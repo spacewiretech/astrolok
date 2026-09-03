@@ -6,18 +6,19 @@ import 'package:flutter/material.dart';
 /// carries every call to action. Screens reference these names rather than raw hex, so a
 /// correction to the design is an edit to this file alone.
 abstract final class AppColors {
-  /// Primary action colour — filled buttons, focus rings, chevrons, the selected wheel row,
-  /// and the accent word in a two-tone heading ("Astro**lok**", "Read Your **Palm**").
-  static const gold = Color(0xFFF0B23D);
+  /// The brand colour. Filled buttons, focus rings, chevrons, the selected wheel row, and the
+  /// accent word in a two-tone heading ("Astro**lok**", "Read Your **Palm**").
+  static const gold = Color(0xFFF4B835);
 
   /// A shade down, for the pressed state and the gold gradient's far end.
-  static const goldDeep = Color(0xFFE09A21);
+  static const goldDeep = Color(0xFFE2A21D);
 
   /// Behind gold icons — the paywall's feature discs, the chevron circles.
   static const goldWash = Color(0xFFFDF1DC);
 
-  /// Headings, the logo disc, and the dark filled buttons on the reading screens.
-  static const navy = Color(0xFF0B1739);
+  /// Headings, the logo disc, and the dark filled buttons on the reading screens. Sampled
+  /// from the exported logo rather than guessed — it is nearly black, not a mid navy.
+  static const navy = Color(0xFF000C2B);
 
   /// [gold] under its old name. `PrimaryButton` and the OTP focus ring read this.
   static const brand = gold;
@@ -28,12 +29,20 @@ abstract final class AppColors {
 
   // ---------------------------------------------------------------- ground
 
-  /// The background gradient: near-white at the top, warm at the edges and the base.
-  static const cream = Color(0xFFFEFAF2);
-  static const creamMid = Color(0xFFFDF3DF);
-  static const creamDeep = Color(0xFFF8E3B8);
+  /// Fallback grounds, sampled from the two background exports. The real screens render those
+  /// images; these show only if a file is missing, and are tuned so that case still looks
+  /// deliberate rather than broken.
+  ///
+  /// Onboarding is nearly white; home is markedly warmer. Two distinct grounds, not one.
+  static const cream = Color(0xFFFFFAF2);
+  static const creamMid = Color(0xFFFFFCFA);
+  static const creamDeep = Color(0xFFFFF6E4);
 
-  /// The zodiac wheel, sun burst and sparkles are drawn at this strength over the gradient.
+  static const homeCream = Color(0xFFFEF1DC);
+  static const homeCreamMid = Color(0xFFFEF9F1);
+  static const homeCreamDeep = Color(0xFFFEE5B5);
+
+  /// Strength of the drawn ornaments used only in the onboarding hero placeholder.
   static const ornament = Color(0x33E0A93B);
 
   // ---------------------------------------------------------------- surfaces
@@ -49,8 +58,9 @@ abstract final class AppColors {
   /// A stronger outline for a field at rest, before it takes focus.
   static const fieldBorder = Color(0xFFD9D2C4);
 
-  /// The date-of-birth picker card.
-  static const wheelCard = Color(0xFFFDF8EC);
+  /// The date-of-birth picker card. Sampled from the render, where it is a single uniform
+  /// fill top to bottom — there is no selection band behind the chosen row.
+  static const wheelCard = Color(0xFFFEFAF0);
 
   /// The dark promo card on Home, behind the astrologer artwork.
   static const promoInk = Color(0xFF120C06);
@@ -90,11 +100,19 @@ abstract final class AppColors {
     offset: Offset(0, -6),
   );
 
-  /// Top-to-bottom ground for every screen.
+  /// Fallback ground for the onboarding and birth screens.
   static const backdrop = LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
     colors: [cream, creamMid, creamDeep],
+    stops: [0.0, 0.55, 1.0],
+  );
+
+  /// Fallback ground for home and the paywall.
+  static const backdropWarm = LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [homeCream, homeCreamMid, homeCreamDeep],
     stops: [0.0, 0.55, 1.0],
   );
 

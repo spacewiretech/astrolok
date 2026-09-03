@@ -26,6 +26,7 @@ class BirthView extends ConsumerWidget {
 
     return Scaffold(
       body: AstralBackground(
+        surface: AstralSurface.onboarding,
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppShape.gutter),

@@ -20,6 +20,7 @@ class SplashView extends ConsumerWidget {
 
     return const Scaffold(
       body: AstralBackground(
+        surface: AstralSurface.onboarding,
         child: Center(child: BrandLogo(size: 64)),
       ),
     );

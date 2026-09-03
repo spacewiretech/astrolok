@@ -5,29 +5,41 @@ import '../app/assets.dart';
 import '../app/theme/app_colors.dart';
 import 'safe_asset.dart';
 
-/// The oṃ disc and the two-tone wordmark.
+/// The full lockup: the oṃ disc and the two-tone "Astrolok".
 ///
-/// The wordmark is drawn as text rather than shipped as an image so it stays crisp at any size
-/// and inherits the type scale. Only the disc is artwork.
+/// Rendered from the exported artwork rather than composed from a disc and two `TextSpan`s —
+/// the export has letterspacing and a glyph the font does not reproduce. The drawn version is
+/// kept as the fallback, so a missing file still leaves a legible, correctly coloured wordmark
+/// rather than a gap where the brand should be.
 class BrandLogo extends StatelessWidget {
   const BrandLogo({super.key, this.size = 40, this.showWordmark = true});
 
-  /// Diameter of the disc; the wordmark scales from it.
+  /// Height of the mark; the lockup scales from it.
   final double size;
 
   final bool showWordmark;
 
+  /// The export is 278x80 — the lockup is this many times wider than it is tall.
+  static const _lockupAspect = 278 / 80;
+
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        BrandMark(size: size),
-        if (showWordmark) ...[
+    if (!showWordmark) return BrandMark(size: size);
+
+    return SafeImage(
+      Brand.wordmark,
+      height: size,
+      width: size * _lockupAspect,
+      fit: BoxFit.contain,
+      semanticLabel: 'Astrolok',
+      fallback: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          BrandMark(size: size),
           SizedBox(width: size * 0.28),
           Wordmark(fontSize: size * 0.62),
         ],
-      ],
+      ),
     );
   }
 }
@@ -40,24 +52,26 @@ class BrandMark extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return SafeImage(
+      Brand.mark,
       width: size,
       height: size,
-      decoration: const BoxDecoration(color: AppColors.navy, shape: BoxShape.circle),
-      alignment: Alignment.center,
-      child: SafeSvg(
-        Svg.omMark,
-        width: size * 0.58,
-        height: size * 0.58,
-        semanticLabel: 'Astrolok',
-        // The glyph itself until the artwork lands — the disc is the recognisable part, and a
-        // blank circle would read as a loading state.
-        fallback: FittedBox(
-          child: Text(
-            'ॐ',
-            style: GoogleFonts.notoSansDevanagari(
-              color: AppColors.gold,
-              fontWeight: FontWeight.w600,
+      fit: BoxFit.contain,
+      semanticLabel: 'Astrolok',
+      fallback: Container(
+        width: size,
+        height: size,
+        decoration: const BoxDecoration(color: AppColors.navy, shape: BoxShape.circle),
+        alignment: Alignment.center,
+        child: FittedBox(
+          child: Padding(
+            padding: EdgeInsets.all(size * 0.22),
+            child: Text(
+              'ॐ',
+              style: GoogleFonts.notoSansDevanagari(
+                color: AppColors.gold,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ),
@@ -66,7 +80,7 @@ class BrandMark extends StatelessWidget {
   }
 }
 
-/// "Astro" in navy, "lok" in gold.
+/// "Astro" in navy, "lok" in gold. The drawn wordmark, used as [BrandLogo]'s fallback.
 class Wordmark extends StatelessWidget {
   const Wordmark({super.key, this.fontSize = 24});
 

@@ -5,7 +5,7 @@ import '../app/theme/app_colors.dart';
 import '../app/theme/app_theme.dart';
 import '../app/theme/app_typography.dart';
 
-/// Country code + 10-digit number, in the bordered 50pt box from the design.
+/// Country code + 10-digit number, in the bordered box from the design.
 class PhoneField extends StatelessWidget {
   const PhoneField({
     super.key,
@@ -20,8 +20,8 @@ class PhoneField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _FieldBox(
-      child: Row(
+    return _FocusBox(
+      builder: (node) => Row(
         children: [
           const _IndiaFlag(),
           const SizedBox(width: 8),
@@ -32,10 +32,10 @@ class PhoneField extends StatelessWidget {
           Expanded(
             child: TextField(
               controller: controller,
-              autofocus: true,
+              focusNode: node,
               keyboardType: TextInputType.phone,
               style: AppText.input,
-              cursorColor: AppColors.brand,
+              cursorColor: AppColors.gold,
               maxLength: 10,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               onSubmitted: onSubmitted,
@@ -53,7 +53,7 @@ class PhoneField extends StatelessWidget {
   }
 }
 
-/// Single-line text field in the same 50pt box — used for the name step.
+/// Single-line text field in the same box — used for the name step.
 class TextFieldBox extends StatelessWidget {
   const TextFieldBox({
     super.key,
@@ -72,15 +72,15 @@ class TextFieldBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return _FieldBox(
-      focused: false,
-      child: TextField(
+    return _FocusBox(
+      autofocus: autofocus,
+      builder: (node) => TextField(
         controller: controller,
-        autofocus: autofocus,
+        focusNode: node,
         keyboardType: keyboardType,
         textCapitalization: TextCapitalization.words,
         style: AppText.input,
-        cursorColor: AppColors.brand,
+        cursorColor: AppColors.gold,
         onSubmitted: onSubmitted,
         decoration: InputDecoration(
           border: InputBorder.none,
@@ -93,13 +93,46 @@ class TextFieldBox extends StatelessWidget {
   }
 }
 
-class _FieldBox extends StatelessWidget {
-  const _FieldBox({required this.child, this.focused = true});
+/// The bordered box, owning the focus node its field reads.
+///
+/// Both fields used to hardcode their border state — the phone field was permanently gold, the
+/// name field permanently grey — so neither reacted to being focused and the name step gave no
+/// sign of where to type.
+///
+/// It also takes focus itself rather than relying on the field's `autofocus`. These sheets are
+/// swapped in by an `AnimatedSwitcher`, which keeps the outgoing sheet mounted through the
+/// transition: its field still holds focus when the new one asks, and the new one loses. The
+/// user then arrives at a field with no keyboard and no caret.
+class _FocusBox extends StatefulWidget {
+  const _FocusBox({required this.builder, this.autofocus = true});
 
-  final Widget child;
+  final Widget Function(FocusNode node) builder;
+  final bool autofocus;
 
-  /// The design draws the active field with a brand border and the resting one in grey.
-  final bool focused;
+  @override
+  State<_FocusBox> createState() => _FocusBoxState();
+}
+
+class _FocusBoxState extends State<_FocusBox> {
+  final _node = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _node.addListener(() => setState(() {}));
+
+    if (widget.autofocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _node.requestFocus();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _node.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -110,11 +143,11 @@ class _FieldBox extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: AppShape.control,
         border: Border.all(
-          color: focused ? AppColors.gold : AppColors.fieldBorder,
-          width: focused ? 1.6 : 1,
+          color: _node.hasFocus ? AppColors.gold : AppColors.fieldBorder,
+          width: _node.hasFocus ? 1.6 : 1,
         ),
       ),
-      child: Center(child: child),
+      child: Center(child: widget.builder(_node)),
     );
   }
 }
@@ -124,34 +157,34 @@ class _Divider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(width: 1, height: 24, color: AppColors.border);
+    return Container(width: 1, height: 24, color: AppColors.fieldBorder);
   }
 }
 
-/// 24x16 tricolour. Drawn rather than exported so it stays sharp at every density.
+/// The tricolour, drawn rather than shipped as an asset — three bands and a chakra outline.
 class _IndiaFlag extends StatelessWidget {
   const _IndiaFlag();
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 24,
-      height: 16,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(2),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(3),
+      child: SizedBox(
+        width: 26,
+        height: 18,
         child: Stack(
           alignment: Alignment.center,
           children: [
-            Column(
-              children: const [
+            const Column(
+              children: [
                 Expanded(child: ColoredBox(color: Color(0xFFFF9933), child: SizedBox.expand())),
                 Expanded(child: ColoredBox(color: Colors.white, child: SizedBox.expand())),
                 Expanded(child: ColoredBox(color: Color(0xFF138808), child: SizedBox.expand())),
               ],
             ),
             Container(
-              width: 5,
-              height: 5,
+              width: 6,
+              height: 6,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(color: const Color(0xFF000080), width: 1),

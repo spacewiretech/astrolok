@@ -98,6 +98,7 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView> {
 
     return Scaffold(
       body: AstralBackground(
+        surface: AstralSurface.home,
         child: SafeArea(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppShape.gutter, vertical: 24),

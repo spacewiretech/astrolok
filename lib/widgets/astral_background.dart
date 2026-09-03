@@ -6,44 +6,52 @@ import '../app/assets.dart';
 import '../app/theme/app_colors.dart';
 import 'safe_asset.dart';
 
-/// The warm cream ground every screen sits on.
+/// Which exported ground a screen sits on.
 ///
-/// Three layers: the gradient, the zodiac-wheel artwork, and a few sparkles. The gradient is
-/// drawn in code rather than shipped as an image so it fills any screen size exactly and costs
-/// nothing to decode; only the ornament is an asset, and it is decoration — the screens read
-/// correctly with or without it.
+/// Two distinct files, not one tinted two ways: the onboarding ground is nearly white
+/// (`#FFFAF2`), the home ground markedly warmer (`#FEF1DC`). Using one for the other is
+/// immediately visible.
+enum AstralSurface {
+  /// Onboarding and the birth screen.
+  onboarding,
+
+  /// Home and the paywall.
+  home,
+}
+
+/// The warm ground every screen sits on.
+///
+/// The exported artwork already contains the zodiac wheel, sun burst, sparkles and warm blobs,
+/// so nothing is drawn on top of it — an earlier version painted its own sun and sparkles, and
+/// with the real file in place those doubled up.
+///
+/// A gradient sits underneath as the fallback. It shows only if the image is missing, and is
+/// sampled from the same export so that case still reads as deliberate.
 class AstralBackground extends StatelessWidget {
-  const AstralBackground({super.key, required this.child, this.showOrnament = true});
+  const AstralBackground({
+    super.key,
+    required this.child,
+    this.surface = AstralSurface.onboarding,
+  });
 
   final Widget child;
-
-  /// Off for the onboarding screen, where a sheet covers the lower half and the artwork sits
-  /// in the device-framed hero instead.
-  final bool showOrnament;
+  final AstralSurface surface;
 
   @override
   Widget build(BuildContext context) {
+    final (image, gradient) = switch (surface) {
+      AstralSurface.onboarding => (Img.bgOnboarding, AppColors.backdrop),
+      AstralSurface.home => (Img.bgHome, AppColors.backdropWarm),
+    };
+
     return DecoratedBox(
-      decoration: const BoxDecoration(gradient: AppColors.backdrop),
+      decoration: BoxDecoration(gradient: gradient),
       child: Stack(
+        fit: StackFit.expand,
         children: [
-          if (showOrnament) ...[
-            // Anchored top-right, matching the sun burst's position in the renders, and
-            // deliberately allowed to bleed off both edges.
-            Positioned(
-              top: -60,
-              right: -80,
-              child: IgnorePointer(
-                child: SafeImage(
-                  Img.backdrop,
-                  width: 420,
-                  fit: BoxFit.contain,
-                  fallback: const _SunBurst(),
-                ),
-              ),
-            ),
-            const Positioned.fill(child: IgnorePointer(child: _Sparkles())),
-          ],
+          // `cover` rather than `fill`: the export is a fixed 824x1834, and stretching it to a
+          // squatter screen visibly distorts the zodiac wheel into an ellipse.
+          IgnorePointer(child: SafeImage(image, fit: BoxFit.cover)),
           child,
         ],
       ),
@@ -51,87 +59,10 @@ class AstralBackground extends StatelessWidget {
   }
 }
 
-/// Stands in for the zodiac artwork until it is exported.
+/// A faint zodiac ring, drawn rather than exported.
 ///
-/// Not an attempt to reproduce the illustration — it is a soft radial glow in the same place,
-/// so the composition reads the same and nothing shifts when the real file arrives.
-class _SunBurst extends StatelessWidget {
-  const _SunBurst();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 420,
-      height: 420,
-      decoration: const BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: RadialGradient(
-          colors: [AppColors.ornament, Color(0x00E0A93B)],
-          stops: [0.0, 0.72],
-        ),
-      ),
-    );
-  }
-}
-
-/// The scattered four-point stars. Positions are fixed fractions, not random, so the layout is
-/// identical on every build and in every screenshot test.
-class _Sparkles extends StatelessWidget {
-  const _Sparkles();
-
-  static const _points = <(double dx, double dy, double size)>[
-    (0.06, 0.04, 12),
-    (0.17, 0.11, 7),
-    (0.90, 0.30, 9),
-    (0.08, 0.55, 8),
-    (0.13, 0.93, 13),
-    (0.83, 0.88, 8),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return Stack(
-          children: [
-            for (final (dx, dy, size) in _points)
-              Positioned(
-                left: constraints.maxWidth * dx,
-                top: constraints.maxHeight * dy,
-                child: CustomPaint(size: Size.square(size), painter: _SparklePainter()),
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _SparklePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final c = size.width / 2;
-    // A four-point star: straight tips, waisted at the centre. Quadratics pulled toward the
-    // middle are what give it the pinch — straight lines would read as a plus sign.
-    final path = Path()
-      ..moveTo(c, 0)
-      ..quadraticBezierTo(c * 1.12, c * 0.88, size.width, c)
-      ..quadraticBezierTo(c * 1.12, c * 1.12, c, size.height)
-      ..quadraticBezierTo(c * 0.88, c * 1.12, 0, c)
-      ..quadraticBezierTo(c * 0.88, c * 0.88, c, 0)
-      ..close();
-
-    canvas.drawPath(path, Paint()..color = AppColors.gold.withValues(alpha: 0.45));
-  }
-
-  @override
-  bool shouldRepaint(covariant _SparklePainter oldDelegate) => false;
-}
-
-/// The faint zodiac ring used behind the birth screen's picker.
-///
-/// Kept separate from [AstralBackground] because it is centred on its own content rather than
-/// on the screen.
+/// Used only by the onboarding hero's placeholder, which stands in for a device mockup that has
+/// not been exported. Not part of any real screen's ground.
 class ZodiacRing extends StatelessWidget {
   const ZodiacRing({super.key, this.diameter = 260});
 
@@ -140,10 +71,7 @@ class ZodiacRing extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return IgnorePointer(
-      child: CustomPaint(
-        size: Size.square(diameter),
-        painter: _RingPainter(),
-      ),
+      child: CustomPaint(size: Size.square(diameter), painter: _RingPainter()),
     );
   }
 }

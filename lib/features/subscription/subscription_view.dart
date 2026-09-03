@@ -65,9 +65,10 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
 
     return Scaffold(
       body: AstralBackground(
+        surface: AstralSurface.home,
         child: SafeArea(
-          // The pay bar paints its own bottom inset so its white ground runs to the edge of
-          // the screen rather than floating above a strip of the cream background.
+          // The pay bar paints its own bottom inset rather than sitting inside the safe area,
+          // so it reaches the edge of the screen.
           bottom: false,
           child: state.loading
               ? const Center(child: CircularProgressIndicator(color: AppColors.gold))
@@ -153,17 +154,16 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
 
   /// The UPI app chip and the pay button, pinned below the scroll so they are reachable on a
   /// short screen without scrolling to the bottom.
+  ///
+  /// No white plate behind them: in the render they sit directly on the cream ground, and the
+  /// plate this used to draw cut a hard horizontal line across the background artwork.
   Widget _payBar(SubscriptionState state) {
-    return Container(
+    return Padding(
       padding: EdgeInsets.fromLTRB(
         AppShape.gutter,
         12,
         AppShape.gutter,
         12 + MediaQuery.paddingOf(context).bottom,
-      ),
-      decoration: const BoxDecoration(
-        color: AppColors.surface,
-        boxShadow: [AppColors.sheetShadow],
       ),
       child: Row(
         children: [

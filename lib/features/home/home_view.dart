@@ -26,6 +26,7 @@ class HomeView extends ConsumerWidget {
 
     return Scaffold(
       body: AstralBackground(
+        surface: AstralSurface.home,
         child: SafeArea(
           child: ListView(
             padding: const EdgeInsets.fromLTRB(AppShape.gutter, 8, AppShape.gutter, 32),
@@ -51,34 +52,17 @@ class HomeView extends ConsumerWidget {
               ],
 
               const SizedBox(height: 20),
+              // One slide until the Palm and Face cards are exported the same way. The dot row
+              // hides itself at one, so the strip does not advertise pages that do not exist.
               PromoCarousel(
                 slides: [
                   PromoSlide(
                     image: Img.promoChatAstro,
-                    lead: 'Chat with',
-                    accent: 'Astro',
-                    body: 'Ask anything about your life, love, career or future.',
-                    cta: 'Start Chat',
-                    ctaIcon: Icons.chat_bubble_outline_rounded,
+                    // The card's heading and button are pixels, so this is the only thing a
+                    // screen reader gets. It has to say what the image says.
+                    label: 'Chat with Astro. Ask anything about your life, love, career or '
+                        'future. Start chat.',
                     onTap: () => _soon(context, 'Chat with Astro'),
-                  ),
-                  PromoSlide(
-                    image: Img.readingPalm,
-                    lead: 'Read your',
-                    accent: 'Palm',
-                    body: 'Your hand holds a story. Let us discover yours.',
-                    cta: 'Read Palm',
-                    ctaIcon: Icons.back_hand_outlined,
-                    onTap: () => _soon(context, 'Palm Reading'),
-                  ),
-                  PromoSlide(
-                    image: Img.readingFace,
-                    lead: 'Show us your',
-                    accent: 'Face',
-                    body: 'Discover what your features reveal about you.',
-                    cta: 'Read Face',
-                    ctaIcon: Icons.face_retouching_natural_outlined,
-                    onTap: () => _soon(context, 'Face Reading'),
                   ),
                 ],
               ),

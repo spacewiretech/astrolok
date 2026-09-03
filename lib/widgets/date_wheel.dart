@@ -6,10 +6,10 @@ import '../app/theme/app_typography.dart';
 
 /// The date-of-birth picker: three labelled wheels inside one card.
 ///
-/// The card, the headers and the selection band belong to this widget rather than to each
-/// column, because the design draws one band straight across all three.
+/// The card and the headers belong to this widget rather than to each column, because the
+/// design draws one card around all three.
 class DatePickerCard extends StatelessWidget {
-  const DatePickerCard({super.key, required this.columns, this.height = 220});
+  const DatePickerCard({super.key, required this.columns, this.height = 150});
 
   final List<DateWheelColumn> columns;
   final double height;
@@ -39,27 +39,15 @@ class DatePickerCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
+          // No selection band. Sampling a vertical strip through the card in the render shows
+          // a single uniform fill top to bottom — the chosen row is picked out by gold type
+          // alone, and a tinted band behind it is an invention.
           SizedBox(
             height: height,
-            child: Stack(
+            child: Row(
               children: [
-                // One band across all three columns, painted under them.
-                Center(
-                  child: Container(
-                    height: DateWheel.itemExtent,
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    decoration: BoxDecoration(
-                      color: AppColors.gold.withValues(alpha: 0.10),
-                      borderRadius: AppShape.control,
-                    ),
-                  ),
-                ),
-                Row(
-                  children: [
-                    for (final column in columns)
-                      Expanded(flex: column.flex, child: column.build()),
-                  ],
-                ),
+                for (final column in columns)
+                  Expanded(flex: column.flex, child: column.build()),
               ],
             ),
           ),
@@ -118,7 +106,9 @@ class DateWheel<T> extends StatefulWidget {
   final String Function(T value) labelFor;
   final ValueChanged<T> onSelected;
 
-  static const itemExtent = 46.0;
+  /// Three rows at this extent fill the card's 150pt, which is what the render shows: one
+  /// above the selection and one below.
+  static const itemExtent = 50.0;
 
   @override
   State<DateWheel<T>> createState() => _DateWheelState<T>();

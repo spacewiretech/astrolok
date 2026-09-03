@@ -48,6 +48,16 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
 
+# The exported mark is 80x80. Both stores want 1024 square, so this stops the app shipping the
+# Flutter default but a full-size export is still needed before release.
+flutter_launcher_icons:
+  image_path: assets/images/app_icon.png
+  android: true
+  ios: true
+  remove_alpha_ios: true
+  # Matches the disc, so the iOS icon has no white ring where the alpha is flattened.
+  background_color_ios: "#000C2B"
+
 flutter:
   uses-material-design: true
 

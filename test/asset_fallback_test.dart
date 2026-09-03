@@ -3,6 +3,7 @@ import 'package:astrolok/widgets/brand_logo.dart';
 import 'package:astrolok/widgets/reading_card.dart';
 import 'package:astrolok/widgets/safe_asset.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// The artwork is still being exported, so every screen has to lay out correctly without it.
@@ -66,9 +67,11 @@ void main() {
   });
 
   testWidgets('a reading card is fully readable with no thumbnail', (tester) async {
+    // Deliberately a path that does not resolve. `Img.readingPalm` is a real file now, so
+    // using it here would exercise the happy path and quietly stop testing the fallback.
     await tester.pumpWidget(wrap(
       ReadingCard(
-        image: Img.readingPalm,
+        image: 'assets/images/not_exported_yet.png',
         title: 'Palm Reading',
         subtitle: 'Discover what your palm reveals about your life.',
         fallbackIcon: Icons.back_hand_outlined,
@@ -83,6 +86,37 @@ void main() {
     expect(find.byIcon(Icons.back_hand_outlined), findsOneWidget);
     // The affordance has to survive too, or the row reads as inert.
     expect(find.byIcon(Icons.chevron_right_rounded), findsOneWidget);
+  });
+
+  group('the exported assets are actually in the bundle', () {
+    // The fallbacks above are so quiet that a mistyped path, a file left out of pubspec, or an
+    // asset dropped in a refactor would look identical to a deliberate placeholder. These load
+    // each shipped file straight from the bundle, so that mistake fails loudly instead.
+    const shipped = [
+      Img.bgOnboarding,
+      Img.bgHome,
+      Img.onboard1,
+      Img.onboard2,
+      Img.onboard3,
+      Img.promoChatAstro,
+      Img.readingChat,
+      Img.readingPalm,
+      Img.readingFace,
+      Img.appIcon,
+      Brand.mark,
+      Brand.wordmark,
+    ];
+
+    for (final path in shipped) {
+      test(path, () async {
+        final bytes = await rootBundle.load(path);
+        expect(bytes.lengthInBytes, greaterThan(0));
+      });
+    }
+
+    test('the onboarding hero list matches the three exported slides', () {
+      expect(Img.onboardHero, [Img.onboard1, Img.onboard2, Img.onboard3]);
+    });
   });
 
   testWidgets('AccentHeading reads as one phrase to a screen reader', (tester) async {

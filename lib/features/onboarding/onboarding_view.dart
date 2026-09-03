@@ -40,7 +40,14 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
 
   /// Device-framed screenshots of the app's own screens. Decoration only — the hero slides
   /// independently of which step the sheet is showing.
-  static const _hero = [Img.onboardHome, Img.onboardPalm, Img.onboardFace];
+  static const _hero = Img.onboardHero;
+
+  /// Measured off the renders: the mockup starts 4% down the screen and is 63% of its width.
+  static const _heroTop = 0.04;
+  static const _heroWidth = 0.63;
+
+  /// The exports are ~542x1098, all device with no margin.
+  static const _heroAspect = 542 / 1098;
 
   @override
   void initState() {
@@ -81,33 +88,49 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
       // what keeps the hero from being shoved off the top.
       resizeToAvoidBottomInset: true,
       body: AstralBackground(
-        showOrnament: false,
-        child: Column(
+        surface: AstralSurface.onboarding,
+        // A Stack, not a Column. Sizing the hero with Expanded made the mockup shrink to
+        // whatever the sheet left over — 54% of the screen width against the render's 63%,
+        // and different on each step as the sheet's content changed height. Here the mockup is
+        // placed against the screen, so it is the same size on all three steps, and the sheet
+        // simply overlays whatever it needs.
+        child: Stack(
           children: [
-            Expanded(child: _heroPager()),
-            _sheet(state),
+            Positioned(
+              top: MediaQuery.sizeOf(context).height * _heroTop,
+              left: 0,
+              right: 0,
+              child: _heroPager(),
+            ),
+            Positioned(left: 0, right: 0, bottom: 0, child: _sheet(state)),
           ],
         ),
       ),
     );
   }
 
-  /// The swipeable top half. Independent of the step, so it keeps its position as the sheet
-  /// below it changes.
+  /// The swipeable mockup. Independent of the step, so it keeps its size and position as the
+  /// sheet below it changes.
   Widget _heroPager() {
-    return SafeArea(
-      bottom: false,
+    final width = MediaQuery.sizeOf(context).width * _heroWidth;
+
+    return SizedBox(
+      // Sized from the screen rather than from the space left over, so all three steps show
+      // the same mockup at the same scale.
+      height: width / _heroAspect,
       child: PageView.builder(
         controller: _pager,
         itemCount: _hero.length,
-        itemBuilder: (context, i) => Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: SafeImage(
-            _hero[i],
-            fit: BoxFit.contain,
-            // Until the mockups are exported: the same ornamented ground the rest of the app
-            // uses, so the composition reads correctly rather than as a blank band.
-            fallback: const _HeroPlaceholder(),
+        itemBuilder: (context, i) => Center(
+          child: SizedBox(
+            width: width,
+            child: SafeImage(
+              _hero[i],
+              fit: BoxFit.contain,
+              // Until every mockup is exported: the same framed shape, so the composition
+              // reads correctly rather than as a blank band.
+              fallback: const _HeroPlaceholder(),
+            ),
           ),
         ),
       ),

@@ -20,6 +20,7 @@ class SafeImage extends StatelessWidget {
     this.width,
     this.height,
     this.fit = BoxFit.cover,
+    this.alignment = Alignment.center,
     this.fallback,
     this.semanticLabel,
   });
@@ -28,6 +29,9 @@ class SafeImage extends StatelessWidget {
   final double? width;
   final double? height;
   final BoxFit fit;
+
+  /// Where the image sits when [fit] leaves spare room — `contain` in a taller box, say.
+  final Alignment alignment;
 
   /// Drawn in place of the image when it is missing. Null renders nothing at all, which is
   /// right for decoration and wrong for anything load-bearing.
@@ -42,6 +46,7 @@ class SafeImage extends StatelessWidget {
       width: width,
       height: height,
       fit: fit,
+      alignment: alignment,
       semanticLabel: semanticLabel,
       // Runs for a missing bundle entry as well as a corrupt one, which is exactly the case
       // being handled here.
