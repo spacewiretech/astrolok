@@ -51,3 +51,7 @@ app.*.map.json
 
 # Figma reference exports — read while building the screens, never shipped.
 /design/
+
+# Supabase CLI machine state: which project this checkout is linked to, cached tool versions.
+# Local to whoever ran `supabase link`, not part of the project.
+/supabase/.temp/

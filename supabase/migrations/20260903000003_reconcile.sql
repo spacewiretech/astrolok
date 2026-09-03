@@ -4,7 +4,7 @@
 -- the webhook, with nothing behind it. A single dropped delivery would then lock out a paying
 -- customer until they contacted support.
 --
--- BEFORE APPLYING: replace <PROJECT_REF> below with the new project's ref (the subdomain of
+-- BEFORE APPLYING: replace qktgingrvecpetrofimy below with the new project's ref (the subdomain of
 -- its Supabase URL). The cron job posts to an absolute URL and there is no variable to read it
 -- from inside a migration.
 
@@ -49,7 +49,7 @@ select cron.schedule(
   '7 * * * *',
   $job$
   select net.http_post(
-    url := 'https://<PROJECT_REF>.supabase.co/functions/v1/subscription-reconcile',
+    url := 'https://qktgingrvecpetrofimy.supabase.co/functions/v1/subscription-reconcile',
     headers := jsonb_build_object(
       'Content-Type', 'application/json',
       'x-reconcile-secret', (select value from public.app_config where key = 'reconcile_secret')

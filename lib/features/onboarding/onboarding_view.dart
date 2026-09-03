@@ -42,8 +42,9 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
   /// independently of which step the sheet is showing.
   static const _hero = Img.onboardHero;
 
-  /// Measured off the renders: the mockup starts 4% down the screen and is 63% of its width.
-  static const _heroTop = 0.04;
+  /// Width measured off the renders, at 63% of the screen. The top offset started at the
+  /// render's 4% and was nudged down by hand to sit better against the sheet.
+  static const _heroTop = 0.1;
   static const _heroWidth = 0.63;
 
   /// The exports are ~542x1098, all device with no margin.
