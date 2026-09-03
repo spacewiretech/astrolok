@@ -8,6 +8,7 @@ import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
 import '../../data/entitlement.dart';
 import '../../data/providers.dart';
+import '../../widgets/astral_background.dart';
 import '../../widgets/primary_button.dart';
 import 'payment_outcome.dart';
 
@@ -89,31 +90,58 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView> {
         ),
     };
 
+    final (icon, tint) = switch (widget.outcome) {
+      PaymentOutcome.success => (Icons.check_rounded, AppColors.success),
+      PaymentOutcome.pending => (Icons.hourglass_top_rounded, AppColors.gold),
+      PaymentOutcome.failed => (Icons.close_rounded, AppColors.danger),
+    };
+
     return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppShape.gutter, vertical: 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Spacer(),
-              if (widget.outcome == PaymentOutcome.pending)
-                const Center(child: CircularProgressIndicator()),
-              const SizedBox(height: 24),
-              Text(title, style: AppText.display, textAlign: TextAlign.center),
-              const SizedBox(height: 8),
-              Text(message, style: AppText.meta, textAlign: TextAlign.center),
-              const Spacer(),
-              PrimaryButton(label: action, onPressed: _onAction),
-              if (widget.outcome != PaymentOutcome.success)
-                TextButton(
-                  onPressed: () => context.go(Routes.subscribe),
-                  child: Text(
-                    'Back to plans',
-                    style: AppText.meta.copyWith(color: AppColors.brand),
+      body: AstralBackground(
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppShape.gutter, vertical: 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Spacer(),
+                Center(
+                  child: Container(
+                    width: 96,
+                    height: 96,
+                    decoration: BoxDecoration(
+                      color: tint.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    alignment: Alignment.center,
+                    child: widget.outcome == PaymentOutcome.pending
+                        ? const SizedBox(
+                            width: 40,
+                            height: 40,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 3,
+                              color: AppColors.gold,
+                            ),
+                          )
+                        : Icon(icon, size: 48, color: tint),
                   ),
                 ),
-            ],
+                const SizedBox(height: 28),
+                Text(title, style: AppText.display, textAlign: TextAlign.center),
+                const SizedBox(height: 10),
+                Text(message, style: AppText.body, textAlign: TextAlign.center),
+                const Spacer(),
+                PrimaryButton(label: action, onPressed: _onAction),
+                if (widget.outcome != PaymentOutcome.success)
+                  TextButton(
+                    onPressed: () => context.go(Routes.subscribe),
+                    child: Text(
+                      'Back to plans',
+                      style: AppText.meta.copyWith(color: AppColors.gold),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

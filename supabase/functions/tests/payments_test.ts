@@ -45,7 +45,7 @@ function user(overrides: Partial<UserRow> = {}): UserRow {
 }
 
 const settings = {
-  trialAmount: 1,
+  trialAmount: 3,
   recurringAmount: 249,
   trialDays: 1,
 } as CashfreeSettings;
@@ -218,16 +218,16 @@ Deno.test("both spellings of the authorisation block are read", () => {
   // The API responds with British "authorisation_details"; some payloads use the American form.
   const british = snapshotOf({
     subscription_status: "ACTIVE",
-    authorisation_details: { authorization_amount: 1, authorization_time: "2026-09-01T12:00:00Z" },
+    authorisation_details: { authorization_amount: 3, authorization_time: "2026-09-01T12:00:00Z" },
   });
-  assertEquals(british.authorizationAmount, 1);
+  assertEquals(british.authorizationAmount, 3);
   assertEquals(british.authorizedAt, "2026-09-01T12:00:00.000Z");
 
   const american = snapshotOf({
     subscription_status: "ACTIVE",
-    authorization_details: { authorization_amount: 1 },
+    authorization_details: { authorization_amount: 3 },
   });
-  assertEquals(american.authorizationAmount, 1);
+  assertEquals(american.authorizationAmount, 3);
 });
 
 Deno.test("an unknown subscription status is recorded, not rejected", () => {
@@ -261,14 +261,14 @@ Deno.test("payment fields are pulled out with the failure reason", () => {
 // ---------------------------------------------------------------- classification
 
 Deno.test("the auth event is classified as AUTH, and the ₹249 debit as RECURRING", () => {
-  assertEquals(paymentKind("SUBSCRIPTION_AUTH_STATUS", 1, settings), "AUTH");
+  assertEquals(paymentKind("SUBSCRIPTION_AUTH_STATUS", 3, settings), "AUTH");
   assertEquals(paymentKind("SUBSCRIPTION_PAYMENT_SUCCESS", 249, settings), "RECURRING");
 });
 
 Deno.test("the amount decides when the event type is unreadable", () => {
-  // Only a RECURRING SUCCESS promotes an account to `active`, so misreading the ₹1 as a monthly
+  // Only a RECURRING SUCCESS promotes an account to `active`, so misreading the ₹3 as a monthly
   // debit would hand out a free month.
-  assertEquals(paymentKind(null, 1, settings), "AUTH");
+  assertEquals(paymentKind(null, 3, settings), "AUTH");
   assertEquals(paymentKind(null, 249, settings), "RECURRING");
 });
 
@@ -279,9 +279,9 @@ Deno.test("an unreadable charge is UNKNOWN rather than a free month", () => {
 });
 
 Deno.test("Cashfree's own payment_type outranks the amount", () => {
-  // A ₹1 row labelled RECURRING is a real renewal on a discounted plan; a ₹249 row labelled
+  // A ₹3 row labelled RECURRING is a real renewal on a discounted plan; a ₹249 row labelled
   // AUTH is an authorisation. The label is the only signal that can tell those apart.
-  assertEquals(paymentKind(null, 1, settings, "RECURRING"), "RECURRING");
+  assertEquals(paymentKind(null, 3, settings, "RECURRING"), "RECURRING");
   assertEquals(paymentKind("SUBSCRIPTION_PAYMENT_SUCCESS", 249, settings, "AUTH"), "AUTH");
 });
 

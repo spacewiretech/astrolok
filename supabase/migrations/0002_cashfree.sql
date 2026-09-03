@@ -1,4 +1,4 @@
--- Cashfree UPI Autopay: a ₹1 authorisation opens a 1-day trial, then ₹249/month recurs.
+-- Cashfree UPI Autopay: a ₹3 authorisation opens a 1-day trial, then ₹249/month recurs.
 --
 -- Security model is unchanged from the init migration: every table here is RLS-on with zero
 -- policies, so the anon key that ships inside the app cannot read or write any of it. Only the
@@ -146,7 +146,7 @@ create table if not exists public.subscription_payments (
   -- The real idempotency guard for money. A webhook redelivered three times upserts one row.
   cf_payment_id   text not null unique,
 
-  -- AUTH is the ₹1 that opens the trial; RECURRING is each ₹249 debit.
+  -- AUTH is the ₹3 that opens the trial; RECURRING is each ₹249 debit.
   kind            text not null default 'RECURRING',
 
   amount          numeric(10,2),
@@ -299,7 +299,7 @@ insert into public.app_config (key, value, is_public, description) values
    'Sent as x-api-version. Payload shapes change between versions.'),
   ('cashfree_plan_id', '', false,
    'Pre-created PERIODIC plan in the Cashfree dashboard, at the recurring amount below.'),
-  ('cashfree_trial_amount', '1', false,
+  ('cashfree_trial_amount', '3', false,
    'Authorisation amount in INR, captured and kept. This is the trial fee.'),
   ('cashfree_recurring_amount', '249', false,
    'Recurring amount in INR. Must match the plan configured at Cashfree.'),
@@ -320,8 +320,20 @@ insert into public.app_config (key, value, is_public, description) values
    'Shared secret for subscription-reconcile, sent as x-reconcile-secret by the cron job. '
    'Filled automatically by 0003_reconcile.sql. Empty means the endpoint refuses every call.'),
 
-  ('trial_price_label', '₹1', true,
+  ('trial_price_label', '₹3', true,
    'Paywall copy only. Never used to compute a charge.'),
   ('plan_price_label', '₹249', true,
-   'Paywall copy only. Never used to compute a charge.')
+   'Paywall copy only. Shown struck through beside the trial price, and in the mandate '
+   'consent line. Never used to compute a charge.'),
+
+  -- Seeded EMPTY on purpose. The paywall hides the rating row entirely while both are blank,
+  -- so a launch build cannot claim a score or a subscriber count the app has not earned.
+  -- Play treats a misrepresented rating the same way it treats a mislabelled free trial.
+  ('rating_label', '', true,
+   'e.g. 4.6. Leave empty until the rating is real; the paywall hides the row.'),
+  ('subscriber_label', '', true,
+   'e.g. 10M+ Subscribers. Leave empty until the number is real.'),
+
+  ('paywall_video_url', '', true,
+   'Public MP4 the paywall plays. Empty shows the static poster instead.')
 on conflict (key) do nothing;

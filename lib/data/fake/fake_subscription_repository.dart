@@ -24,9 +24,11 @@ class FakeSubscriptionRepository implements SubscriptionRepository {
   @override
   Future<SubscriptionOffer> offer() async {
     await FakeSession.latency(300);
+    final plan = defaultAppConfig.configString('plan_price_label');
     return SubscriptionOffer(
       trialPrice: defaultAppConfig.configString('trial_price_label'),
-      planPrice: defaultAppConfig.configString('plan_price_label'),
+      planPrice: plan,
+      strikePrice: plan,
       trialDays: _trialDays,
     );
   }

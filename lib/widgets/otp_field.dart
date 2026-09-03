@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app/theme/app_colors.dart';
+import '../app/theme/app_theme.dart';
 import '../app/theme/app_typography.dart';
 
 /// The boxed code entry from the design.
@@ -46,6 +47,15 @@ class _OtpFieldState extends State<OtpField> {
     _node.addListener(() {
       _pinCaretToEnd();
       setState(() {});
+    });
+
+    // `autofocus` alone is not enough here. This field is swapped in by an AnimatedSwitcher,
+    // which keeps the outgoing sheet mounted through the transition — the phone field is still
+    // holding focus when the OTP field asks for it, and loses the race. Without this the user
+    // arrives at six empty boxes, no keyboard, and no highlighted box telling them where to
+    // type.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _node.requestFocus();
     });
   }
 
@@ -103,10 +113,10 @@ class _OtpFieldState extends State<OtpField> {
           Row(
             children: [
               for (var i = 0; i < widget.length; i++) ...[
-                if (i > 0) const SizedBox(width: 8),
+                if (i > 0) const SizedBox(width: 10),
                 Expanded(
                   child: AspectRatio(
-                    aspectRatio: 1,
+                    aspectRatio: 0.92,
                     child: _Box(
                       digit: i < code.length ? code[i] : '',
                       focused: _node.hasFocus && i == activeIndex,
@@ -178,10 +188,11 @@ class _Box extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
+        color: AppColors.surface,
+        borderRadius: AppShape.control,
         border: Border.all(
-          color: focused ? AppColors.brand : AppColors.border,
-          width: focused ? 1.5 : 1,
+          color: focused ? AppColors.gold : AppColors.fieldBorder,
+          width: focused ? 1.6 : 1,
         ),
       ),
       child: Center(

@@ -85,13 +85,13 @@ export function cashfreeSettings(config: AppConfig): CashfreeSettings {
     apiVersion: configSetting(config, "cashfree_api_version") || "2025-01-01",
     planId: configSetting(config, "cashfree_plan_id"),
     trialAmount: numberFrom(config, "cashfree_trial_amount", 3),
-    recurringAmount: numberFrom(config, "cashfree_recurring_amount", 499),
+    recurringAmount: numberFrom(config, "cashfree_recurring_amount", 249),
     // Astrolok sells a one-day trial, so the default matches. Cashfree requires
     // subscription_first_charge_time to sit at least 24 hours out for a UPI Autopay mandate,
     // which is exactly where trialDays = 1 lands it — verify a real mandate in sandbox before
     // going live, and raise this to 2 if Cashfree refuses the schedule.
     trialDays: numberFrom(config, "cashfree_trial_days", 1),
-    graceHours: numberFrom(config, "entitlement_grace_hours", 12),
+    graceHours: numberFrom(config, "entitlement_grace_hours", 2),
   };
 }
 

@@ -110,7 +110,8 @@ class _FieldBox extends StatelessWidget {
         color: AppColors.surface,
         borderRadius: AppShape.control,
         border: Border.all(
-          color: focused ? AppColors.brand : AppColors.border,
+          color: focused ? AppColors.gold : AppColors.fieldBorder,
+          width: focused ? 1.6 : 1,
         ),
       ),
       child: Center(child: child),

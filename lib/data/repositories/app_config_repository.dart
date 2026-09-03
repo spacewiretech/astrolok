@@ -17,9 +17,15 @@ const defaultAppConfig = <String, String>{
   'otp_resend_cooldown_seconds': '30',
   // Paywall copy. The amounts actually charged come from the Cashfree plan and from private
   // config rows — these only decide what the screen says.
-  'trial_price_label': '₹1',
+  'trial_price_label': '₹3',
   'plan_price_label': '₹249',
   'cashfree_trial_days': '1',
+  // Marketing claims, deliberately empty. The paywall hides the rating row entirely while
+  // these are blank rather than shipping a rating the app has not earned yet.
+  'rating_label': '',
+  'subscriber_label': '',
+  // Empty until a video exists; the paywall shows a static poster instead.
+  'paywall_video_url': '',
 };
 
 /// Typed reads over the raw key/value map, so a bad or missing value can never crash a screen.

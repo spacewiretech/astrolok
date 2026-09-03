@@ -14,7 +14,7 @@ class SubscriptionOffer {
     this.strikePrice,
   });
 
-  /// Formatted with the currency symbol, e.g. `₹1`.
+  /// Formatted with the currency symbol, e.g. `₹3`.
   final String trialPrice;
   final String planPrice;
 
@@ -25,9 +25,13 @@ class SubscriptionOffer {
 
   /// The mandate consent line. UPI Autopay requires the recurring amount and cadence to be
   /// stated before authorisation, so this is a compliance requirement, not marketing copy.
+  ///
+  /// Pluralised because the trial is one day by default, and "after 1 days" on the one line a
+  /// user is asked to read before authorising a recurring debit reads as carelessness about
+  /// the part that takes their money.
   String get consent =>
       '$trialPrice today. $planPrice/month will be auto-debited from your UPI '
-      'after $trialDays days. Cancel anytime.';
+      'after $trialDays ${trialDays == 1 ? 'day' : 'days'}. Cancel anytime.';
 }
 
 /// The result of asking the server to open a mandate.

@@ -23,7 +23,7 @@ export type PaymentType = "trial" | "active" | "expired" | "cancelled";
  */
 export function graceHoursFrom(config: AppConfig): number {
   const parsed = Number(configSetting(config, "entitlement_grace_hours"));
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 12;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 2;
 }
 
 export interface UserRow {

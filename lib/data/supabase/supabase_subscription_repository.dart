@@ -28,9 +28,14 @@ class SupabaseSubscriptionRepository implements SubscriptionRepository {
     final config = await _config.load();
     final days = config.configInt('cashfree_trial_days');
 
+    final plan = config.configString('plan_price_label');
+
     return SubscriptionOffer(
       trialPrice: config.configString('trial_price_label'),
-      planPrice: config.configString('plan_price_label'),
+      planPrice: plan,
+      // The paywall shows the monthly price struck through beside the trial price — "₹̶2̶4̶9̶ ₹3".
+      // Same row, used twice: the strikethrough and the consent line can never disagree.
+      strikePrice: plan,
       trialDays: days > 0 ? days : 1,
     );
   }

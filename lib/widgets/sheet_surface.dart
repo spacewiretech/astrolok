@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import '../app/theme/app_colors.dart';
 import '../app/theme/app_theme.dart';
 
-/// The white panel every screen sits on: full width, pinned to the bottom, 56pt radius on the
-/// top corners only.
+/// The white panel the onboarding steps sit on: full width, pinned to the bottom, with the
+/// design's radius on the top corners only.
 class SheetSurface extends StatelessWidget {
   const SheetSurface({
     super.key,
@@ -21,9 +21,9 @@ class SheetSurface extends StatelessWidget {
       width: double.infinity,
       decoration: const BoxDecoration(
         color: AppColors.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(AppShape.sheetRadius)),
+        borderRadius: AppShape.sheetTop,
+        boxShadow: [AppColors.sheetShadow],
       ),
-      clipBehavior: Clip.antiAlias,
       child: SafeArea(
         top: false,
         child: Padding(padding: padding, child: child),
@@ -66,8 +66,7 @@ class DraggableSheetSurface extends StatelessWidget {
         return Container(
           decoration: const BoxDecoration(
             color: AppColors.surface,
-            borderRadius:
-                BorderRadius.vertical(top: Radius.circular(AppShape.sheetRadius)),
+            borderRadius: AppShape.sheetTop,
             boxShadow: [AppColors.floatingShadow],
           ),
           clipBehavior: Clip.antiAlias,

@@ -37,6 +37,10 @@ dependencies:
   url_launcher: ^6.3.2
   share_plus: ^13.3.0
 
+  # The paywall's promo clip, streamed from the URL in app_config so it can be swapped
+  # without shipping a release. Absent config falls back to a static poster.
+  video_player: ^2.9.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
