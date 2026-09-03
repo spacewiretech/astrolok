@@ -105,6 +105,18 @@ void main() {
       Img.appIcon,
       Brand.mark,
       Brand.wordmark,
+      // The palm flow's glyphs. Every one of these renders through a Material fallback if it
+      // goes missing, which is exactly why a dropped file would otherwise go unnoticed.
+      PalmIcon.tipLighting,
+      PalmIcon.tipOpenHand,
+      PalmIcon.tipSharpPhoto,
+      PalmIcon.shieldCheck,
+      PalmIcon.checkCircle,
+      PalmIcon.scanDetect,
+      PalmIcon.scanTraits,
+      PalmIcon.scanInsights,
+      PalmIcon.bulbDisc,
+      PalmIcon.backCircle,
     ];
 
     for (final path in shipped) {

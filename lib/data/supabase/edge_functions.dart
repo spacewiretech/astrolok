@@ -27,6 +27,14 @@ abstract interface class EdgeFunctions {
     Map<String, dynamic>? body,
     String? bearerToken,
     bool delete = false,
+
+    /// Overrides the instance default for this one call.
+    ///
+    /// Every function here answers well inside 20 seconds except the palm reading, which waits
+    /// on a multimodal model and routinely runs past it. A parameter rather than a second
+    /// [SupabaseEdgeFunctions] instance in `providers.dart`, which would leave two
+    /// similarly-named objects a reader has to tell apart.
+    Duration? timeout,
   });
 }
 
@@ -42,6 +50,7 @@ class SupabaseEdgeFunctions implements EdgeFunctions {
     Map<String, dynamic>? body,
     String? bearerToken,
     bool delete = false,
+    Duration? timeout,
   }) async {
     final FunctionResponse response;
     try {
@@ -54,7 +63,7 @@ class SupabaseEdgeFunctions implements EdgeFunctions {
                 : {'Authorization': 'Bearer $bearerToken'},
             method: delete ? HttpMethod.delete : HttpMethod.post,
           )
-          .timeout(timeout);
+          .timeout(timeout ?? this.timeout);
     } on SocketException {
       throw const EdgeError(
         null,

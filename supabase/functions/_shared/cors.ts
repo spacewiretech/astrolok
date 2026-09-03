@@ -36,8 +36,14 @@ export function fail(
     | "not_entitled"
     // add-person: this pair is already linked, in whatever direction.
     | "already_connected"
-    // add-person: the caller is at max_tracked_people.
-    | "limit_reached",
+    // add-person: the caller is at max_tracked_people, or the day's palm readings are used up.
+    | "limit_reached"
+    // The photo did not show a readable palm. Distinct from a failure: nothing went wrong, the
+    // user simply needs to take another photo, so the app sends them back to the camera.
+    | "no_palm"
+    // The reading model is unreachable, overloaded, or answered with something unusable.
+    // Retryable, and nothing is wrong with the user's photo.
+    | "ai_unavailable",
   message: string,
   status = 400,
 ): Response {

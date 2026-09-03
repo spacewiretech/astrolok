@@ -1,5 +1,6 @@
-# Uncomment this line to define a global platform for your project
-# platform :ios, '13.0'
+# Pinned rather than left to CocoaPods' default, which is far older than the camera and
+# TTS pods accept. Matches IPHONEOS_DEPLOYMENT_TARGET in the Xcode project.
+platform :ios, '13.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'

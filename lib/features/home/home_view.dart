@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../app/assets.dart';
+import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
@@ -14,9 +16,10 @@ import '../../widgets/safe_asset.dart';
 
 /// The signed-in, paid-for home.
 ///
-/// The three reading entries and the profile button are designed but not built — they need a
-/// camera, an upload target and a reading backend, none of which exist yet. Each answers with
-/// "Coming soon" rather than being a chevron that does nothing, which reads as a bug.
+/// Palm Reading is built and routes into its own flow. Chat, Face Reading and the profile
+/// button are still designed rather than built — they need backends that do not exist yet — so
+/// each answers with "Coming soon" rather than being a chevron that does nothing, which reads
+/// as a bug.
 class HomeView extends ConsumerWidget {
   const HomeView({super.key});
 
@@ -84,7 +87,7 @@ class HomeView extends ConsumerWidget {
                 title: 'Palm Reading',
                 subtitle: 'Discover what your palm reveals about your life.',
                 fallbackIcon: Icons.back_hand_outlined,
-                onTap: () => _soon(context, 'Palm Reading'),
+                onTap: () => context.push(Routes.palmCapture),
               ),
               const SizedBox(height: 14),
               ReadingCard(

@@ -39,6 +39,11 @@ verify_jwt = false
 [functions.update-profile]
 verify_jwt = false
 
+# Readings. Requires a bearer session token, re-checks entitlement server-side, and holds the
+# Gemini key so it never ships inside the app.
+[functions.palm-reading]
+verify_jwt = false
+
 # Payments. subscription-* require a bearer session token and derive the user from it, so no
 # request can name an account other than its own.
 [functions.subscription-start]

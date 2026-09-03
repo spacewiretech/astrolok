@@ -81,15 +81,33 @@ class PrimaryButton extends StatelessWidget {
                         width: 20,
                         child: CircularProgressIndicator(strokeWidth: 2, color: foreground),
                       )
-                    : Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (icon != null) ...[
-                            Icon(icon, size: 20, color: foreground),
-                            const SizedBox(width: 8),
+                    : Padding(
+                        // Keeps a long label off the button's rounded ends rather than letting
+                        // it run to the very edge before it shortens.
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (icon != null) ...[
+                              Icon(icon, size: 20, color: foreground),
+                              const SizedBox(width: 8),
+                            ],
+                            // Flexible so a long label shortens instead of overflowing. The
+                            // reading screens build labels out of a line's name — "Ask Astro
+                            // about your relationship line" — which is wider than a 360pt
+                            // phone can hold, and a min-sized Row would rather overflow than
+                            // let its text shrink.
+                            Flexible(
+                              child: Text(
+                                label,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: AppText.button.copyWith(color: foreground),
+                              ),
+                            ),
                           ],
-                          Text(label, style: AppText.button.copyWith(color: foreground)),
-                        ],
+                        ),
                       ),
               ),
             ),

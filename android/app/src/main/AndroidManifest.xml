@@ -1,5 +1,18 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Palm reading photographs the user's hand. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+
+    <!-- camera_android_camerax declares RECORD_AUDIO for video capture. This app never records
+         audio, and a microphone permission on a palm reader reads as spyware on the store
+         listing, so it is merged out rather than inherited. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove"/>
+
+    <!-- Not required: a device with no camera can still upload a photo from its gallery, and
+         marking this required would hide the app from those devices on the Play Store. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
 
     <application
         android:label="Astrolok"
@@ -70,6 +83,13 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+
+        <!-- REQUIRED on Android 11+ for flutter_tts to find a speech engine. Package
+             visibility is filtered by default, so without this the reading appears to play
+             and no sound comes out — with no error to explain why. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE"/>
         </intent>
 
         <!-- REQUIRED for UPI app discovery on Android 11+. Package visibility is filtered by

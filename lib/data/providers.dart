@@ -3,21 +3,28 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../app/env.dart';
+import 'camera/palm_camera.dart';
 import 'cashfree/cashfree_checkout.dart';
 import 'cashfree/upi_app_preference.dart';
 import 'fake/fake_auth_repository.dart';
+import 'fake/fake_palm_reading.dart';
 import 'fake/fake_session.dart';
 import 'fake/fake_subscription_repository.dart';
 import 'fast2sms/fast2sms_auth_repository.dart';
 import 'fast2sms/fast2sms_client.dart';
+import 'local/palm_image_store.dart';
+import 'local/palm_reading_store.dart';
 import 'repositories/app_config_repository.dart';
 import 'repositories/auth_repository.dart';
+import 'repositories/palm_repository.dart';
 import 'repositories/subscription_repository.dart';
 import 'supabase/edge_functions.dart';
 import 'supabase/session_store.dart';
 import 'supabase/supabase_app_config_repository.dart';
 import 'supabase/supabase_auth_repository.dart';
+import 'supabase/supabase_palm_repository.dart';
 import 'supabase/supabase_subscription_repository.dart';
+import 'tts/palm_speech.dart';
 
 /// The whole data layer is bound here. No ViewModel or view imports a concrete repository, so
 /// swapping an implementation is an edit to the right-hand side of one provider.
@@ -100,3 +107,43 @@ final cashfreeCheckoutProvider = Provider<CashfreeCheckout>((ref) {
 final upiAppPreferenceProvider = Provider<UpiAppPreference>(
   (ref) => const UpiAppPreference(),
 );
+
+// ---------------------------------------------------------------- palm reading
+
+/// Reads a palm photograph, through the Edge Function that holds the Gemini key.
+///
+/// Same `Env.hasSupabase` rule as the two above: there is no direct-to-Gemini rung, because
+/// that would mean shipping the key inside the app, and the fake is a canned reading so the
+/// four screens stay walkable on a checkout that has never been pointed at a project.
+final palmRepositoryProvider = Provider<PalmRepository>((ref) {
+  if (Env.hasSupabase) {
+    return SupabasePalmRepository(
+      SupabaseEdgeFunctions(Supabase.instance.client),
+      ref.watch(sessionStoreProvider),
+    );
+  }
+
+  debugPrint('[palm] Supabase is not configured; readings are canned.');
+  return const FakePalmRepository();
+});
+
+/// The live camera. autoDispose so leaving the capture screen releases the hardware — a held
+/// camera keeps the indicator light on and blocks other apps.
+final palmCameraProvider = Provider.autoDispose<PalmCamera>((ref) {
+  final camera = DeviceCamera();
+  ref.onDispose(camera.dispose);
+  return camera;
+});
+
+/// The captured photographs, on the device only.
+final palmImageStoreProvider = Provider<PalmImageStore>((ref) => PalmImageStore());
+
+/// The recent readings, so a result survives a cold start.
+final palmReadingStoreProvider = Provider<PalmReadingStore>((ref) => PalmReadingStore());
+
+/// Reads a reading aloud. One instance app-wide: two would talk over each other.
+final palmSpeechProvider = Provider<PalmSpeech>((ref) {
+  final speech = PalmSpeech();
+  ref.onDispose(speech.dispose);
+  return speech;
+});

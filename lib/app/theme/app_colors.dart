@@ -82,6 +82,11 @@ abstract final class AppColors {
   static const personality = gold;
   static const money = Color(0xFF16A34A);
 
+  /// The fifth, added for the palm lines. The head line reads blue in the design and none of
+  /// the four above is one — gold and red are spoken for, and tinting it purple would make it
+  /// read as a second fate line.
+  static const insight = Color(0xFF3B82F6);
+
   /// Behind modal bottom sheets.
   static const scrim = Color(0x660B1739);
 

@@ -26,6 +26,13 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Both strings are shown verbatim in the system permission dialog. iOS terminates the
+	     app on first access if the matching key is absent, so these are load-bearing, not
+	     documentation. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Astrolok uses your camera to photograph your palm and read it.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Astrolok needs your photo library so you can choose a photo of your palm.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -1,7 +1,13 @@
 import 'package:go_router/go_router.dart';
 
+import '../data/models/palm_reading.dart';
 import '../features/birth/birth_view.dart';
 import '../features/home/home_view.dart';
+import '../features/palm/palm_capture_view.dart';
+import '../features/palm/palm_capture_viewmodel.dart';
+import '../features/palm/palm_line_view.dart';
+import '../features/palm/palm_reading_view.dart';
+import '../features/palm/palm_scan_view.dart';
 import '../features/onboarding/onboarding_state.dart';
 import '../features/onboarding/onboarding_view.dart';
 import '../features/payment_status/payment_outcome.dart';
@@ -27,10 +33,26 @@ abstract final class Routes {
 
   static const home = '/home';
 
+  /// The palm flow. Three steps and a per-line detail, hierarchical so that popping from a
+  /// line lands on its reading and popping from a reading lands on Home.
+  static const palmCapture = '/palm';
+  static const palmScan = '/palm/scan';
+
+  /// `:id` is a reading id. Use [palmReadingFor].
+  static const palmReading = '/palm/reading/:id';
+
+  /// `:line` is a [PalmLineKind] name. Use [palmLineFor].
+  static const palmLine = '/palm/reading/:id/line/:line';
+
   static String onboardingAt(OnboardingStep step) => '$onboarding?step=${step.name}';
 
   static String paymentStatusFor(PaymentOutcome outcome) =>
       '/payment-status/${outcome.slug}';
+
+  static String palmReadingFor(String id) => '/palm/reading/$id';
+
+  static String palmLineFor(String id, PalmLineKind line) =>
+      '/palm/reading/$id/line/${line.name}';
 }
 
 /// The route each resolved destination maps to.
@@ -81,6 +103,40 @@ final appRouter = GoRouter(
     GoRoute(
       path: Routes.home,
       builder: (context, state) => const EntitlementGate(child: HomeView()),
+    ),
+
+    // Gated like Home: a reading costs money to produce, and the server refuses one for a
+    // lapsed account anyway, so a trial that runs out mid-flow should bounce here rather than
+    // at the point of asking.
+    GoRoute(
+      path: Routes.palmCapture,
+      builder: (context, state) => const EntitlementGate(child: PalmCaptureView()),
+    ),
+
+    // The prepared image is handed over in `extra` rather than being re-read from disk: it is
+    // already in memory, and a scan that started is a scan the user is waiting on.
+    GoRoute(
+      path: Routes.palmScan,
+      builder: (context, state) => EntitlementGate(
+        child: PalmScanView(request: state.extra as PalmScanRequest?),
+      ),
+    ),
+
+    GoRoute(
+      path: Routes.palmReading,
+      builder: (context, state) => EntitlementGate(
+        child: PalmReadingView(readingId: state.pathParameters['id'] ?? ''),
+      ),
+    ),
+
+    GoRoute(
+      path: Routes.palmLine,
+      builder: (context, state) => EntitlementGate(
+        child: PalmLineView(
+          readingId: state.pathParameters['id'] ?? '',
+          line: PalmLineKind.values.asNameMap()[state.pathParameters['line']],
+        ),
+      ),
     ),
   ],
 );

@@ -26,7 +26,7 @@ so RLS cannot be written against a Supabase session. Instead:
 4. `supabase functions deploy`
 5. Fill in the private `app_config` rows from the dashboard (all seeded empty):
    `fast2sms_api_key`, `fast2sms_otp_id`, `cashfree_app_id`, `cashfree_secret_key`,
-   `cashfree_plan_id`.
+   `cashfree_plan_id`, `gemini_api_key`.
 6. Point the Cashfree webhook at `https://<ref>.supabase.co/functions/v1/cashfree-webhook`.
 7. Flip `cashfree_env` to `production` only once a sandbox mandate has been tested end to end.
    It ships as `sandbox` so a half-configured project cannot take real money.
@@ -75,12 +75,47 @@ absolute state rather than trusting the payload.
 
 `subscription-reconcile` runs hourly on pg_cron as the safety net for a dropped webhook.
 
+## Palm readings
+
+`palm-reading` takes a base64 photograph and returns an eight-line reading. **The photograph is
+never stored.** It goes to Gemini and is dropped when the request ends — there is no column and
+no bucket that could hold one — so the only copy that outlives the request is on the user's own
+device. `palm_readings` keeps the text, plus `model`/`latency_ms`/`image_bytes` for tuning.
+
+The key lives in `gemini_api_key` (private). `GEMINI_AI_KEY` is also read, for a row created
+under that name before the convention settled. Note that the secret-guard CHECK in `0001` was
+case-**sensitive**, so an uppercase `..._KEY` could be marked public and published to every
+install through the anon key; `0004_palm` forces those rows private and makes the constraint
+case-insensitive.
+
+Three guards, because this endpoint spends money on every call:
+
+- Entitlement is re-checked here. `EntitlementGate` in the app is a convenience, not a boundary.
+- `palm_readings_per_day` (default 10) caps a single account. The row is inserted as `pending`
+  **before** the model is called, so a request that is paid for is counted even when it fails.
+  `failed` rows are excluded — a user should not lose a reading because the model was down.
+- The image is capped at ~1.5 MB of base64 and rejected locally above that.
+
+Model ids live in config so a retirement is a dashboard edit, not a redeploy — which has
+already happened once: `gemini-2.5-flash` was retired mid-build. **Not every model accepts this
+request shape** (inline image + `responseSchema` + `thinkingBudget: 0`); `gemini-3.6-flash` and
+every `*-flash-lite` answer 400. Verify end to end before changing `gemini_model` or
+`gemini_model_fallback`. Current pair: `gemini-3.8-flash` / `gemini-3.5-flash`, ~9-11s.
+
+The prompt's boundaries are written as rules about how to write, not as a disclaimer to append:
+no health, diagnosis or lifespan claims, no guarantees, no dates, and no deterministic verbs.
+The Mercury line ships as communication and vitality, never as a "health line" — that label
+steers the model straight at the claims the prompt forbids. Rejection is deliberately narrow:
+an early version bounced real palms because a second hand was in frame, and a false "no palm"
+sends a paying user back to retake a photo that was fine.
+
 ## Tests
 
 ```
-deno test functions/tests/payments_test.ts   # 38 tests
+deno test functions/tests/                   # 58 tests
 deno check functions/*/index.ts functions/_shared/*.ts
 ```
 
 Covers entitlement boundaries, HMAC tamper and replay, payment classification, IST date
-arithmetic and month-end clamping.
+arithmetic and month-end clamping, and `normalisePalmReading` — every way a language model can
+break the reading contract, since the screen renders whatever comes out of it.

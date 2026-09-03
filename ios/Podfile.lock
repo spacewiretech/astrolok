@@ -12,10 +12,13 @@ PODS:
   - flutter_cashfree_pg_sdk (0.0.1):
     - CashfreePG (= 2.4.0)
     - Flutter
+  - flutter_tts (0.0.1):
+    - Flutter
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
   - flutter_cashfree_pg_sdk (from `.symlinks/plugins/flutter_cashfree_pg_sdk/ios`)
+  - flutter_tts (from `.symlinks/plugins/flutter_tts/ios`)
 
 SPEC REPOS:
   trunk:
@@ -30,6 +33,8 @@ EXTERNAL SOURCES:
     :path: Flutter
   flutter_cashfree_pg_sdk:
     :path: ".symlinks/plugins/flutter_cashfree_pg_sdk/ios"
+  flutter_tts:
+    :path: ".symlinks/plugins/flutter_tts/ios"
 
 SPEC CHECKSUMS:
   CashfreeAnalyticsSDK: 11f37b2323be07bf07948bd6046b7c19e947ae07
@@ -39,7 +44,8 @@ SPEC CHECKSUMS:
   CFNetworkSDK: 6a6261de10185efd4d2957583f0cbad395999cac
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   flutter_cashfree_pg_sdk: 5fd528f67b0e6d658d421342427d6dd76d4ce55f
+  flutter_tts: 91ad1884033cd95ef6e9338754adad54f01f090f
 
-PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+PODFILE CHECKSUM: 0917f48f94b35d87bfd395dc19015279c914d222
 
 COCOAPODS: 1.16.2

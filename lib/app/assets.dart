@@ -49,6 +49,38 @@ abstract final class Brand {
   static const wordmark = '$_base/wordmark.png';
 }
 
+/// The palm reading flow's glyphs.
+///
+/// Exported as small PNGs rather than SVGs, so they load through [SafeImage] like the brand
+/// marks and not through [SafeSvg]. Each still gets a Material fallback at its use site: a
+/// dropped file costs its own box, never the screen it sits on.
+abstract final class PalmIcon {
+  static const _base = 'assets/icons';
+
+  /// The three cards under the viewfinder.
+  static const tipLighting = '$_base/tip_lighting.png';
+  static const tipOpenHand = '$_base/tip_open_hand.png';
+  static const tipSharpPhoto = '$_base/tip_sharp_photo.png';
+
+  /// The gold shield on "Your images are private and secure".
+  static const shieldCheck = '$_base/shield_check.png';
+
+  /// The green tick inside the "Hand Detected" pill.
+  static const checkCircle = '$_base/check_circle.png';
+
+  /// The four chips around the hand while it is being read. There is no separate export for
+  /// "Reading patterns" — the design uses a grid glyph, which is a Material icon here.
+  static const scanDetect = '$_base/scan_detect.png';
+  static const scanTraits = '$_base/scan_traits.png';
+  static const scanInsights = '$_base/scan_insights.png';
+
+  /// The lightbulb on its pale disc, in the "Did you know?" card.
+  static const bulbDisc = '$_base/bulb_disc.png';
+
+  /// The circular back button, top left on every palm screen.
+  static const backCircle = '$_base/back_circle.png';
+}
+
 /// Vector assets. Still to be exported — every reference falls back to a Material icon, which
 /// is why the paywall and Home read correctly without them.
 abstract final class Svg {

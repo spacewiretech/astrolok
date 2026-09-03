@@ -41,6 +41,27 @@ dependencies:
   # without shipping a release. Absent config falls back to a static poster.
   video_player: ^2.9.2
 
+  # Palm reading. `camera` rather than image_picker's camera because the capture screen draws
+  # its own square viewfinder with corner brackets over the live preview, which the OS camera
+  # UI cannot do; image_picker is the gallery path beside it, and the only way to work on a
+  # simulator, which has no camera at all.
+  camera: ^0.12.0+2
+  image_picker: ^1.2.3
+
+  # Downscaling the capture before it goes to the model. flutter_image_compress is native and
+  # off the platform thread — a 12MP decode in pure Dart is over a second of jank on a
+  # mid-range Android. `image` only centre-crops the already-small result.
+  flutter_image_compress: ^2.5.1
+  image: ^4.9.2
+  path_provider: ^2.1.6
+
+  # Reading the result aloud, and exporting it. TTS is on-device: free, offline, and it starts
+  # speaking instantly, which matters for something a user replays. `pdf` composes the export;
+  # `printing` is deliberately not used — it exists for a platform print dialog and a native
+  # share sheet, and share_plus above already covers the sharing.
+  flutter_tts: ^4.2.5
+  pdf: ^3.13.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -67,3 +88,8 @@ flutter:
     - assets/images/
     - assets/icons/
     - assets/env/
+    # Declared as assets, not under `fonts:` — the UI keeps rendering Poppins through
+    # google_fonts, and only the PDF export needs the raw bytes. The pdf package's built-in
+    # Helvetica covers Latin-1 and nothing else, so a reading that comes back with a curly
+    # quote or a dash would render it as a blank box.
+    - assets/fonts/
