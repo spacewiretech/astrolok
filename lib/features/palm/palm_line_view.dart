@@ -15,6 +15,7 @@ import '../../widgets/circle_icon_button.dart';
 import '../../widgets/info_card.dart';
 import '../../widgets/primary_button.dart';
 import '../../widgets/safe_asset.dart';
+import '../../widgets/speak_button.dart';
 import '../../widgets/status_chip.dart';
 import 'palm_copy.dart';
 import 'palm_reading_viewmodel.dart';
@@ -132,19 +133,24 @@ class _Line extends StatelessWidget {
             ),
             children: [
               Text(line.title, style: AppText.display),
+              if (line.sanskrit.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(
+                  line.sanskrit,
+                  style: AppText.title.copyWith(fontSize: 15, color: line.kind.accent),
+                ),
+              ],
               const SizedBox(height: 6),
               Text(line.kind.subtitle, style: AppText.body),
 
               if (canSpeak) ...[
                 const SizedBox(height: 16),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: GoldPillButton(
-                    label: speaking ? PalmCopy.stopListening : PalmCopy.listen,
-                    icon: speaking ? Icons.stop_rounded : Icons.volume_up_rounded,
-                    compact: true,
-                    onPressed: onSpeak,
-                  ),
+                SpeakButton(
+                  speaking: speaking,
+                  onTap: onSpeak,
+                  listenLabel: PalmCopy.listen,
+                  stopLabel: PalmCopy.stopListening,
+                  color: line.kind.accent,
                 ),
               ],
 
@@ -169,6 +175,16 @@ class _Line extends StatelessWidget {
                   icon: Icons.lightbulb_outline_rounded,
                   body: line.tip,
                   filled: true,
+                ),
+              ],
+
+              if (line.blessing.isNotEmpty) ...[
+                const SizedBox(height: 14),
+                InfoCard(
+                  title: PalmCopy.blessingHeading,
+                  accent: AppColors.goldDeep,
+                  icon: Icons.spa_outlined,
+                  body: line.blessing,
                 ),
               ],
             ],

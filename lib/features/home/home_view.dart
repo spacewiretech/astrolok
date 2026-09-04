@@ -16,10 +16,10 @@ import '../../widgets/safe_asset.dart';
 
 /// The signed-in, paid-for home.
 ///
-/// Palm Reading is built and routes into its own flow. Chat, Face Reading and the profile
-/// button are still designed rather than built — they need backends that do not exist yet — so
-/// each answers with "Coming soon" rather than being a chevron that does nothing, which reads
-/// as a bug.
+/// Palm Reading, Face Reading and the profile button all route into their own flows. Chat with
+/// Astro is still designed rather than built — it needs a backend that does not exist yet — so
+/// it answers with "Coming soon" rather than being a chevron that does nothing, which reads as
+/// a bug.
 class HomeView extends ConsumerWidget {
   const HomeView({super.key});
 
@@ -38,7 +38,7 @@ class HomeView extends ConsumerWidget {
                 children: [
                   const BrandLogo(size: 42),
                   const Spacer(),
-                  _ProfileButton(onTap: () => _soon(context, 'Your profile')),
+                  _ProfileButton(onTap: () => context.push(Routes.profile)),
                 ],
               ),
               const SizedBox(height: 28),
@@ -95,7 +95,7 @@ class HomeView extends ConsumerWidget {
                 title: 'Face Reading',
                 subtitle: 'Discover what your face reveals.',
                 fallbackIcon: Icons.face_retouching_natural_outlined,
-                onTap: () => _soon(context, 'Face Reading'),
+                onTap: () => context.push(Routes.faceCapture),
               ),
             ],
           ),

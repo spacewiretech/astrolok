@@ -1,4 +1,4 @@
-import 'package:astrolok/data/camera/palm_camera.dart';
+import 'package:astrolok/data/camera/reading_camera.dart';
 import 'package:astrolok/data/providers.dart';
 import 'package:astrolok/features/palm/palm_capture_viewmodel.dart';
 import 'package:flutter/foundation.dart';
@@ -23,7 +23,7 @@ void main() {
       overrides: [
         palmCameraProvider.overrideWith((ref) {
           built++;
-          return FakePalmCamera(failure: null);
+          return FakeReadingCamera(failure: null);
         }),
       ],
     );
@@ -41,7 +41,7 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         palmCameraProvider.overrideWith(
-          (ref) => FakePalmCamera(failure: CameraFailure.unavailable),
+          (ref) => FakeReadingCamera(failure: CameraFailure.unavailable),
         ),
       ],
     );
@@ -62,7 +62,7 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         palmCameraProvider.overrideWith(
-          (ref) => FakePalmCamera(failure: null, bytes: Uint8List(0)),
+          (ref) => FakeReadingCamera(failure: null, bytes: Uint8List(0)),
         ),
       ],
     );

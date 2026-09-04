@@ -87,6 +87,13 @@ class _PalmScanViewState extends ConsumerState<PalmScanView>
         ref.read(palmRejectionProvider.notifier).state = state.error;
         context.pop();
 
+      case PalmScanOutcome.limitReached:
+        // Back to the capture screen too, but as a standing notice rather than a snackbar:
+        // nothing the user does today will change the answer, so it has to stay on screen and
+        // close the buttons rather than fade away and let them try again.
+        ref.read(palmLimitProvider.notifier).state = state.error;
+        context.pop();
+
       case PalmScanOutcome.notEntitled:
         context.go(Routes.subscribe);
 
@@ -213,6 +220,9 @@ class _PalmScanViewState extends ConsumerState<PalmScanView>
 
                       if (failed)
                         _RetryCard(
+                          title: state.failedSlowly
+                              ? PalmCopy.slowTitle
+                              : PalmCopy.failedTitle,
                           message: state.error ?? PalmCopy.slowBody,
                           onRetry: () =>
                               ref.read(palmScanViewModelProvider.notifier).retry(),
@@ -381,11 +391,13 @@ class _Progress extends StatelessWidget {
 /// fail — so that is the second choice here, never the first.
 class _RetryCard extends StatelessWidget {
   const _RetryCard({
+    required this.title,
     required this.message,
     required this.onRetry,
     required this.onNewPhoto,
   });
 
+  final String title;
   final String message;
   final VoidCallback onRetry;
   final VoidCallback onNewPhoto;
@@ -401,11 +413,7 @@ class _RetryCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Text(
-            PalmCopy.slowTitle,
-            style: AppText.title,
-            textAlign: TextAlign.center,
-          ),
+          Text(title, style: AppText.title, textAlign: TextAlign.center),
           const SizedBox(height: 8),
           Text(message, style: AppText.meta, textAlign: TextAlign.center),
           const SizedBox(height: 18),

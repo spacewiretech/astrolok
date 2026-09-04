@@ -1,7 +1,13 @@
 import 'package:go_router/go_router.dart';
 
+import '../data/models/face_reading.dart';
 import '../data/models/palm_reading.dart';
 import '../features/birth/birth_view.dart';
+import '../features/face/face_capture_view.dart';
+import '../features/face/face_capture_viewmodel.dart';
+import '../features/face/face_part_view.dart';
+import '../features/face/face_reading_view.dart';
+import '../features/face/face_scan_view.dart';
 import '../features/home/home_view.dart';
 import '../features/palm/palm_capture_view.dart';
 import '../features/palm/palm_capture_viewmodel.dart';
@@ -11,6 +17,8 @@ import '../features/palm/palm_scan_view.dart';
 import '../features/onboarding/onboarding_state.dart';
 import '../features/onboarding/onboarding_view.dart';
 import '../features/payment_status/payment_outcome.dart';
+import '../features/profile/downloads_view.dart';
+import '../features/profile/profile_view.dart';
 import '../features/payment_status/payment_status_view.dart';
 import '../features/splash/splash_view.dart';
 import '../features/splash/splash_viewmodel.dart';
@@ -44,6 +52,21 @@ abstract final class Routes {
   /// `:line` is a [PalmLineKind] name. Use [palmLineFor].
   static const palmLine = '/palm/reading/:id/line/:line';
 
+  /// The face flow, shaped exactly like the palm one so that popping from a feature lands on
+  /// its reading and popping from a reading lands on Home.
+  static const faceCapture = '/face';
+  static const faceScan = '/face/scan';
+
+  /// `:id` is a reading id. Use [faceReadingFor].
+  static const faceReading = '/face/reading/:id';
+
+  /// `:part` is a [FacePartKind] name. Use [facePartFor].
+  static const facePart = '/face/reading/:id/part/:part';
+
+  /// The account. Nested so that popping from Downloads lands on the profile.
+  static const profile = '/profile';
+  static const downloads = '/profile/downloads';
+
   static String onboardingAt(OnboardingStep step) => '$onboarding?step=${step.name}';
 
   static String paymentStatusFor(PaymentOutcome outcome) =>
@@ -53,6 +76,11 @@ abstract final class Routes {
 
   static String palmLineFor(String id, PalmLineKind line) =>
       '/palm/reading/$id/line/${line.name}';
+
+  static String faceReadingFor(String id) => '/face/reading/$id';
+
+  static String facePartFor(String id, FacePartKind part) =>
+      '/face/reading/$id/part/${part.name}';
 }
 
 /// The route each resolved destination maps to.
@@ -135,6 +163,49 @@ final appRouter = GoRouter(
         child: PalmLineView(
           readingId: state.pathParameters['id'] ?? '',
           line: PalmLineKind.values.asNameMap()[state.pathParameters['line']],
+        ),
+      ),
+    ),
+
+    // The face flow, gated for the same reasons as the palm one: a reading costs money to
+    // produce, and the server refuses one for a lapsed account anyway.
+    GoRoute(
+      path: Routes.faceCapture,
+      builder: (context, state) => const EntitlementGate(child: FaceCaptureView()),
+    ),
+
+    GoRoute(
+      path: Routes.faceScan,
+      builder: (context, state) => EntitlementGate(
+        child: FaceScanView(request: state.extra as FaceScanRequest?),
+      ),
+    ),
+
+    GoRoute(
+      path: Routes.faceReading,
+      builder: (context, state) => EntitlementGate(
+        child: FaceReadingView(readingId: state.pathParameters['id'] ?? ''),
+      ),
+    ),
+
+    // The account. Gated like Home: everything reachable from here is behind the paywall, and
+    // a lapsed user belongs on /subscribe rather than on a page telling them their plan ended.
+    GoRoute(
+      path: Routes.profile,
+      builder: (context, state) => const EntitlementGate(child: ProfileView()),
+    ),
+
+    GoRoute(
+      path: Routes.downloads,
+      builder: (context, state) => const EntitlementGate(child: DownloadsView()),
+    ),
+
+    GoRoute(
+      path: Routes.facePart,
+      builder: (context, state) => EntitlementGate(
+        child: FacePartView(
+          readingId: state.pathParameters['id'] ?? '',
+          part: FacePartKind.values.asNameMap()[state.pathParameters['part']],
         ),
       ),
     ),

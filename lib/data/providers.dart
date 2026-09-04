@@ -1,30 +1,34 @@
+import 'package:camera/camera.dart' show CameraLensDirection;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../app/env.dart';
-import 'camera/palm_camera.dart';
+import 'camera/reading_camera.dart';
 import 'cashfree/cashfree_checkout.dart';
 import 'cashfree/upi_app_preference.dart';
 import 'fake/fake_auth_repository.dart';
+import 'fake/fake_face_reading.dart';
 import 'fake/fake_palm_reading.dart';
 import 'fake/fake_session.dart';
 import 'fake/fake_subscription_repository.dart';
 import 'fast2sms/fast2sms_auth_repository.dart';
 import 'fast2sms/fast2sms_client.dart';
-import 'local/palm_image_store.dart';
-import 'local/palm_reading_store.dart';
+import 'local/reading_image_store.dart';
+import 'local/reading_store.dart';
 import 'repositories/app_config_repository.dart';
 import 'repositories/auth_repository.dart';
+import 'repositories/face_repository.dart';
 import 'repositories/palm_repository.dart';
 import 'repositories/subscription_repository.dart';
 import 'supabase/edge_functions.dart';
 import 'supabase/session_store.dart';
 import 'supabase/supabase_app_config_repository.dart';
 import 'supabase/supabase_auth_repository.dart';
+import 'supabase/supabase_face_repository.dart';
 import 'supabase/supabase_palm_repository.dart';
 import 'supabase/supabase_subscription_repository.dart';
-import 'tts/palm_speech.dart';
+import 'tts/reading_speech.dart';
 
 /// The whole data layer is bound here. No ViewModel or view imports a concrete repository, so
 /// swapping an implementation is an edit to the right-hand side of one provider.
@@ -127,23 +131,65 @@ final palmRepositoryProvider = Provider<PalmRepository>((ref) {
   return const FakePalmRepository();
 });
 
-/// The live camera. autoDispose so leaving the capture screen releases the hardware — a held
-/// camera keeps the indicator light on and blocks other apps.
-final palmCameraProvider = Provider.autoDispose<PalmCamera>((ref) {
+/// The live camera, back-facing. autoDispose so leaving the capture screen releases the
+/// hardware — a held camera keeps the indicator light on and blocks other apps.
+final palmCameraProvider = Provider.autoDispose<ReadingCamera>((ref) {
   final camera = DeviceCamera();
   ref.onDispose(camera.dispose);
   return camera;
 });
 
 /// The captured photographs, on the device only.
-final palmImageStoreProvider = Provider<PalmImageStore>((ref) => PalmImageStore());
+final palmImageStoreProvider =
+    Provider<ReadingImageStore>((ref) => ReadingImageStore('palm'));
 
 /// The recent readings, so a result survives a cold start.
-final palmReadingStoreProvider = Provider<PalmReadingStore>((ref) => PalmReadingStore());
+final palmReadingStoreProvider =
+    Provider<PalmReadingStore>((ref) => const PalmReadingStore());
 
-/// Reads a reading aloud. One instance app-wide: two would talk over each other.
-final palmSpeechProvider = Provider<PalmSpeech>((ref) {
-  final speech = PalmSpeech();
+// ---------------------------------------------------------------- face reading
+
+/// Reads a face photograph, through the Edge Function that holds the Gemini key.
+///
+/// Same rule and same reasons as [palmRepositoryProvider].
+final faceRepositoryProvider = Provider<FaceRepository>((ref) {
+  if (Env.hasSupabase) {
+    return SupabaseFaceRepository(
+      SupabaseEdgeFunctions(Supabase.instance.client),
+      ref.watch(sessionStoreProvider),
+    );
+  }
+
+  debugPrint('[face] Supabase is not configured; readings are canned.');
+  return const FakeFaceRepository();
+});
+
+/// The live camera, front-facing — the whole difference from [palmCameraProvider].
+///
+/// A separate provider rather than a parameter on one, so that leaving either capture screen
+/// disposes only its own controller. Two `autoDispose` families keyed by lens would achieve the
+/// same thing with more ceremony.
+final faceCameraProvider = Provider.autoDispose<ReadingCamera>((ref) {
+  final camera = DeviceCamera(lens: CameraLensDirection.front);
+  ref.onDispose(camera.dispose);
+  return camera;
+});
+
+/// Its own directory, so signing out of one feature's images cannot take the other's, and so
+/// palm and face each keep ten photos rather than ten between them.
+final faceImageStoreProvider =
+    Provider<ReadingImageStore>((ref) => ReadingImageStore('face'));
+
+final faceReadingStoreProvider =
+    Provider<FaceReadingStore>((ref) => const FaceReadingStore());
+
+// ---------------------------------------------------------------- narration
+
+/// Reads a reading aloud. One instance app-wide, shared by both features: two would talk over
+/// each other, and a palm reading left playing while a face reading starts is a bug the user
+/// hears rather than sees.
+final readingSpeechProvider = Provider<ReadingSpeech>((ref) {
+  final speech = ReadingSpeech();
   ref.onDispose(speech.dispose);
   return speech;
 });

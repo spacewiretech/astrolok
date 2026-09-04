@@ -53,5 +53,6 @@ app.*.map.json
 /design/
 
 # Supabase CLI machine state: which project this checkout is linked to, cached tool versions.
-# Local to whoever ran `supabase link`, not part of the project.
+# Local to whoever ran `supabase link` or `supabase start`, not part of the project.
 /supabase/.temp/
+/supabase/.branches/

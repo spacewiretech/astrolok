@@ -3,19 +3,25 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
-/// The captured palm photographs, kept on the device and nowhere else.
+/// The captured photographs, kept on the device and nowhere else.
 ///
-/// The server never stores the image — it goes to the model and is dropped — so this is the
-/// only copy that outlives a reading, and it is what lets the results screen show the hand it
-/// is talking about.
+/// The server never stores an image — it goes to the model and is dropped — so this is the only
+/// copy that outlives a reading, and it is what lets the results screen show the hand or the
+/// face it is talking about.
+///
+/// One instance per feature, each with its own [folder], so a sign-out that clears one cannot
+/// take the other with it and the two prune independently. Palm and face keep ten each rather
+/// than ten between them.
 ///
 /// Everything here is best-effort. A reading whose photo cannot be written, or has since been
-/// deleted, is still a perfectly good reading; the screens fall back to the palm artwork. So no
-/// method throws, and a failure costs the image and nothing else.
-class PalmImageStore {
-  PalmImageStore();
+/// deleted, is still a perfectly good reading; the screens fall back to artwork. So no method
+/// throws, and a failure costs the image and nothing else.
+class ReadingImageStore {
+  ReadingImageStore(this.folder);
 
-  static const _folder = 'palm';
+  /// The subdirectory under the documents directory — `palm` or `face`. Also the log prefix,
+  /// so a line in the console says which feature it came from.
+  final String folder;
 
   /// Written before the reading is requested, when there is no id yet to name the file after.
   static const _pendingName = 'pending.jpg';
@@ -30,11 +36,11 @@ class PalmImageStore {
     if (_dir != null) return _dir;
     try {
       final documents = await getApplicationDocumentsDirectory();
-      final dir = Directory('${documents.path}/$_folder');
+      final dir = Directory('${documents.path}/$folder');
       if (!await dir.exists()) await dir.create(recursive: true);
       return _dir = dir;
     } catch (error) {
-      debugPrint('[palm] could not open the image directory: $error');
+      debugPrint('[$folder] could not open the image directory: $error');
       return null;
     }
   }
@@ -60,7 +66,7 @@ class PalmImageStore {
     try {
       await File('${dir.path}/$_pendingName').writeAsBytes(bytes, flush: true);
     } catch (error) {
-      debugPrint('[palm] could not save the capture: $error');
+      debugPrint('[$folder] could not save the capture: $error');
     }
   }
 
@@ -79,7 +85,7 @@ class PalmImageStore {
       await _prune();
       return name;
     } catch (error) {
-      debugPrint('[palm] could not commit the capture: $error');
+      debugPrint('[$folder] could not commit the capture: $error');
       return null;
     }
   }
@@ -92,12 +98,12 @@ class PalmImageStore {
       final pending = File('${dir.path}/$_pendingName');
       if (await pending.exists()) await pending.delete();
     } catch (error) {
-      debugPrint('[palm] could not discard the capture: $error');
+      debugPrint('[$folder] could not discard the capture: $error');
     }
   }
 
   /// Everything, on sign-out. The next person to use this device must not find the last one's
-  /// hand in it.
+  /// hand — or face — in it.
   Future<void> clear() async {
     final dir = await _directory();
     if (dir == null) return;
@@ -105,7 +111,7 @@ class PalmImageStore {
       if (await dir.exists()) await dir.delete(recursive: true);
       _dir = null;
     } catch (error) {
-      debugPrint('[palm] could not clear the images: $error');
+      debugPrint('[$folder] could not clear the images: $error');
     }
   }
 
@@ -128,7 +134,7 @@ class PalmImageStore {
         await stale.delete();
       }
     } catch (error) {
-      debugPrint('[palm] could not prune old images: $error');
+      debugPrint('[$folder] could not prune old images: $error');
     }
   }
 }

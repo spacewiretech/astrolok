@@ -1,4 +1,4 @@
-import 'package:astrolok/data/local/palm_reading_store.dart';
+import 'package:astrolok/data/local/reading_store.dart';
 import 'package:astrolok/data/models/palm_reading.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -200,7 +200,7 @@ void main() {
     test('saves and reads back on an empty cache', () async {
       // The first save on a fresh install: `all()` returns an unmodifiable empty list, and an
       // earlier version mutated it in place, so this path threw for every new user.
-      final store = PalmReadingStore();
+      final store = const PalmReadingStore();
       final reading = PalmReading.fromServer(payload())!;
 
       await store.save(reading);
@@ -210,7 +210,7 @@ void main() {
     });
 
     test('replaces a reading rather than duplicating it', () async {
-      final store = PalmReadingStore();
+      final store = const PalmReadingStore();
       final reading = PalmReading.fromServer(payload())!;
 
       await store.save(reading);
@@ -222,7 +222,7 @@ void main() {
     });
 
     test('keeps only the ten newest', () async {
-      final store = PalmReadingStore();
+      final store = const PalmReadingStore();
       for (var i = 0; i < 14; i++) {
         await store.save(
           PalmReading.fromServer(payload()..['id'] = 'reading-$i')!,
@@ -240,7 +240,7 @@ void main() {
         'astrolok.palm_readings': '{"v":0,"readings":[{"id":"old"}]}',
       });
 
-      expect(await PalmReadingStore().all(), isEmpty);
+      expect(await const PalmReadingStore().all(), isEmpty);
     });
 
     test('a corrupt cache reads as empty rather than throwing', () async {
@@ -248,7 +248,7 @@ void main() {
         'astrolok.palm_readings': 'not json at all',
       });
 
-      expect(await PalmReadingStore().all(), isEmpty);
+      expect(await const PalmReadingStore().all(), isEmpty);
     });
   });
 }

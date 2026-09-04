@@ -1,15 +1,15 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../data/entitlement.dart';
+import '../../data/pdf/reading_pdf.dart';
+import '../../data/pdf/reading_pdf_requests.dart';
 import '../../data/providers.dart';
 import 'palm_copy.dart';
-import 'palm_pdf.dart';
 import 'palm_reading_state.dart';
 
 /// Backs both the results screen and the per-line detail screen.
@@ -26,7 +26,7 @@ class PalmReadingViewModel
 
     // Resolved here, not inside onDispose: reading a provider from a container that is already
     // tearing down throws, and the dispose callback runs after this one is gone.
-    final speech = ref.read(palmSpeechProvider);
+    final speech = ref.read(readingSpeechProvider);
     ref.onDispose(() {
       _disposed = true;
       // A reading that keeps talking after the user has left the screen is a one-star review.
@@ -58,14 +58,14 @@ class PalmReadingViewModel
 
     // Asked after the reading is on screen, so a slow engine check never delays it. The button
     // appears once the answer is yes, and simply never appears when it is no.
-    final canSpeak = await ref.read(palmSpeechProvider).prepare();
+    final canSpeak = await ref.read(readingSpeechProvider).prepare();
     if (_disposed) return;
     state = state.copyWith(canSpeak: canSpeak);
   }
 
   /// Starts or stops narration of [text].
   Future<void> toggleSpeech(String text) async {
-    final speech = ref.read(palmSpeechProvider);
+    final speech = ref.read(readingSpeechProvider);
 
     if (state.speaking) {
       await speech.stop();
@@ -85,7 +85,7 @@ class PalmReadingViewModel
   /// Stops narration without toggling it on. For leaving the screen.
   Future<void> stopSpeech() async {
     if (!state.speaking) return;
-    await ref.read(palmSpeechProvider).stop();
+    await ref.read(readingSpeechProvider).stop();
     if (_disposed) return;
     state = state.copyWith(speaking: false);
   }
@@ -101,27 +101,30 @@ class PalmReadingViewModel
     state = state.copyWith(exporting: true, clearError: true);
 
     try {
-      // rootBundle is not available on a background isolate, so the fonts are read here and
+      // rootBundle is not available on a background isolate, so the assets are read here and
       // the composition itself is what moves off the UI thread.
-      final regular = await rootBundle.load('assets/fonts/Poppins-Regular.ttf');
-      final bold = await rootBundle.load('assets/fonts/Poppins-SemiBold.ttf');
+      final assets = await ReadingPdfAssets.load();
+      if (_disposed) return;
 
-      final bytes = await buildPalmPdf(
-        PalmPdfRequest(
-          reading: reading,
-          regular: regular.buffer.asUint8List(),
-          bold: bold.buffer.asUint8List(),
-          handImage: state.image,
-          name: ref.read(entitlementProvider)?.name,
-        ),
+      final request = reading.toPdfRequest(
+        regular: assets.regular,
+        bold: assets.bold,
+        image: state.image,
+        mark: assets.mark,
+        name: ref.read(entitlementProvider)?.name,
       );
+
+      // Genuinely off the UI isolate. `ReadingPdfRequest` holds only primitives and byte
+      // buffers precisely so this line is possible; the old code called the builder directly
+      // and hitched the frame for as long as eight paragraphs and a JPEG took to lay out.
+      final bytes = await compute(buildReadingPdf, request);
       if (_disposed) return;
 
       // Written to a real file rather than shared as raw bytes: the share sheet uses the
-      // filename as the suggested name, and "astrolok-palm-reading.pdf" is what should land in
-      // someone's Files app or WhatsApp.
+      // filename as the suggested name, and that is what lands in someone's Files app or
+      // WhatsApp. Named per reading, so two exports in a row cannot overwrite each other.
       final dir = await getTemporaryDirectory();
-      final path = '${dir.path}/astrolok-palm-reading.pdf';
+      final path = '${dir.path}/${request.fileName(reading.id)}';
       await File(path).writeAsBytes(bytes, flush: true);
       if (_disposed) return;
 

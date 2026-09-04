@@ -19,13 +19,13 @@ enum CameraFailure {
   unavailable,
 }
 
-/// The live camera behind the capture screen.
+/// The live camera behind a capture screen.
 ///
-/// An interface, not the plugin used directly, for two reasons: the capture screen is
-/// otherwise untestable — there is no camera in a widget test — and the same screen has to
-/// render sensibly on a simulator, where [DeviceCamera] always fails and [FakePalmCamera]
+/// An interface, not the plugin used directly, for two reasons: the capture screens are
+/// otherwise untestable — there is no camera in a widget test — and the same screens have to
+/// render sensibly on a simulator, where [DeviceCamera] always fails and [FakeReadingCamera]
 /// stands in during development.
-abstract interface class PalmCamera {
+abstract interface class ReadingCamera {
   /// Null once ready; a reason when the preview cannot be shown.
   CameraFailure? get failure;
 
@@ -45,8 +45,13 @@ abstract interface class PalmCamera {
   Future<void> dispose();
 }
 
-class DeviceCamera implements PalmCamera {
-  DeviceCamera();
+class DeviceCamera implements ReadingCamera {
+  /// [lens] is the whole difference between the two capture screens: a palm is photographed with
+  /// the back camera, a face with the front one. Defaulting to the back camera keeps the palm
+  /// flow's construction unchanged.
+  DeviceCamera({this.lens = CameraLensDirection.back});
+
+  final CameraLensDirection lens;
 
   CameraController? _controller;
   CameraFailure? _failure;
@@ -81,32 +86,35 @@ class DeviceCamera implements PalmCamera {
         return;
       }
 
-      final back = cameras.firstWhere(
-        (camera) => camera.lensDirection == CameraLensDirection.back,
+      // Falls back to whatever the device has rather than failing: a tablet with only a front
+      // camera should still be able to read a palm, and the alternative is an "unavailable"
+      // card on hardware that plainly has a camera in it.
+      final selected = cameras.firstWhere(
+        (camera) => camera.lensDirection == lens,
         orElse: () => cameras.first,
       );
 
       final controller = CameraController(
-        back,
+        selected,
         // `high` is 720p-ish on most devices, which is already well above the 1024px the
         // model is sent. `max` would spend a second on a 12MP capture and then throw most of
         // it away in the downscale.
         ResolutionPreset.high,
         // No audio: the app never records any, and asking for it would add a microphone
-        // permission to a palm reader.
+        // permission to an app that only ever takes still photographs.
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.jpeg,
       );
 
       await controller.initialize().timeout(_startupTimeout);
-      // Locked so the preview does not swim while someone lines up their hand.
+      // Locked so the preview does not swim while someone lines up the shot.
       await controller.setFlashMode(FlashMode.off);
 
       _controller = controller;
       _failure = null;
     } on TimeoutException {
       _failure = CameraFailure.unavailable;
-      debugPrint('[palm] camera did not start within $_startupTimeout');
+      debugPrint('[reading] camera did not start within $_startupTimeout');
     } on CameraException catch (error) {
       _failure = switch (error.code) {
         'CameraAccessDeniedWithoutPrompt' ||
@@ -115,10 +123,10 @@ class DeviceCamera implements PalmCamera {
         'CameraAccessDenied' => CameraFailure.denied,
         _ => CameraFailure.unavailable,
       };
-      debugPrint('[palm] camera unavailable: ${error.code} ${error.description}');
+      debugPrint('[reading] camera unavailable: ${error.code} ${error.description}');
     } catch (error) {
       _failure = CameraFailure.unavailable;
-      debugPrint('[palm] camera failed to start: $error');
+      debugPrint('[reading] camera failed to start: $error');
     }
   }
 
@@ -141,7 +149,7 @@ class DeviceCamera implements PalmCamera {
       final bytes = await shot.readAsBytes();
 
       // takePicture leaves the frame in a temporary file that nothing else reads. The bytes
-      // are in memory now and PalmImageStore writes the copy that matters, so this one is
+      // are in memory now and ReadingImageStore writes the copy that matters, so this one is
       // tidied away rather than left in the cache directory. A failure here is not worth
       // failing a capture over.
       try {
@@ -150,7 +158,7 @@ class DeviceCamera implements PalmCamera {
 
       return bytes;
     } catch (error) {
-      debugPrint('[palm] capture failed: $error');
+      debugPrint('[reading] capture failed: $error');
       return null;
     }
   }
@@ -164,7 +172,7 @@ class DeviceCamera implements PalmCamera {
 }
 
 /// Opens the system gallery. Also the only way to get a photo on a simulator.
-Future<Uint8List?> pickPalmFromGallery() async {
+Future<Uint8List?> pickPhotoFromGallery() async {
   try {
     final picked = await ImagePicker().pickImage(
       source: ImageSource.gallery,
@@ -176,7 +184,7 @@ Future<Uint8List?> pickPalmFromGallery() async {
     );
     return await picked?.readAsBytes();
   } catch (error) {
-    debugPrint('[palm] gallery pick failed: $error');
+    debugPrint('[reading] gallery pick failed: $error');
     return null;
   }
 }
@@ -186,8 +194,8 @@ Future<Uint8List?> pickPalmFromGallery() async {
 /// Reports [CameraFailure.unavailable] by default, which is the honest answer in a widget test
 /// and on a simulator, and exercises the screen's fallback card — the state most likely to be
 /// wrong precisely because it is the one nobody looks at.
-class FakePalmCamera implements PalmCamera {
-  FakePalmCamera({this.failure = CameraFailure.unavailable, this.bytes});
+class FakeReadingCamera implements ReadingCamera {
+  FakeReadingCamera({this.failure = CameraFailure.unavailable, this.bytes});
 
   @override
   CameraFailure? failure;

@@ -41,6 +41,9 @@ export function fail(
     // The photo did not show a readable palm. Distinct from a failure: nothing went wrong, the
     // user simply needs to take another photo, so the app sends them back to the camera.
     | "no_palm"
+    // The same, for a face. A separate code rather than a shared "no_subject": the two flows
+    // show different guidance, and a shared code would have the face screen guessing which.
+    | "no_face"
     // The reading model is unreachable, overloaded, or answered with something unusable.
     // Retryable, and nothing is wrong with the user's photo.
     | "ai_unavailable",

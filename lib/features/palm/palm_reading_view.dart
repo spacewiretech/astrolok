@@ -15,8 +15,8 @@ import '../../widgets/brand_logo.dart';
 import '../../widgets/circle_icon_button.dart';
 import '../../widgets/primary_button.dart';
 import '../../widgets/safe_asset.dart';
+import '../../widgets/speak_button.dart';
 import '../../widgets/status_chip.dart';
-import '../../widgets/step_indicator.dart';
 import 'palm_copy.dart';
 import 'palm_reading_state.dart';
 import 'palm_reading_viewmodel.dart';
@@ -126,11 +126,21 @@ class _Reading extends StatelessWidget {
                 style: AppText.body,
               ),
 
+              if (reading.invocation.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  reading.invocation,
+                  style: AppText.body.copyWith(color: AppColors.goldDeep, height: 1.5),
+                ),
+              ],
+
               if (state.canSpeak) ...[
                 const SizedBox(height: 16),
-                _SpeakButton(
+                SpeakButton(
                   speaking: state.speaking,
                   onTap: () => model.toggleSpeech(reading.spoken),
+                  listenLabel: PalmCopy.listen,
+                  stopLabel: PalmCopy.stopListening,
                 ),
               ],
 
@@ -168,6 +178,11 @@ class _Reading extends StatelessWidget {
                     context.push(Routes.palmLineFor(readingId, line.kind));
                   },
                 ),
+
+              if (reading.blessing.isNotEmpty) ...[
+                const SizedBox(height: 22),
+                _BlessingCard(text: reading.blessing),
+              ],
 
               const SizedBox(height: 24),
               Text(PalmCopy.moreHeading, style: AppText.section),
@@ -358,6 +373,41 @@ class _LineRow extends StatelessWidget {
   }
 }
 
+/// The closing ashirvad.
+class _BlessingCard extends StatelessWidget {
+  const _BlessingCard({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.cardSoft,
+        borderRadius: AppShape.card,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const BrandMark(size: 24),
+              const SizedBox(width: 8),
+              Text(
+                PalmCopy.blessingHeading,
+                style: AppText.title.copyWith(fontSize: 14, color: AppColors.goldDeep),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(text, style: AppText.body.copyWith(height: 1.5)),
+        ],
+      ),
+    );
+  }
+}
+
 class _AskAstroRow extends StatelessWidget {
   const _AskAstroRow({required this.onTap});
 
@@ -395,27 +445,6 @@ class _AskAstroRow extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-/// The listen control. Only ever built when the device has a speech engine.
-class _SpeakButton extends StatelessWidget {
-  const _SpeakButton({required this.speaking, required this.onTap});
-
-  final bool speaking;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: GoldPillButton(
-        label: speaking ? PalmCopy.stopListening : PalmCopy.listen,
-        icon: speaking ? Icons.stop_rounded : Icons.volume_up_rounded,
-        compact: true,
-        onPressed: onTap,
       ),
     );
   }

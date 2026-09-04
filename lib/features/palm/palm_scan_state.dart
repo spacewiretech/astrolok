@@ -20,6 +20,9 @@ enum PalmScanOutcome {
   /// Not a palm. Back to the camera with the reason.
   rejected,
 
+  /// The day's allowance is gone. Back to the camera, with the buttons closed.
+  limitReached,
+
   /// The subscription lapsed while waiting.
   notEntitled,
 
@@ -112,6 +115,14 @@ class PalmScanState {
     if (complete) return 3;
     return (elapsed.inSeconds ~/ 6).clamp(0, 3);
   }
+
+  /// True only when the failure arrived after a wait long enough to call slow.
+  ///
+  /// The retry card used to be titled "That's taking longer than usual" whatever went wrong,
+  /// so an outage that answered in 300ms told the user their photo was taking a long time.
+  /// The client gives the model 75 seconds, so anything that fails inside 20 is a hard
+  /// failure and should say so.
+  bool get failedSlowly => elapsed >= const Duration(seconds: 20);
 
   /// The line under the heading.
   ///

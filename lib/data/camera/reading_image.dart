@@ -4,19 +4,22 @@ import 'package:image/image.dart' as img;
 
 /// Turns a camera capture into something worth sending to the model.
 ///
+/// Shared by the palm and face flows: both send a square photograph to the same model through
+/// the same pipeline, and the only difference between them is which lens took it.
+///
 /// Three things happen here, and each one earns its place:
 ///
 ///  * **Downscale to 1024².** Gemini tiles images at 768², so below roughly 1536 the token
 ///    cost is a flat minimum — 1024 is effectively free next to 768 and keeps fine palm
-///    creases resolvable, which is the entire read. Larger buys detail the model does not use
-///    and a slower upload on an Indian mobile connection.
+///    creases and the set of an eye resolvable, which is the entire read. Larger buys detail
+///    the model does not use and a slower upload on an Indian mobile connection.
 ///  * **Crop to the square the user actually framed.** The viewfinder is square; the sensor is
 ///    not. An uncropped capture carries a strip of room the user never saw, which both dilutes
 ///    the read and wastes image tokens.
-///  * **Strip EXIF.** A palm photograph tagged with the user's home coordinates, forwarded to
-///    Google, is not a trade to make silently.
-class PalmImage {
-  const PalmImage({required this.bytes, required this.width, required this.height});
+///  * **Strip EXIF.** A photograph of someone's hand — or their face — tagged with their home
+///    coordinates, forwarded to Google, is not a trade to make silently.
+class ReadingImage {
+  const ReadingImage({required this.bytes, required this.width, required this.height});
 
   final Uint8List bytes;
   final int width;
@@ -30,9 +33,10 @@ const _target = 1024;
 
 /// JPEG quality for the encode that actually goes to the model.
 ///
-/// Not lower. The whole read is the fine creases across the palm, and JPEG spends its bit
-/// budget on exactly the low-contrast, high-frequency detail those creases are made of — at
-/// quality 10 the palm arrives as smooth blocks and the model has nothing to read.
+/// Not lower. The read is fine creases across a palm, or the set of a brow against an eyelid,
+/// and JPEG spends its bit budget on exactly the low-contrast, high-frequency detail those are
+/// made of — at quality 10 the subject arrives as smooth blocks and the model has nothing to
+/// read.
 const _quality = 82;
 
 /// Prepares a capture for the model. Null when the bytes could not be turned into an image.
@@ -46,9 +50,9 @@ const _quality = 82;
 /// The crop takes the centre square, which needs no knowledge of the preview: the capture
 /// screen shows the sensor image `cover`-fitted into a square box, and cover on a square box
 /// scales the shorter edge to fill and crops the longer one — so the centre square *is*
-/// exactly what the user framed. If that box ever stops being square, this has to change with
-/// it.
-Future<PalmImage?> preparePalmImage(Uint8List raw) async {
+/// exactly what the user framed. Both capture screens draw a square viewfinder for precisely
+/// this reason. If either box ever stops being square, this has to change with it.
+Future<ReadingImage?> prepareReadingImage(Uint8List raw) async {
   Uint8List downscaled;
 
   try {
@@ -66,21 +70,21 @@ Future<PalmImage?> preparePalmImage(Uint8List raw) async {
     // A plugin that is missing, or a format it cannot read. The pure-Dart path below can
     // still decode an ordinary JPEG or PNG, so this is a degraded route rather than a dead
     // end — slower, but it produces the same result.
-    debugPrint('[palm] native downscale unavailable, falling back to Dart: $error');
+    debugPrint('[reading] native downscale unavailable, falling back to Dart: $error');
     downscaled = raw;
   }
 
   try {
     return await compute(_cropToSquare, downscaled);
   } catch (error) {
-    debugPrint('[palm] could not prepare the capture: $error');
+    debugPrint('[reading] could not prepare the capture: $error');
     return null;
   }
 }
 
 /// Centre-crops to a square and re-encodes. Pure Dart — no plugins, no channels — so this is
 /// the part that is safe to run on a background isolate.
-PalmImage? _cropToSquare(Uint8List bytes) {
+ReadingImage? _cropToSquare(Uint8List bytes) {
   var decoded = img.decodeImage(bytes);
   if (decoded == null) return null;
 
@@ -106,7 +110,7 @@ PalmImage? _cropToSquare(Uint8List bytes) {
   // No size ceiling here. A 1024² JPEG lands around 150-250KB, an order of magnitude under
   // anything the request could not carry, so a local gate only ever produced false refusals.
   // The server still bounds the body it will accept.
-  return PalmImage(
+  return ReadingImage(
     bytes: Uint8List.fromList(encoded),
     width: decoded.width,
     height: decoded.height,

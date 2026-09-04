@@ -11,8 +11,8 @@ import 'package:flutter_tts/flutter_tts.dart';
 /// Every method is best-effort. A device with no speech engine is not an error worth showing;
 /// the screens hide the control instead, because a button that does nothing reads as a bug
 /// while an absent one reads as a design.
-class PalmSpeech {
-  PalmSpeech([FlutterTts? tts]) : _tts = tts ?? FlutterTts();
+class ReadingSpeech {
+  ReadingSpeech([FlutterTts? tts]) : _tts = tts ?? FlutterTts();
 
   final FlutterTts _tts;
 
@@ -64,7 +64,7 @@ class PalmSpeech {
 
       _available = true;
     } catch (error) {
-      debugPrint('[palm] speech unavailable: $error');
+      debugPrint('[reading] speech unavailable: $error');
       _available = false;
     }
   }
@@ -94,7 +94,7 @@ class PalmSpeech {
         await _tts.speak(chunk);
       }
     } catch (error) {
-      debugPrint('[palm] speech failed: $error');
+      debugPrint('[reading] speech failed: $error');
     }
   }
 
@@ -104,7 +104,7 @@ class PalmSpeech {
     try {
       await _tts.stop();
     } catch (error) {
-      debugPrint('[palm] could not stop speech: $error');
+      debugPrint('[reading] could not stop speech: $error');
     }
   }
 

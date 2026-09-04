@@ -2,8 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../data/camera/palm_camera.dart';
-import '../../data/camera/palm_image.dart';
+import '../../data/camera/reading_camera.dart';
+import '../../data/camera/reading_image.dart';
 import '../../data/models/palm_reading.dart';
 import '../../data/providers.dart';
 import 'palm_copy.dart';
@@ -39,7 +39,7 @@ class PalmCaptureViewModel extends AutoDisposeNotifier<PalmCaptureState> {
   /// next `isReady` asked a fresh one that had never been started. The viewfinder then waited
   /// on a camera nobody had opened, forever. Watching gives the screen a single instance for
   /// as long as it is on screen.
-  late final PalmCamera _camera;
+  late final ReadingCamera _camera;
 
   @override
   PalmCaptureState build() {
@@ -75,12 +75,18 @@ class PalmCaptureViewModel extends AutoDisposeNotifier<PalmCaptureState> {
     state = state.copyWith(focus: focus, clearError: true);
   }
 
+  /// Records that the day's allowance is gone, so the buttons close rather than spending
+  /// another round trip to be refused again.
+  void setLimitReached(String message) {
+    state = state.copyWith(limitReached: message);
+  }
+
   /// Takes a photo, prepares it, and returns what the scan screen needs. Null on failure, with
   /// the reason already in `state.error`.
   Future<PalmScanRequest?> capture() => _prepare(() => _camera.capture());
 
   /// The gallery path. Also the only way to get a photo on a simulator, which has no camera.
-  Future<PalmScanRequest?> pickFromGallery() => _prepare(pickPalmFromGallery);
+  Future<PalmScanRequest?> pickFromGallery() => _prepare(pickPhotoFromGallery);
 
   Future<PalmScanRequest?> _prepare(Future<Uint8List?> Function() source) async {
     if (state.busy) return null;
@@ -96,7 +102,7 @@ class PalmCaptureViewModel extends AutoDisposeNotifier<PalmCaptureState> {
         return null;
       }
 
-      final prepared = await preparePalmImage(raw);
+      final prepared = await prepareReadingImage(raw);
       if (_disposed) return null;
 
       if (prepared == null) {

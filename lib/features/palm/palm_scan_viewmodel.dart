@@ -87,6 +87,12 @@ class PalmScanViewModel extends AutoDisposeNotifier<PalmScanState> {
       // the user goes back to the viewfinder rather than being shown an error state.
       await ref.read(palmImageStoreProvider).discardPending();
       await _settle(startedAt, e.message, PalmScanOutcome.rejected);
+    } on PalmLimitReachedException catch (e) {
+      // Caught by name, before the generic branch below. Falling through to `failed` offered a
+      // "Try again" button that was guaranteed to fail identically — a dead-end retry loop for
+      // the rest of the day.
+      await ref.read(palmImageStoreProvider).discardPending();
+      await _settle(startedAt, e.message, PalmScanOutcome.limitReached);
     } on PalmNotEntitledException catch (e) {
       await _settle(startedAt, e.message, PalmScanOutcome.notEntitled);
     } on PalmSignedOutException catch (e) {
