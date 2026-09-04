@@ -44,6 +44,9 @@ verify_jwt = false
 [functions.palm-reading]
 verify_jwt = false
 
+[functions.face-reading]
+verify_jwt = false
+
 # Payments. subscription-* require a bearer session token and derive the user from it, so no
 # request can name an account other than its own.
 [functions.subscription-start]

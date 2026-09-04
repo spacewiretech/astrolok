@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../app/theme/app_colors.dart';
+import 'reading_status.dart';
+
+export 'reading_status.dart';
 
 /// One reading of a palm, as the Edge Function returns it.
 ///
@@ -92,39 +95,10 @@ enum PalmLineKind {
 }
 
 /// The coloured chip beside a line's title.
-enum PalmLineStatus {
-  strong('Strong'),
-  balanced('Balanced'),
-  deep('Deep'),
-  developing('Developing'),
-  clear('Clear'),
-  faint('Faint');
-
-  const PalmLineStatus(this.label);
-
-  final String label;
-
-  Color get color => switch (this) {
-        PalmLineStatus.strong => AppColors.love,
-        PalmLineStatus.balanced => AppColors.insight,
-        PalmLineStatus.deep => AppColors.money,
-        PalmLineStatus.developing => AppColors.career,
-        PalmLineStatus.clear => AppColors.gold,
-        PalmLineStatus.faint => AppColors.muted,
-      };
-
-  /// The chip's fill: the same hue, dropped back far enough to read as a wash.
-  Color get wash => color.withValues(alpha: 0.12);
-
-  /// Unlike [PalmLineKind.parse] this defaults rather than returning null. Losing a whole
-  /// line — a paragraph the user waited for — over an unfamiliar chip label would be absurd.
-  static PalmLineStatus parse(Object? raw) {
-    for (final status in PalmLineStatus.values) {
-      if (status.label == raw) return status;
-    }
-    return PalmLineStatus.balanced;
-  }
-}
+///
+/// Lifted into [ReadingStatus] when face reading arrived — the server sends the same six words
+/// for a face feature — and left here as an alias so every existing call site reads unchanged.
+typedef PalmLineStatus = ReadingStatus;
 
 /// What the user asked the reading to concentrate on.
 ///
@@ -274,12 +248,20 @@ class PalmLine {
     required this.status,
     required this.summary,
     required this.detail,
+    this.sanskrit = '',
     this.meaning = const [],
     this.tip = '',
+    this.blessing = '',
   });
 
   final PalmLineKind kind;
   final String title;
+
+  /// The tradition's name for this line, transliterated — "Hridaya Rekha". Shown once beside
+  /// the title and never again in the section, which is what keeps the register light enough to
+  /// read. Empty on a reading written before the pandit voice landed, so every use site checks.
+  final String sanskrit;
+
   final PalmLineStatus status;
 
   /// The one-liner on the results row.
@@ -292,6 +274,10 @@ class PalmLine {
   final List<String> meaning;
 
   final String tip;
+
+  /// The line's closing ashirvad. A wish, never a promise — the prompt is explicit about the
+  /// difference, and the detail screen renders it as the last thing on the page.
+  final String blessing;
 
   /// Null when the entry names a line this build does not know, or carries no reading at all.
   static PalmLine? fromServer(Object? raw) {
@@ -308,30 +294,38 @@ class PalmLine {
     return PalmLine(
       kind: kind,
       title: title.isEmpty ? kind.label : title,
+      sanskrit: _text(raw['sanskrit']),
       status: PalmLineStatus.parse(raw['status']),
       summary: _text(raw['summary']),
       detail: detail,
       meaning: _stringList(raw['meaning']),
       tip: _text(raw['tip']),
+      blessing: _text(raw['blessing']),
     );
   }
 
   Map<String, dynamic> toJson() => {
         'key': kind.wire,
         'title': title,
+        'sanskrit': sanskrit,
         'status': status.label,
         'summary': summary,
         'detail': detail,
         'meaning': meaning,
         'tip': tip,
+        'blessing': blessing,
       };
 
   /// What the speak button reads out on the detail screen.
+  ///
+  /// The Sanskrit term is deliberately left out. It is a visual flourish beside the title; read
+  /// aloud by a device voice that has never seen the word, it comes out as noise.
   String get spoken => [
         title,
         detail,
         ...meaning,
         if (tip.isNotEmpty) 'A tip. $tip',
+        if (blessing.isNotEmpty) blessing,
       ].join('\n\n');
 }
 
@@ -343,7 +337,9 @@ class PalmReading {
     required this.createdAt,
     required this.focus,
     required this.lines,
+    this.invocation = '',
     this.headline = '',
+    this.blessing = '',
     this.strongestTrait = const PalmTrait(),
     this.hand = const HandTraits(),
     this.imageFileName,
@@ -353,7 +349,16 @@ class PalmReading {
   final DateTime createdAt;
   final PalmFocus focus;
   final List<PalmLine> lines;
+
+  /// The reading's opening line, written after the model has looked at the hand so that it is
+  /// about this hand. Empty on readings cached before the pandit voice landed.
+  final String invocation;
+
   final String headline;
+
+  /// The closing ashirvad. Read aloud last, and printed last in the export.
+  final String blessing;
+
   final PalmTrait strongestTrait;
   final HandTraits hand;
 
@@ -391,7 +396,9 @@ class PalmReading {
       createdAt: DateTime.tryParse(_text(raw['created_at']))?.toLocal() ?? DateTime.now(),
       focus: PalmFocus.parse(raw['focus']),
       lines: lines,
+      invocation: _text(raw['invocation']),
       headline: _text(raw['headline']),
+      blessing: _text(raw['blessing']),
       strongestTrait: PalmTrait.fromServer(raw['strongest_trait']),
       hand: HandTraits.fromServer(raw['hand']),
       imageFileName: _text(raw['image_file_name']).isEmpty
@@ -404,7 +411,9 @@ class PalmReading {
         'id': id,
         'created_at': createdAt.toUtc().toIso8601String(),
         'focus': focus.wire,
+        'invocation': invocation,
         'headline': headline,
+        'blessing': blessing,
         'strongest_trait': strongestTrait.toJson(),
         'hand': hand.toJson(),
         'lines': [for (final line in lines) line.toJson()],
@@ -416,7 +425,9 @@ class PalmReading {
         createdAt: createdAt,
         focus: focus,
         lines: lines,
+        invocation: invocation,
         headline: headline,
+        blessing: blessing,
         strongestTrait: strongestTrait,
         hand: hand,
         imageFileName: imageFileName ?? this.imageFileName,
@@ -430,7 +441,11 @@ class PalmReading {
   }
 
   /// What the speak button reads out on the results screen: the overview, not every paragraph.
+  ///
+  /// Opens on the invocation and closes on the blessing, so the spoken reading is framed the way
+  /// the written one is — it is the version most people will actually take in.
   String get spoken => [
+        if (invocation.isNotEmpty) invocation,
         if (headline.isNotEmpty) headline,
         if (!strongestTrait.isEmpty) ...[
           'Your strongest trait. ${strongestTrait.title}.',
@@ -439,5 +454,6 @@ class PalmReading {
         ],
         'Here is what your palm lines show.',
         for (final line in lines) '${line.title}. ${line.summary}',
+        if (blessing.isNotEmpty) blessing,
       ].where((part) => part.trim().isNotEmpty).join('\n\n');
 }

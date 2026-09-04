@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-import '../../data/camera/palm_camera.dart';
+import '../../data/camera/reading_camera.dart';
 import '../../data/models/palm_reading.dart';
 
 /// What the capture screen is doing.

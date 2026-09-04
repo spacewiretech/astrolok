@@ -20,6 +20,9 @@ enum PalmScanOutcome {
   /// Not a palm. Back to the camera with the reason.
   rejected,
 
+  /// The day's allowance is gone. Back to the camera, with the buttons closed.
+  limitReached,
+
   /// The subscription lapsed while waiting.
   notEntitled,
 

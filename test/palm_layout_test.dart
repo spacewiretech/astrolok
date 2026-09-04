@@ -1,7 +1,7 @@
 import 'package:astrolok/app/theme/app_theme.dart';
-import 'package:astrolok/data/camera/palm_camera.dart';
+import 'package:astrolok/data/camera/reading_camera.dart';
 import 'package:astrolok/data/fake/fake_palm_reading.dart';
-import 'package:astrolok/data/local/palm_reading_store.dart';
+import 'package:astrolok/data/local/reading_store.dart';
 import 'package:astrolok/data/models/palm_reading.dart';
 import 'package:astrolok/data/providers.dart';
 import 'package:astrolok/features/palm/palm_capture_view.dart';
@@ -35,7 +35,7 @@ void main() {
   /// Seeds the cache the reading screens read from, since they are routed to by id.
   Future<PalmReading> seedReading() async {
     final reading = fakePalmReading(PalmFocus.love);
-    await PalmReadingStore().save(reading);
+    await const PalmReadingStore().save(reading);
     return reading;
   }
 
@@ -49,7 +49,7 @@ void main() {
         overrides: [
           // No camera in a widget test. The unavailable path is also what every simulator
           // shows, so this is the state most worth proving lays out.
-          palmCameraProvider.overrideWithValue(FakePalmCamera()),
+          palmCameraProvider.overrideWithValue(FakeReadingCamera()),
         ],
         child: MaterialApp(theme: buildAppTheme(), home: child),
       ),

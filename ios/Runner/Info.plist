@@ -30,9 +30,9 @@
 	     app on first access if the matching key is absent, so these are load-bearing, not
 	     documentation. -->
 	<key>NSCameraUsageDescription</key>
-	<string>Astrolok uses your camera to photograph your palm and read it.</string>
+	<string>Astrolok uses your camera to photograph your palm or your face, so it can read them.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Astrolok needs your photo library so you can choose a photo of your palm.</string>
+	<string>Astrolok needs your photo library so you can choose a photo of your palm or your face.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

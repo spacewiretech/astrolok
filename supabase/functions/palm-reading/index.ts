@@ -7,15 +7,16 @@ import {
   isEntitled,
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
+import { GeminiError, geminiSettings, readImage } from "../_shared/gemini.ts";
 import {
+  buildUserPrompt,
   FOCUS_KEYS,
   FocusKey,
   focusMismatch,
-  GeminiError,
-  geminiSettings,
   normalisePalmReading,
-  readPalm,
-} from "../_shared/gemini.ts";
+  PALM_SCHEMA,
+  SYSTEM_PROMPT,
+} from "../_shared/palm_reading.ts";
 
 /**
  * Reads a photograph of a palm and returns a written reading.
@@ -171,12 +172,16 @@ Deno.serve(async (req) => {
 
   try {
     const settings = geminiSettings(config);
-    const result = await readPalm(settings, {
+    const result = await readImage(settings, {
       imageBase64,
       mimeType,
-      focus,
-      name: firstName(user.name),
-      age: ageFrom(user.dob),
+      systemPrompt: SYSTEM_PROMPT,
+      schema: PALM_SCHEMA,
+      userPrompt: buildUserPrompt({
+        focus,
+        name: firstName(user.name),
+        age: ageFrom(user.dob),
+      }),
     });
 
     if (focusMismatch(result.parsed, focus)) {
@@ -215,12 +220,14 @@ Deno.serve(async (req) => {
       .update({
         status: "ready",
         reject_reason: null,
+        invocation: reading.invocation,
         headline: reading.headline,
         strongest_trait_title: reading.strongestTrait.title,
         strongest_trait_summary: reading.strongestTrait.summary,
         strongest_trait_detail: reading.strongestTrait.detail,
         hand: reading.hand,
         lines: reading.lines,
+        blessing: reading.blessing,
         model: result.model,
         latency_ms: result.latencyMs,
       })
@@ -237,10 +244,12 @@ Deno.serve(async (req) => {
         id: readingId,
         created_at: new Date().toISOString(),
         focus: reading.focus,
+        invocation: reading.invocation,
         headline: reading.headline,
         strongest_trait: reading.strongestTrait,
         hand: reading.hand,
         lines: reading.lines,
+        blessing: reading.blessing,
       },
     });
   } catch (error) {

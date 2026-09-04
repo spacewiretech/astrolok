@@ -22,6 +22,10 @@ class StepIndicator extends StatelessWidget {
 
   static const _disc = 36.0;
 
+  /// The narrowest a connector is allowed to get before the labels start giving way instead.
+  /// Below this the strip stops reading as a progression and starts looking broken.
+  static const _minConnector = 12.0;
+
   @override
   Widget build(BuildContext context) {
     return Semantics(
@@ -29,36 +33,59 @@ class StepIndicator extends StatelessWidget {
       label: 'Step ${(current + 1).clamp(1, labels.length)} of ${labels.length}, '
           '${labels[current.clamp(0, labels.length - 1)]}',
       excludeSemantics: true,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (var i = 0; i < labels.length; i++) ...[
-            if (i > 0)
-              Expanded(
-                child: Padding(
-                  // Sits on the discs' centre line, not the column's, so it does not drift
-                  // down when a label wraps to two lines.
-                  padding: const EdgeInsets.only(top: _disc / 2),
-                  child: Container(
-                    height: 1,
-                    color: i <= current ? AppColors.gold : AppColors.fieldBorder,
+      // The labels have to be bounded, or a long one pushes the whole Row past the screen —
+      // an unconstrained Text in a Row grows to its intrinsic width and the connectors, being
+      // Expanded, cannot give back more than they have. That overflowed at 360pt the first
+      // time a step was called something longer than "Scan".
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final connectors = (labels.length - 1) * _minConnector;
+          final perLabel =
+              ((constraints.maxWidth - connectors) / labels.length).clamp(_disc, 400.0);
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var i = 0; i < labels.length; i++) ...[
+                if (i > 0)
+                  Expanded(
+                    child: Padding(
+                      // Sits on the discs' centre line, not the column's, so it does not drift
+                      // down when a label wraps to two lines.
+                      padding: const EdgeInsets.only(top: _disc / 2),
+                      child: Container(
+                        height: 1,
+                        color: i <= current ? AppColors.gold : AppColors.fieldBorder,
+                      ),
+                    ),
                   ),
+                _Step(
+                  index: i,
+                  label: labels[i],
+                  reached: i <= current,
+                  maxLabelWidth: perLabel,
                 ),
-              ),
-            _Step(index: i, label: labels[i], reached: i <= current),
-          ],
-        ],
+              ],
+            ],
+          );
+        },
       ),
     );
   }
 }
 
 class _Step extends StatelessWidget {
-  const _Step({required this.index, required this.label, required this.reached});
+  const _Step({
+    required this.index,
+    required this.label,
+    required this.reached,
+    required this.maxLabelWidth,
+  });
 
   final int index;
   final String label;
   final bool reached;
+  final double maxLabelWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -86,12 +113,18 @@ class _Step extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 6),
-        Text(
-          label,
-          style: AppText.meta.copyWith(
-            fontSize: 13,
-            color: reached ? AppColors.gold : AppColors.muted,
-            fontWeight: reached ? FontWeight.w600 : FontWeight.w400,
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxLabelWidth),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: AppText.meta.copyWith(
+              fontSize: 13,
+              color: reached ? AppColors.gold : AppColors.muted,
+              fontWeight: reached ? FontWeight.w600 : FontWeight.w400,
+            ),
           ),
         ),
       ],

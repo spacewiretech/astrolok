@@ -59,13 +59,13 @@ abstract final class PalmCopy {
   /// Advanced by elapsed time and then held on the last one — see `PalmScanState.statusLine`.
   /// Wrapping back to the first would read as the scan having restarted.
   static const statusLines = [
-    'Looking at your palm…',
+    'Settling in with your hand…',
     'Mapping the major lines…',
     'Following your life line…',
     'Reading your heart line…',
     'Weighing the mounts and the skin…',
     'Reading your head line…',
-    'Pulling the threads together…',
+    'Drawing the threads together…',
     'Almost there…',
   ];
 
@@ -76,6 +76,7 @@ abstract final class PalmCopy {
     'Your palm lines can change over time as you grow and experience life.',
     'No two palms are alike — even identical twins have different lines.',
     'Palmistry is thousands of years old and reached Europe from India.',
+    'Samudrika Shastra, the science of reading the body, reads the hand and the face alike.',
     'The hand you write with is read for who you have become; the other, for what you were born with.',
     'The mounts — the pads below each finger — matter as much as the lines.',
     'Fine, densely drawn lines often belong to people who think in detail.',
@@ -95,7 +96,7 @@ abstract final class PalmCopy {
 
   static const readingTitleLead = 'Your Palm has a';
   static const readingTitleAccent = 'Story';
-  static const readingSubtitle = "Here's what your palm reveals";
+  static const readingSubtitle = "Here's what your palm reveals about you.";
   static const strongestTrait = 'Your Strongest Trait';
   static const linesHeading = 'Your Palm lines';
   static const handHeading = 'What your hand shows';
@@ -106,6 +107,10 @@ abstract final class PalmCopy {
 
   static const meansForYou = 'What it means for you';
   static const tip = 'Tip';
+
+  /// The label above the closing ashirvad, on the results screen, the line screen and in the
+  /// export. Kept identical to the face flow's — a user who reads both should hear one voice.
+  static const blessingHeading = 'A blessing for you';
 
   static const listen = 'Listen';
   static const stopListening = 'Stop';

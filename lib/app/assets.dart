@@ -81,6 +81,23 @@ abstract final class PalmIcon {
   static const backCircle = '$_base/back_circle.png';
 }
 
+/// The face reading flow's glyphs.
+///
+/// Only the four features the design ships artwork for. Forehead and eyebrows deliberately have
+/// no entry: [FacePartKind.asset] returns null for them and the row draws its Material icon
+/// instead, which is honest about what exists rather than pointing at a file that does not.
+abstract final class FaceIcon {
+  static const _base = 'assets/icons';
+
+  /// The four flat glyphs on the "Your Face Reveals" rows. Each is already in its own accent —
+  /// purple, gold, green, red — matching [FacePartKind.accent], so the tile tint behind them
+  /// and the glyph itself never disagree.
+  static const eyes = '$_base/face_eyes.png';
+  static const faceShape = '$_base/face_shape.png';
+  static const nose = '$_base/face_nose.png';
+  static const lips = '$_base/face_lips.png';
+}
+
 /// Vector assets. Still to be exported — every reference falls back to a Material icon, which
 /// is why the paywall and Home read correctly without them.
 abstract final class Svg {

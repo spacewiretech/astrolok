@@ -43,6 +43,7 @@ PalmReading fakePalmReading(PalmFocus focus) {
     id: 'demo-reading',
     createdAt: DateTime.now(),
     focus: focus,
+    invocation: 'Come, give me your hand. Let us see what it has been keeping for you.',
     headline: 'A grounded, loyal hand guided by patience and quiet strength',
     strongestTrait: const PalmTrait(
       title: 'Independent & Intuitive',
@@ -68,6 +69,7 @@ PalmReading fakePalmReading(PalmFocus focus) {
     lines: [
       const PalmLine(
         kind: PalmLineKind.heart,
+        sanskrit: 'Hridaya Rekha',
         title: 'Heart Line',
         status: PalmLineStatus.strong,
         summary: 'You tend to value deep emotional connections.',
@@ -85,6 +87,7 @@ PalmReading fakePalmReading(PalmFocus focus) {
       ),
       const PalmLine(
         kind: PalmLineKind.life,
+        sanskrit: 'Jeevan Rekha',
         title: 'Life Line',
         status: PalmLineStatus.deep,
         summary: 'Steady stamina and a reassuring, grounded presence.',
@@ -102,6 +105,7 @@ PalmReading fakePalmReading(PalmFocus focus) {
       ),
       const PalmLine(
         kind: PalmLineKind.head,
+        sanskrit: 'Mastak Rekha',
         title: 'Head Line',
         status: PalmLineStatus.balanced,
         summary: 'Practical thinking, applied calmly under pressure.',
@@ -119,6 +123,7 @@ PalmReading fakePalmReading(PalmFocus focus) {
       ),
       const PalmLine(
         kind: PalmLineKind.fate,
+        sanskrit: 'Bhagya Rekha',
         title: 'Fate Line',
         status: PalmLineStatus.developing,
         summary: 'A path you are still shaping, and shaping deliberately.',
@@ -136,6 +141,7 @@ PalmReading fakePalmReading(PalmFocus focus) {
       ),
       const PalmLine(
         kind: PalmLineKind.sun,
+        sanskrit: 'Surya Rekha',
         title: 'Sun Line',
         status: PalmLineStatus.clear,
         summary: 'Quiet contentment that others notice before you do.',
@@ -153,6 +159,7 @@ PalmReading fakePalmReading(PalmFocus focus) {
       ),
       const PalmLine(
         kind: PalmLineKind.mercury,
+        sanskrit: 'Budh Rekha',
         title: 'Mercury Line',
         status: PalmLineStatus.faint,
         summary: 'Direct, unadorned communication.',
@@ -169,6 +176,7 @@ PalmReading fakePalmReading(PalmFocus focus) {
       ),
       const PalmLine(
         kind: PalmLineKind.marriage,
+        sanskrit: 'Vivah Rekha',
         title: 'Relationship Line',
         status: PalmLineStatus.strong,
         summary: 'Depth and permanence over breadth.',
@@ -186,6 +194,7 @@ PalmReading fakePalmReading(PalmFocus focus) {
       ),
       const PalmLine(
         kind: PalmLineKind.mars,
+        sanskrit: 'Mangal Rekha',
         title: 'Mars Line',
         status: PalmLineStatus.developing,
         summary: 'Resilience that shows up for other people first.',
@@ -200,7 +209,11 @@ PalmReading fakePalmReading(PalmFocus focus) {
           'Your endurance is quiet and easy to underestimate.',
         ],
         tip: 'Leaning on someone else is its own kind of trust. Try it occasionally.',
+        blessing: 'May your quiet strength never have to be proved to anyone.',
       ),
     ],
+    blessing:
+        'May your patience keep finding you good company, and may the steadiness you give '
+        'others come back to you twice over. Shubh ho.',
   );
 }

@@ -87,6 +87,13 @@ class _PalmScanViewState extends ConsumerState<PalmScanView>
         ref.read(palmRejectionProvider.notifier).state = state.error;
         context.pop();
 
+      case PalmScanOutcome.limitReached:
+        // Back to the capture screen too, but as a standing notice rather than a snackbar:
+        // nothing the user does today will change the answer, so it has to stay on screen and
+        // close the buttons rather than fade away and let them try again.
+        ref.read(palmLimitProvider.notifier).state = state.error;
+        context.pop();
+
       case PalmScanOutcome.notEntitled:
         context.go(Routes.subscribe);
 

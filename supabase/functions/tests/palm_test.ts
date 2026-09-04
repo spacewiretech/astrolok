@@ -1,12 +1,12 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 
+import { geminiSettings } from "../_shared/gemini.ts";
 import {
   buildUserPrompt,
   focusMismatch,
-  geminiSettings,
   LINE_KEYS,
   normalisePalmReading,
-} from "../_shared/gemini.ts";
+} from "../_shared/palm_reading.ts";
 
 /**
  * `normalisePalmReading` is the whole correctness surface of the palm feature: everything a

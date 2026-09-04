@@ -108,19 +108,25 @@ class Wordmark extends StatelessWidget {
   }
 }
 
-/// A heading whose last word is picked out in gold — "Read Your **Palm**", "Show us your
-/// **Face**". The design uses this shape on every titled screen.
+/// A heading with one word picked out in gold — "Read Your **Palm**", "Show us your
+/// **Face**", "Your **Face** Readings". The design uses this shape on every titled screen.
 class AccentHeading extends StatelessWidget {
   const AccentHeading({
     super.key,
     required this.lead,
     required this.accent,
+    this.tail = '',
     this.style,
     this.textAlign = TextAlign.center,
   });
 
   final String lead;
   final String accent;
+
+  /// What follows the gold word, when the accent is not the last one — "Your **Face**
+  /// Readings". Empty for the more common case where the heading ends on the accent.
+  final String tail;
+
   final TextStyle? style;
   final TextAlign textAlign;
 
@@ -133,10 +139,11 @@ class AccentHeading extends StatelessWidget {
         children: [
           TextSpan(text: '$lead ', style: base),
           TextSpan(text: accent, style: base.copyWith(color: AppColors.gold)),
+          if (tail.isNotEmpty) TextSpan(text: tail, style: base),
         ],
       ),
       textAlign: textAlign,
-      semanticsLabel: '$lead $accent',
+      semanticsLabel: '$lead $accent$tail',
     );
   }
 }
