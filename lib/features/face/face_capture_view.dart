@@ -13,7 +13,6 @@ import '../../widgets/capture_frame.dart';
 import '../../widgets/circle_icon_button.dart';
 import '../../widgets/guide_card.dart';
 import '../../widgets/primary_button.dart';
-import '../../widgets/step_indicator.dart';
 import 'face_capture_viewmodel.dart';
 import 'face_copy.dart';
 
@@ -104,12 +103,12 @@ class _FaceCaptureViewState extends ConsumerState<FaceCaptureView>
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
+              // const SizedBox(height: 16),
 
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: AppShape.gutter + 12),
-                child: StepIndicator(labels: FaceCopy.steps, current: 0),
-              ),
+              // const Padding(
+              //   padding: EdgeInsets.symmetric(horizontal: AppShape.gutter + 12),
+              //   child: StepIndicator(labels: FaceCopy.steps, current: 0),
+              // ),
 
               Expanded(
                 child: ListView(

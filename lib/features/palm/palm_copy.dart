@@ -88,6 +88,9 @@ abstract final class PalmCopy {
   static const cancelDismiss = 'Keep reading';
 
   static const slowTitle = "That's taking longer than usual.";
+
+  /// Shown instead of [slowTitle] when the reading failed too quickly to blame the wait.
+  static const failedTitle = "We couldn't finish that reading.";
   static const slowBody = 'Your palm is still with our reader. You can wait, or try again.';
   static const tryAgain = 'Try again';
   static const useAnotherPhoto = 'Use another photo';

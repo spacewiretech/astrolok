@@ -122,6 +122,14 @@ class FaceScanState {
   /// The row currently working, or null once everything is done.
   int? get stageInProgress => complete ? null : stagesDone;
 
+  /// True only when the failure arrived after a wait long enough to call slow.
+  ///
+  /// The retry card used to be titled "That's taking longer than usual" whatever went wrong,
+  /// so a function answering 404 in 300ms — an outage, nothing to do with speed — told the
+  /// user their photo was taking a long time, and sent them off shrinking images. The client
+  /// gives the model 75 seconds, so anything that fails inside 20 is a hard failure.
+  bool get failedSlowly => elapsed >= const Duration(seconds: 20);
+
   /// The line under the heading.
   ///
   /// Advances every 3.5s and then **sticks** on the final entry rather than wrapping. Cycling

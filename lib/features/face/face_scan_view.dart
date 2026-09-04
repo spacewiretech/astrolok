@@ -15,7 +15,6 @@ import '../../widgets/capture_frame.dart';
 import '../../widgets/circle_icon_button.dart';
 import '../../widgets/primary_button.dart';
 import '../../widgets/safe_asset.dart';
-import '../../widgets/step_indicator.dart';
 import 'face_capture_view.dart';
 import 'face_capture_viewmodel.dart';
 import 'face_copy.dart';
@@ -176,12 +175,12 @@ class _FaceScanViewState extends ConsumerState<FaceScanView>
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
-
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: AppShape.gutter + 12),
-                  child: StepIndicator(labels: FaceCopy.steps, current: 1),
-                ),
+                // const SizedBox(height: 16),
+                //
+                // const Padding(
+                //   padding: EdgeInsets.symmetric(horizontal: AppShape.gutter + 12),
+                //   child: StepIndicator(labels: FaceCopy.steps, current: 1),
+                // ),
 
                 Expanded(
                   child: ListView(
@@ -213,6 +212,9 @@ class _FaceScanViewState extends ConsumerState<FaceScanView>
 
                       if (failed)
                         _RetryCard(
+                          title: state.failedSlowly
+                              ? FaceCopy.slowTitle
+                              : FaceCopy.failedTitle,
                           message: state.error ?? FaceCopy.slowBody,
                           onRetry: () =>
                               ref.read(faceScanViewModelProvider.notifier).retry(),
@@ -426,11 +428,13 @@ class _StageRow extends StatelessWidget {
 /// fail — so that is the second choice here, never the first.
 class _RetryCard extends StatelessWidget {
   const _RetryCard({
+    required this.title,
     required this.message,
     required this.onRetry,
     required this.onNewPhoto,
   });
 
+  final String title;
   final String message;
   final VoidCallback onRetry;
   final VoidCallback onNewPhoto;
@@ -446,7 +450,7 @@ class _RetryCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          Text(FaceCopy.slowTitle, style: AppText.title, textAlign: TextAlign.center),
+          Text(title, style: AppText.title, textAlign: TextAlign.center),
           const SizedBox(height: 8),
           Text(message, style: AppText.meta, textAlign: TextAlign.center),
           const SizedBox(height: 18),

@@ -87,6 +87,9 @@ abstract final class FaceCopy {
 
   static const slowTitle = "That's taking longer than usual.";
   static const slowBody = 'Your photo is still with our reader. You can wait, or try again.';
+
+  /// Shown instead of [slowTitle] when the reading failed too quickly to blame the wait.
+  static const failedTitle = "We couldn't finish that reading.";
   static const tryAgain = 'Try again';
   static const useAnotherPhoto = 'Use another photo';
 
