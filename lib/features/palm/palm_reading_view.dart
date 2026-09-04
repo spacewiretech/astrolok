@@ -11,6 +11,7 @@ import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
 import '../../data/models/palm_reading.dart';
 import '../../widgets/app_snackbar.dart';
+import '../../widgets/ask_astro_row.dart';
 import '../../widgets/brand_logo.dart';
 import '../../widgets/circle_icon_button.dart';
 import '../../widgets/primary_button.dart';
@@ -187,8 +188,15 @@ class _Reading extends StatelessWidget {
               const SizedBox(height: 24),
               Text(PalmCopy.moreHeading, style: AppText.section),
               const SizedBox(height: 12),
-              _AskAstroRow(
-                onTap: () => showAppSnackBar(context, 'Chat with Astro is coming soon.'),
+              AskAstroRow(
+                title: PalmCopy.askAstroTitle,
+                subtitle: PalmCopy.askAstroSubtitle,
+                onTap: () {
+                  model.stopSpeech();
+                  // Seeded, so the chat opens already discussing this reading rather than on a
+                  // blank screen. The server loads the newest reading for grounding anyway.
+                  context.push(Routes.chat, extra: PalmCopy.askAstroSeed);
+                },
               ),
             ],
           ),
@@ -408,47 +416,6 @@ class _BlessingCard extends StatelessWidget {
   }
 }
 
-class _AskAstroRow extends StatelessWidget {
-  const _AskAstroRow({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: AppColors.surface,
-      borderRadius: AppShape.card,
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Ink(
-          decoration: BoxDecoration(
-            borderRadius: AppShape.card,
-            border: Border.all(color: AppColors.border),
-          ),
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            children: [
-              const BrandMark(size: 44),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(PalmCopy.askAstroTitle, style: AppText.title),
-                    const SizedBox(height: 3),
-                    Text(PalmCopy.askAstroSubtitle, style: AppText.meta),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 class _Missing extends StatelessWidget {
   const _Missing({required this.onBack});

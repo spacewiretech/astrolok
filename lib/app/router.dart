@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 import '../data/models/face_reading.dart';
 import '../data/models/palm_reading.dart';
 import '../features/birth/birth_view.dart';
+import '../features/chat/chat_view.dart';
 import '../features/face/face_capture_view.dart';
 import '../features/face/face_capture_viewmodel.dart';
 import '../features/face/face_part_view.dart';
@@ -18,6 +19,7 @@ import '../features/onboarding/onboarding_state.dart';
 import '../features/onboarding/onboarding_view.dart';
 import '../features/payment_status/payment_outcome.dart';
 import '../features/profile/downloads_view.dart';
+import '../features/profile/memory_view.dart';
 import '../features/profile/profile_view.dart';
 import '../features/payment_status/payment_status_view.dart';
 import '../features/splash/splash_view.dart';
@@ -63,9 +65,14 @@ abstract final class Routes {
   /// `:part` is a [FacePartKind] name. Use [facePartFor].
   static const facePart = '/face/reading/:id/part/:part';
 
+  /// The conversation with Astro. One thread, so no id — an opening question is handed over in
+  /// `extra`, the way the scan screens take their prepared image.
+  static const chat = '/chat';
+
   /// The account. Nested so that popping from Downloads lands on the profile.
   static const profile = '/profile';
   static const downloads = '/profile/downloads';
+  static const memory = '/profile/memory';
 
   static String onboardingAt(OnboardingStep step) => '$onboarding?step=${step.name}';
 
@@ -188,6 +195,15 @@ final appRouter = GoRouter(
       ),
     ),
 
+    // Gated like the readings: a turn costs money, and the server refuses one for a lapsed
+    // account anyway.
+    GoRoute(
+      path: Routes.chat,
+      builder: (context, state) => EntitlementGate(
+        child: ChatView(opener: state.extra as String?),
+      ),
+    ),
+
     // The account. Gated like Home: everything reachable from here is behind the paywall, and
     // a lapsed user belongs on /subscribe rather than on a page telling them their plan ended.
     GoRoute(
@@ -198,6 +214,11 @@ final appRouter = GoRouter(
     GoRoute(
       path: Routes.downloads,
       builder: (context, state) => const EntitlementGate(child: DownloadsView()),
+    ),
+
+    GoRoute(
+      path: Routes.memory,
+      builder: (context, state) => const EntitlementGate(child: MemoryView()),
     ),
 
     GoRoute(

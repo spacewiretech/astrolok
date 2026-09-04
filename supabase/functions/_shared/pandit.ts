@@ -113,11 +113,24 @@ STYLE
   practical, recognisable consequences of it.
 `.trim();
 
-/** The four blocks in the order every system prompt uses them. */
+/**
+ * The four blocks in the order every system prompt uses them.
+ *
+ * [grounding] overrides [GROUNDING], which is written entirely around a photograph — "what you
+ * can genuinely see" makes no sense to a chat that has no image. What must not change is that
+ * *something* fills that slot: the rule that every paragraph cites its evidence is what separates
+ * a reading about this person from a horoscope column, and it is the first thing that would be
+ * quietly dropped by someone adding a feature in a hurry. Hence a required override rather than
+ * an optional one that defaults to nothing.
+ */
 export function panditSystemPrompt(
-  { craft, lengths }: { craft: string; lengths: string },
+  { craft, lengths, grounding = GROUNDING }: {
+    craft: string;
+    lengths: string;
+    grounding?: string;
+  },
 ): string {
-  return [PANDIT_VOICE, "", craft, "", GROUNDING, "", BOUNDARIES, "", lengths, "", STYLE]
+  return [PANDIT_VOICE, "", craft, "", grounding, "", BOUNDARIES, "", lengths, "", STYLE]
     .join("\n");
 }
 

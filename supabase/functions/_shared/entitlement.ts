@@ -35,6 +35,12 @@ export interface UserRow {
   /// travel with every user payload or a user who has given it would be asked again forever.
   dob: string | null;
 
+  /// `HH:MM:SS` local wall clock, read as IST. Not an entitlement input either; it is here
+  /// because the chat computes a chart from it, and asking for it twice would be a poor way to
+  /// treat someone who already answered.
+  birth_time?: string | null;
+  birth_place?: string | null;
+
   creation_time?: string;
   payment_type: PaymentType;
   trial_ends_at: string | null;
@@ -57,8 +63,8 @@ export interface UserRow {
  * every trial user as unentitled — or `dob`, which would loop the birth step forever.
  */
 export const USER_COLUMNS =
-  "user_id, mobile_no, name, dob, creation_time, payment_type, trial_ends_at, " +
-  "current_period_end, active_subscription_id, trial_started_at, " +
+  "user_id, mobile_no, name, dob, birth_time, birth_place, creation_time, payment_type, " +
+  "trial_ends_at, current_period_end, active_subscription_id, trial_started_at, " +
   "subscription_started_at, cancelled_at, billing_state";
 
 /**
@@ -130,6 +136,11 @@ export function entitlementPayload(
     // Routed on by the onboarding gate, so it belongs in every user payload — `me` included,
     // or a cold start would send a complete user back to the birth screen.
     dob: user.dob,
+    // Collected by the chat rather than by onboarding, and returned so Profile can show what
+    // the chart was built from. A user who has told Astro their birth hour should be able to
+    // see that it was heard.
+    birth_time: user.birth_time ?? null,
+    birth_place: user.birth_place ?? null,
     payment_type: user.payment_type,
     trial_ends_at: user.trial_ends_at,
     current_period_end: user.current_period_end,

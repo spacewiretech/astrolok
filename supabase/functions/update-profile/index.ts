@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
     return fail("invalid_request", "Malformed request.", 400);
   }
 
-  const update: Record<string, string> = {};
+  const update: Record<string, string | null> = {};
 
   if ("name" in body) {
     const name = body.name;
@@ -79,6 +79,33 @@ Deno.serve(async (req) => {
       return fail("invalid_request", "Please enter a valid date of birth.", 400);
     }
     update.dob = dob;
+  }
+
+  // The two the chat collects. Both nullable on the row, and both accept an explicit null so a
+  // user who realises they gave the wrong hour can take it back rather than being stuck with a
+  // chart built on it.
+  if ("birth_time" in body) {
+    const value = body.birth_time;
+    if (value === null) {
+      update.birth_time = null;
+    } else if (typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(value)) {
+      update.birth_time = value;
+    } else {
+      return fail("invalid_request", "Please give the time of birth as HH:MM.", 400);
+    }
+  }
+
+  if ("birth_place" in body) {
+    const value = body.birth_place;
+    if (value === null) {
+      update.birth_place = null;
+    } else {
+      const trimmed = typeof value === "string" ? value.trim() : "";
+      if (trimmed.length < 1 || trimmed.length > 120) {
+        return fail("invalid_request", "Please give a place of birth.", 400);
+      }
+      update.birth_place = trimmed;
+    }
   }
 
   if (Object.keys(update).length === 0) {

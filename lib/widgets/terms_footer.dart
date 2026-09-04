@@ -15,8 +15,17 @@ class TermsFooter extends StatefulWidget {
 
   final String lead;
 
-  static const termsUrl = 'https://astrolok.app/terms';
-  static const privacyUrl = 'https://astrolok.app/privacy';
+  /// The site these point at is built from `lib/website/`, and `test/website_test.dart`
+  /// asserts that every path here is a route it actually serves — so a link cannot go dead
+  /// without a test failing.
+  static const siteUrl = 'https://astrolok.app';
+
+  static const termsUrl = '$siteUrl/terms';
+  static const privacyUrl = '$siteUrl/privacy';
+  static const helpUrl = '$siteUrl/help';
+
+  /// Also what the site's contact page and footer print, so support reaches one inbox.
+  static const supportEmail = 'contact@astrolok.app';
 
   @override
   State<TermsFooter> createState() => _TermsFooterState();

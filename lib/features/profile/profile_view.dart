@@ -15,6 +15,7 @@ import '../../widgets/app_snackbar.dart';
 import '../../widgets/astral_background.dart';
 import '../../widgets/circle_icon_button.dart';
 import '../../widgets/terms_footer.dart';
+import '../chat/chat_copy.dart';
 
 /// The account.
 ///
@@ -110,12 +111,17 @@ class ProfileView extends ConsumerWidget {
                           onTap: () => context.push(Routes.downloads),
                         ),
                         _MenuRow(
+                          icon: Icons.auto_awesome_outlined,
+                          label: ChatCopy.memoryHeading,
+                          onTap: () => context.push(Routes.memory),
+                        ),
+                        _MenuRow(
                           icon: Icons.phone_outlined,
                           label: 'Contact us',
                           onTap: () => _open(
                             context,
                             Uri.parse(
-                              'mailto:support@astrolok.app'
+                              'mailto:${TermsFooter.supportEmail}'
                               '?subject=${Uri.encodeComponent('Astrolok support')}',
                             ),
                           ),
@@ -123,8 +129,7 @@ class ProfileView extends ConsumerWidget {
                         _MenuRow(
                           icon: Icons.info_outline_rounded,
                           label: 'Help & FAQ',
-                          onTap: () =>
-                              _open(context, Uri.parse('https://astrolok.app/help')),
+                          onTap: () => _open(context, Uri.parse(TermsFooter.helpUrl)),
                         ),
                         _MenuRow(
                           icon: Icons.shield_outlined,

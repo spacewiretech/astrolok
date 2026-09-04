@@ -108,6 +108,14 @@ abstract final class PalmCopy {
   static const askAstroTitle = 'Ask Astro about your palm';
   static const askAstroSubtitle = 'Get personalised answers for all your questions';
 
+  /// Sent as the opening turn when the chat is entered from a reading, so the conversation
+  /// starts inside it rather than on a blank screen. Written in the first person, because it
+  /// becomes the user's own bubble in the transcript.
+  static const askAstroSeed = 'Tell me more about what my palm reading means.';
+
+  static String askAstroSeedFor(String line) =>
+      'Tell me more about my $line and what it means for me.';
+
   static const meansForYou = 'What it means for you';
   static const tip = 'Tip';
 

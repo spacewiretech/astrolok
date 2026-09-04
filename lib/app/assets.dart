@@ -98,6 +98,20 @@ abstract final class FaceIcon {
   static const lips = '$_base/face_lips.png';
 }
 
+/// The chat's two glyphs.
+///
+/// Both are small and flat, and both already carry their own colour — the send disc is navy with
+/// a gold chevron, the spark is gold — so nothing tints them at the use site.
+abstract final class ChatIcon {
+  static const _base = 'assets/icons';
+
+  /// The circular send button at the right of the composer.
+  static const send = '$_base/chat_send.png';
+
+  /// The four-pointed star at the left of the composer, before "Ask Astro".
+  static const spark = '$_base/chat_spark.png';
+}
+
 /// Vector assets. Still to be exported — every reference falls back to a Material icon, which
 /// is why the paywall and Home read correctly without them.
 abstract final class Svg {

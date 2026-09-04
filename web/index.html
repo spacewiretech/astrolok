@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <!--
     If you are serving your web app in a path other than the root, change the
@@ -18,21 +18,154 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Astrolok reads your palm and your face and reads the result back to you in a pandit's voice. Personal, private, and yours to keep as a PDF.">
+  <meta name="theme-color" content="#F4B835">
+
+  <!-- The site renders to canvas, so these tags are almost all a crawler or a link preview
+       ever sees. Keep them in step with SiteCopy. -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Astrolok">
+  <meta property="og:title" content="Astrolok — Palm, face and astrology readings in your pocket">
+  <meta property="og:description" content="Namaste. What would you like to discover? Palm and face readings in plain language, read aloud and saved as a PDF.">
+  <meta property="og:image" content="icons/Icon-512.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Astrolok — Palm, face and astrology readings in your pocket">
+  <meta name="twitter:description" content="Namaste. What would you like to discover? Palm and face readings in plain language, read aloud and saved as a PDF.">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="astrolok">
+  <meta name="apple-mobile-web-app-title" content="Astrolok">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>astrolok</title>
+  <!-- google_fonts pulls Poppins and Inter over the network at runtime; warming the
+       connections here shortens the swap from the fallback face. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <title>Astrolok — Palm, face and astrology readings in your pocket</title>
   <link rel="manifest" href="manifest.json">
+
+  <script>
+    // Deep-link recovery, paired with `404.html`.
+    //
+    // With `usePathUrlStrategy()` the router needs the server to answer `/privacy` with this
+    // file. Hosts with a rewrite rule do that directly and this script is a no-op. Hosts
+    // without one serve `404.html`, which stashes the path and bounces here — so put it back
+    // in the URL bar before the Flutter bootstrap reads it, or go_router boots at `/`.
+    (function () {
+      try {
+        var target = sessionStorage.getItem('astrolok:redirect');
+        if (target) {
+          sessionStorage.removeItem('astrolok:redirect');
+          if (target.charAt(0) === '/' && target.charAt(1) !== '/') {
+            history.replaceState(null, '', target);
+          }
+        }
+      } catch (e) {
+        // Private mode with storage blocked. The visitor lands on the home page, which is a
+        // worse answer than the one they asked for but not a broken one.
+      }
+    })();
+  </script>
+
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; background: #FFFAF2; }
+
+    /* Shown until Flutter paints its first frame, so the page is never a blank white box. */
+    #site-loader {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 22px;
+      background: #FFFAF2;
+      z-index: 10;
+      transition: opacity 260ms ease;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    #site-loader.hidden { opacity: 0; pointer-events: none; }
+    #site-loader img { width: 54px; height: auto; }
+    #site-loader .bar {
+      width: 132px;
+      height: 3px;
+      border-radius: 999px;
+      background: #FDF1DC;
+      overflow: hidden;
+    }
+    #site-loader .bar span {
+      display: block;
+      width: 40%;
+      height: 100%;
+      border-radius: 999px;
+      background: #F4B835;
+      animation: slide 1.15s ease-in-out infinite;
+    }
+    @keyframes slide {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(330%); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #site-loader .bar span { animation: none; width: 100%; }
+    }
+
+    /* Only ever seen with JavaScript disabled — and by crawlers, which is the point. */
+    .noscript-wrap {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 48px 24px;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      color: #000C2B;
+      line-height: 1.7;
+    }
+    .noscript-wrap a { color: #E2A21D; }
+  </style>
 </head>
 <body>
+  <div id="site-loader">
+    <img src="icons/Icon-192.png" alt="Astrolok">
+    <div class="bar"><span></span></div>
+  </div>
+
+  <noscript>
+    <div class="noscript-wrap">
+      <h1>Astrolok — Palm, face and astrology readings in your pocket</h1>
+      <p>
+        Namaste. What would you like to discover? Astrolok reads your palm and your face, and
+        reads the result back to you in a pandit's voice. Personal, private, and yours to keep
+        as a PDF.
+      </p>
+      <ul>
+        <li><strong>Palm Reading</strong> — the life, heart, head and fate lines, and what each one says about you.</li>
+        <li><strong>Face Reading</strong> — your eyes, face shape, nose and lips, each carrying a trait.</li>
+        <li><strong>Chat with Astro</strong> — coming soon; it is not in the app yet.</li>
+      </ul>
+      <p>&#8377;3 for a 1-day trial, then &#8377;249/month by UPI Autopay. Cancel any time.</p>
+      <p>
+        Your palm or face photo is used to produce one reading and then deleted from our
+        servers. It is never sold, never shown to another user, and never used to train
+        anything.
+      </p>
+      <h2>Policies</h2>
+      <ul>
+        <li><a href="/privacy">Privacy Policy</a></li>
+        <li><a href="/terms">Terms &amp; Conditions</a></li>
+        <li><a href="/refund">Cancellation &amp; Refund</a></li>
+        <li><a href="/shipping">Shipping &amp; Delivery</a></li>
+        <li><a href="/delete-account">Delete Account</a></li>
+        <li><a href="/contact">Contact Us</a></li>
+      </ul>
+      <p>Readings are for guidance and reflection, not professional advice.</p>
+      <p>This site needs JavaScript enabled to display its full content.</p>
+    </div>
+  </noscript>
+
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader
@@ -42,5 +175,13 @@
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
   <script src="flutter_bootstrap.js" async></script>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var loader = document.getElementById('site-loader');
+      if (!loader) return;
+      loader.classList.add('hidden');
+      setTimeout(function () { loader.remove(); }, 300);
+    });
+  </script>
 </body>
 </html>

@@ -71,6 +71,15 @@ class FacePartView extends ConsumerWidget {
                     onSpeak: () => model.toggleSpeech(entry.spoken),
                     onExport: model.exportPdf,
                     onBack: back,
+                    onAskAstro: () {
+                      // The speech engine is app-wide, so a feature left playing would talk
+                      // over the sage.
+                      model.stopSpeech();
+                      context.push(
+                        Routes.chat,
+                        extra: FaceCopy.askAstroSeedFor(entry.kind.possessive),
+                      );
+                    },
                   ),
       ),
     );
@@ -87,6 +96,7 @@ class _Part extends StatelessWidget {
     required this.onSpeak,
     required this.onExport,
     required this.onBack,
+    required this.onAskAstro,
   });
 
   final FacePart part;
@@ -97,6 +107,7 @@ class _Part extends StatelessWidget {
   final VoidCallback onSpeak;
   final VoidCallback onExport;
   final VoidCallback onBack;
+  final VoidCallback onAskAstro;
 
   @override
   Widget build(BuildContext context) {
@@ -203,8 +214,7 @@ class _Part extends StatelessWidget {
             label: FaceCopy.askAstroAbout(part.kind.possessive),
             tone: ButtonTone.navy,
             icon: Icons.chat_bubble_outline_rounded,
-            onPressed: () =>
-                showAppSnackBar(context, 'Chat with Astro is coming soon.'),
+            onPressed: onAskAstro,
           ),
         ),
       ],

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/astro_message.dart';
 import '../models/face_reading.dart';
 import '../models/palm_reading.dart';
 
@@ -133,6 +134,39 @@ class PalmReadingStore extends ReadingStore<PalmReading> {
 
   @override
   String idOf(PalmReading reading) => reading.id;
+}
+
+/// The conversation, cached so a cold start paints instantly and yesterday's counsel is still
+/// readable with no signal.
+///
+/// `ReadingStore<ChatThread>` where the whole transcript is one entry, not
+/// `ReadingStore<AstroMessage>` where each turn is: `_keep` is a non-overridable `static const`
+/// 10, which as "ten threads" is generous and as "ten messages" would silently eat the
+/// eleventh. The cost is re-encoding the transcript on every turn, which at a few tens of
+/// kilobytes is not worth a second storage class.
+class ChatThreadStore extends ReadingStore<ChatThread> {
+  const ChatThreadStore();
+
+  @override
+  String get storageKey => 'astrolok.chat_thread';
+
+  @override
+  int get version => 1;
+
+  @override
+  String get logTag => 'chat';
+
+  @override
+  ChatThread? parse(Object? raw) => ChatThread.fromServer(raw);
+
+  @override
+  Map<String, dynamic> encode(ChatThread thread) => thread.toJson();
+
+  @override
+  String idOf(ChatThread thread) => ChatThread.soleId;
+
+  /// The one thread, or null before there is one.
+  Future<ChatThread?> load() => byId(ChatThread.soleId);
 }
 
 class FaceReadingStore extends ReadingStore<FaceReading> {
