@@ -26,6 +26,16 @@ const defaultAppConfig = <String, String>{
   'subscriber_label': '',
   // Empty until a video exists; the paywall shows a static poster instead.
   'paywall_video_url': '',
+  // Support and legal links, opened from the account menu and the onboarding footer. Both
+  // stores check these at review time, so a dead one fails a review — read them with
+  // [AppConfigValues.configLink], which refuses to hand back a blank.
+  //
+  // `support_url` is launched verbatim, whatever its scheme, so support can move from an
+  // inbox to a WhatsApp or help-desk link without an app release.
+  'support_url': 'mailto:contact@astrolok.app?subject=Astrolok%20support',
+  'help_url': 'https://astrolok.app/help',
+  'privacy_url': 'https://astrolok.app/privacy',
+  'terms_url': 'https://astrolok.app/terms',
 };
 
 /// Typed reads over the raw key/value map, so a bad or missing value can never crash a screen.
@@ -38,4 +48,15 @@ extension AppConfigValues on Map<String, String> {
       0;
 
   bool configFlag(String key) => configString(key).toLowerCase() == 'true';
+
+  /// Like [configString], but a row that exists and is *blank* falls back to the shipped
+  /// default as well.
+  ///
+  /// [configString] only covers a missing key. A link is different: one cleared cell in the
+  /// dashboard would leave a row in the account menu that opens nothing, and a policy link
+  /// that opens nothing is how a store review fails.
+  String configLink(String key) {
+    final value = configString(key).trim();
+    return value.isEmpty ? (defaultAppConfig[key] ?? '') : value;
+  }
 }

@@ -1,10 +1,9 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 import '../app/theme/app_colors.dart';
 import '../app/theme/app_theme.dart';
 import '../app/theme/app_typography.dart';
+import 'audio_bars.dart';
 
 /// The listen control, on every reading screen.
 ///
@@ -12,11 +11,9 @@ import '../app/theme/app_typography.dart';
 /// answers that, and the screens leave this out entirely when the answer is no. A control that
 /// does nothing reads as a bug; an absent one reads as a design.
 ///
-/// While speaking it shows three bars rising and falling. That is doing real work: on-device
-/// TTS gives no progress callback worth binding a bar to, and without *some* sign of life a
-/// forty-second narration looks identical to a button that did not respond. The animation is
-/// honest about what it claims — it says "this is playing", not "you are 40% through".
-class SpeakButton extends StatefulWidget {
+/// While speaking it shows [AudioBars] — three bars rising and falling — which is what tells the
+/// user a forty-second narration is running rather than a button having failed to respond.
+class SpeakButton extends StatelessWidget {
   const SpeakButton({
     super.key,
     required this.speaking,
@@ -40,118 +37,41 @@ class SpeakButton extends StatefulWidget {
   final Alignment alignment;
 
   @override
-  State<SpeakButton> createState() => _SpeakButtonState();
-}
-
-class _SpeakButtonState extends State<SpeakButton>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _bars = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 900),
-  );
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.speaking) _bars.repeat();
-  }
-
-  @override
-  void didUpdateWidget(SpeakButton old) {
-    super.didUpdateWidget(old);
-    if (widget.speaking && !_bars.isAnimating) {
-      _bars.repeat();
-    } else if (!widget.speaking && _bars.isAnimating) {
-      _bars.stop();
-      _bars.value = 0;
-    }
-  }
-
-  @override
-  void dispose() {
-    _bars.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final speaking = widget.speaking;
-
     return Align(
-      alignment: widget.alignment,
+      alignment: alignment,
       child: Semantics(
         button: true,
-        label: speaking ? widget.stopLabel : widget.listenLabel,
+        label: speaking ? stopLabel : listenLabel,
         excludeSemantics: true,
         child: Material(
-          color: speaking ? widget.color : widget.color.withValues(alpha: 0.12),
+          color: speaking ? color : color.withValues(alpha: 0.12),
           borderRadius: AppShape.pill,
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            onTap: widget.onTap,
+            onTap: onTap,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (speaking)
-                    _Equaliser(animation: _bars)
+                    // White, because the pill fills with the accent while it plays.
+                    const AudioBars(speaking: true, color: Colors.white)
                   else
-                    Icon(Icons.volume_up_rounded, size: 18, color: widget.color),
+                    Icon(Icons.volume_up_rounded, size: 18, color: color),
                   const SizedBox(width: 9),
                   Text(
-                    speaking ? widget.stopLabel : widget.listenLabel,
+                    speaking ? stopLabel : listenLabel,
                     style: AppText.title.copyWith(
                       fontSize: 14,
-                      color: speaking ? Colors.white : widget.color,
+                      color: speaking ? Colors.white : color,
                     ),
                   ),
                 ],
               ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Three bars, out of phase, so the group reads as sound rather than as a loading spinner.
-class _Equaliser extends StatelessWidget {
-  const _Equaliser({required this.animation});
-
-  final Animation<double> animation;
-
-  static const _phases = [0.0, 0.33, 0.66];
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 18,
-      height: 16,
-      child: AnimatedBuilder(
-        animation: animation,
-        builder: (context, _) => Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            for (final phase in _phases)
-              Container(
-                width: 3.5,
-                // A sine off a shared clock: cheap, and the three never line up.
-                height: 5 +
-                    9 *
-                        (0.5 +
-                            0.5 *
-                                math.sin(
-                                  (animation.value + phase) * 2 * math.pi,
-                                )),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-          ],
         ),
       ),
     );

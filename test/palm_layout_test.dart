@@ -69,7 +69,6 @@ void main() {
       expect(tester.takeException(), isNull);
       // The parts that must survive the squeeze.
       expect(find.text('Scan Palm'), findsOneWidget);
-      expect(find.text('Upload from gallery'), findsOneWidget);
       expect(find.textContaining('private and secure'), findsOneWidget);
     });
 
@@ -78,14 +77,17 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('offers the gallery when there is no camera', (tester) async {
+    testWidgets('says so, and offers no gallery, when there is no camera', (tester) async {
       // The simulator path, and the one a developer sees every day. It has to read as a
       // designed state rather than a broken screen.
       await pumpAt(tester, small, const PalmCaptureView());
 
       expect(tester.takeException(), isNull);
       expect(find.textContaining("camera isn't available"), findsOneWidget);
-      expect(find.text('Upload from gallery'), findsOneWidget);
+      // Camera only on this screen, unlike the face flow. The copy above must not offer an
+      // upload there is no button for — the two have to be removed together or not at all.
+      expect(find.text('Upload from gallery'), findsNothing);
+      expect(find.textContaining('upload'), findsNothing);
     });
 
     testWidgets('the focus picker offers no health option', (tester) async {

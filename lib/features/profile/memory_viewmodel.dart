@@ -54,7 +54,10 @@ class MemoryViewModel extends AutoDisposeNotifier<MemoryState> {
 
   Future<void> _load() async {
     try {
-      final snapshot = await ref.read(chatRepositoryProvider).history();
+      // The thread list rather than a transcript: this screen wants only the facts, and both
+      // carry them — but the list does not also drag two hundred messages across the wire to
+      // deliver them.
+      final snapshot = await ref.read(chatRepositoryProvider).threads();
       if (_disposed) return;
       state = state.copyWith(facts: snapshot.facts, loading: false);
     } catch (error) {

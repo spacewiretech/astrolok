@@ -15,8 +15,8 @@ abstract final class SiteRoutes {
   static const deleteAccount = '/delete-account';
   static const contact = '/contact';
 
-  /// `lib/features/profile/profile_view.dart` already ships `https://astrolok.app/help` in its
-  /// menu, so the path has to exist. There is no separate help centre to send it to — the
+  /// The account menu's "Help & FAQ" opens `help_url` from `app_config`, which ships pointing
+  /// here, so the path has to exist. There is no separate help centre to send it to — the
   /// contact page is the answer to "I need help".
   static const help = '/help';
 

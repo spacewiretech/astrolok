@@ -31,7 +31,11 @@ abstract interface class ReadingCamera {
 
   bool get isReady;
 
-  /// The preview's aspect ratio (width / height), needed to crop what the user actually framed.
+  /// The sensor's aspect ratio (width / height), which is landscape on every phone.
+  ///
+  /// Not the shape the preview is drawn in — upright, a 16:9 sensor fills a 9:16 box.
+  /// `CaptureViewfinder` turns this one into the other; it needs the sensor ratio because that
+  /// is what the camera plugin reports and what the capture is cropped from.
   double get aspectRatio;
 
   Future<void> initialize();
@@ -206,8 +210,9 @@ class FakeReadingCamera implements ReadingCamera {
   @override
   bool get isReady => failure == null;
 
+  /// Landscape, like a real sensor reports — 3/4 here would quietly test the wrong geometry.
   @override
-  double get aspectRatio => 3 / 4;
+  double get aspectRatio => 4 / 3;
 
   @override
   Future<void> initialize() async {}

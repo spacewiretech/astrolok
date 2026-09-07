@@ -115,6 +115,7 @@ class AstroMessage {
     required this.role,
     required this.createdAt,
     this.text = '',
+    this.verdict = '',
     this.titleEmoji = '',
     this.title = '',
     this.sections = const [],
@@ -131,6 +132,12 @@ class AstroMessage {
   /// One field for both because it is the same thing to every reader: the body of the message.
   /// An Astro turn decorates it with a title and sections; a user turn does not.
   final String text;
+
+  /// The answer itself, before the reasoning that follows it in [text].
+  ///
+  /// Empty on a user turn, and empty on any Astro turn stored before the field existed — the
+  /// screen simply omits the block, and such a reply renders exactly as replies used to.
+  final String verdict;
 
   final String titleEmoji;
   final String title;
@@ -168,6 +175,7 @@ class AstroMessage {
       role: role,
       createdAt: DateTime.tryParse(_text(raw['created_at']))?.toLocal() ?? DateTime.now(),
       text: text,
+      verdict: _text(raw['verdict']),
       titleEmoji: _text(raw['title_emoji']),
       title: _text(raw['title']),
       sections: [
@@ -184,6 +192,7 @@ class AstroMessage {
         'role': role.wire,
         'created_at': createdAt.toUtc().toIso8601String(),
         if (isUser) 'text': text else 'opening': text,
+        'verdict': verdict,
         'title_emoji': titleEmoji,
         'title': title,
         'sections': [for (final section in sections) section.toJson()],
@@ -195,7 +204,12 @@ class AstroMessage {
   ///
   /// The title is included but the emoji is not: a device voice reads "sparkles" aloud, which is
   /// not what anyone wants to hear in the middle of a reading.
+  ///
+  /// The verdict comes first, ahead of even the title — spoken aloud, an answer that arrives
+  /// after its own justification is worse than on the page, because a listener cannot skip ahead
+  /// to find it.
   String get spoken => [
+        if (verdict.isNotEmpty) verdict,
         if (title.isNotEmpty) title,
         text,
         for (final section in sections) '${section.heading}. ${section.body}',
@@ -243,14 +257,110 @@ class AstroFact {
       };
 }
 
+/// One conversation in the sidebar: enough to list it, not enough to read it.
+///
+/// Separate from [ChatThread] on purpose. The drawer lists every conversation an account has and
+/// must open instantly; sending each one's transcript to render a two-line row would make the
+/// payload grow with how much the user has talked, which is precisely backwards.
+@immutable
+class ChatThreadSummary {
+  const ChatThreadSummary({
+    required this.id,
+    required this.title,
+    this.preview = '',
+    this.lastMessageAt,
+  });
+
+  final String id;
+
+  /// Written by the server from the first reply's own subject line. May be empty for a
+  /// conversation whose first reply never landed; the drawer shows a placeholder.
+  final String title;
+
+  /// The newest answer, in one line.
+  final String preview;
+
+  final DateTime? lastMessageAt;
+
+  static ChatThreadSummary? fromServer(Object? raw) {
+    if (raw is! Map) return null;
+
+    final id = _text(raw['id']);
+    if (id.isEmpty) return null;
+
+    return ChatThreadSummary(
+      id: id,
+      title: _text(raw['title']),
+      preview: _text(raw['preview']),
+      lastMessageAt: DateTime.tryParse(_text(raw['last_message_at']))?.toLocal(),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'preview': preview,
+        'last_message_at': lastMessageAt?.toUtc().toIso8601String(),
+      };
+}
+
+/// Where a conversation sits in the sidebar.
+enum ChatAge { today, yesterday, week, older }
+
+/// Buckets conversations by when they were last spoken to, newest bucket first.
+///
+/// Top-level and pure — takes [now] rather than reading the clock — so the midnight and seven-day
+/// boundaries can be tested without waiting for either.
+///
+/// Compared by calendar day rather than by elapsed hours: something said at 11pm belongs under
+/// "Yesterday" at 1am, not under "Today" because twenty-three hours have not passed.
+Map<ChatAge, List<ChatThreadSummary>> groupThreads(
+  List<ChatThreadSummary> threads, {
+  required DateTime now,
+}) {
+  final today = DateTime(now.year, now.month, now.day);
+  final grouped = <ChatAge, List<ChatThreadSummary>>{};
+
+  for (final thread in threads) {
+    final at = thread.lastMessageAt;
+    // Undated goes last rather than first: it is almost always a locally-cached thread that has
+    // never reached the server, and pinning one to the top of the list would be a lie about it.
+    final days = at == null
+        ? 1 << 20
+        : today.difference(DateTime(at.year, at.month, at.day)).inDays;
+
+    final age = switch (days) {
+      // Negative covers a device clock behind the server's — the row is "today", not "the future".
+      <= 0 => ChatAge.today,
+      1 => ChatAge.yesterday,
+      < 7 => ChatAge.week,
+      _ => ChatAge.older,
+    };
+
+    (grouped[age] ??= []).add(thread);
+  }
+
+  // Rebuilt in enum order so the drawer never has to sort, and an empty bucket is simply absent.
+  return {
+    for (final age in ChatAge.values) age: ?grouped[age],
+  };
+}
+
 /// A whole conversation, as cached on the device.
 @immutable
 class ChatThread {
   const ChatThread({
+    required this.id,
     required this.messages,
+    this.title = '',
     this.remaining,
     this.updatedAt,
   });
+
+  /// The server's thread id, or [draftId] for one that has not been sent yet.
+  final String id;
+
+  final String title;
 
   /// Oldest first, as a transcript reads.
   final List<AstroMessage> messages;
@@ -260,16 +370,22 @@ class ChatThread {
 
   final DateTime? updatedAt;
 
-  /// The one thread this app keeps.
+  /// A conversation that exists only on this device, because nothing has been sent yet.
   ///
-  /// The design shows a single continuous conversation with Astro rather than a list of them, so
-  /// there is one id and the cache holds one row. `ReadingStore` keys on an id and keeps ten, so
-  /// this fits it unchanged — with nine slots spare should threads ever arrive.
-  static const soleId = 'astro';
+  /// The screen needs a stable key from the moment it opens — before the server has said what
+  /// this thread is called — and the ViewModel keeps it for the life of the visit even after the
+  /// real id arrives, so the first reply does not tear the screen down and rebuild it.
+  ///
+  /// Never a valid server id: those are uuids.
+  static const draftId = 'draft';
+
+  bool get isDraft => id == draftId;
 
   bool get isEmpty => messages.isEmpty;
 
   ChatThread copyWith({List<AstroMessage>? messages, int? remaining}) => ChatThread(
+        id: id,
+        title: title,
         messages: messages ?? this.messages,
         remaining: remaining ?? this.remaining,
         updatedAt: DateTime.now(),
@@ -278,7 +394,14 @@ class ChatThread {
   static ChatThread? fromServer(Object? raw) {
     if (raw is! Map) return null;
 
+    final id = _text(raw['id']);
+    // A cached thread with no id cannot be keyed, found again, or sent to. Dropped rather than
+    // half-built, like everything else here.
+    if (id.isEmpty) return null;
+
     return ChatThread(
+      id: id,
+      title: _text(raw['title']),
       messages: [
         for (final entry in (raw['messages'] is List ? raw['messages'] as List : const []))
           ?AstroMessage.fromServer(entry),
@@ -288,12 +411,30 @@ class ChatThread {
     );
   }
 
+  /// How this conversation looks in the sidebar, without a round trip.
+  ///
+  /// What lets the drawer paint from the cache on a cold start, before `chat-history` answers.
+  ChatThreadSummary get summary => ChatThreadSummary(
+        id: id,
+        title: title,
+        preview: messages.isEmpty ? '' : _previewOf(messages.last),
+        lastMessageAt: updatedAt,
+      );
+
   Map<String, dynamic> toJson() => {
-        'id': soleId,
+        'id': id,
+        'title': title,
         'messages': [for (final message in messages) message.toJson()],
         'remaining': remaining,
         'updated_at': (updatedAt ?? DateTime.now()).toUtc().toIso8601String(),
       };
+}
+
+/// The same line the server denormalises onto a thread: an answer if there is one, else words.
+String _previewOf(AstroMessage message) {
+  final line = message.verdict.isNotEmpty ? message.verdict : message.text;
+  final flat = line.replaceAll(RegExp(r'\s+'), ' ').trim();
+  return flat.length <= 100 ? flat : flat.substring(0, 100);
 }
 
 String _text(Object? raw) => raw?.toString().trim() ?? '';

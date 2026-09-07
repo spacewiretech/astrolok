@@ -10,26 +10,32 @@ import '../../app/theme/app_typography.dart';
 import '../../data/models/astro_message.dart';
 import '../../widgets/app_snackbar.dart';
 import '../../widgets/astral_background.dart';
+import '../../widgets/audio_bars.dart';
 import '../../widgets/brand_logo.dart';
 import '../../widgets/circle_icon_button.dart';
 import '../../widgets/safe_asset.dart';
 import 'chat_composer.dart';
 import 'chat_copy.dart';
+import 'chat_drawer.dart';
+import 'chat_reveal.dart';
 import 'chat_state.dart';
 import 'chat_viewmodel.dart';
 
 /// The conversation with Astro.
 ///
-/// One continuous thread rather than a list of them, as the design shows: someone consulting an
-/// astrologer is having *a* conversation, and starting a second one would throw away everything
-/// the first taught them.
+/// One of several: the drawer holds the rest. Which one is on screen lives in
+/// [selectedThreadProvider] rather than in the route, because a conversation that has not been
+/// sent yet has no id to put in a URL — see [ChatViewModel] for why rekeying it mid-send would
+/// lose the reply in flight.
 class ChatView extends ConsumerStatefulWidget {
   const ChatView({super.key, this.opener});
 
   /// A question to ask on arrival, handed over from wherever the chat was opened.
   ///
   /// This is what makes "Ask Astro about your eyes" land in a conversation already about the
-  /// eyes rather than on a blank screen.
+  /// eyes rather than on a blank screen. It always starts a *new* conversation: the question is
+  /// about a reading the user is looking at now, and appending it to whatever they last talked
+  /// about would bury it.
   final String? opener;
 
   @override
@@ -38,19 +44,24 @@ class ChatView extends ConsumerStatefulWidget {
 
 class _ChatViewState extends ConsumerState<ChatView> {
   final _scroll = ScrollController();
+  final _scaffold = GlobalKey<ScaffoldState>();
 
   @override
   void initState() {
     super.initState();
 
     final opener = widget.opener?.trim();
-    if (opener != null && opener.isNotEmpty) {
-      // Deferred: sending touches a provider, and doing that during the first build throws
-      // "modified a provider while the widget tree was building".
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        ref.read(chatViewModelProvider.notifier).send(opener);
-      });
-    }
+
+    // Deferred: both of these touch providers, and doing that during the first build throws
+    // "modified a provider while the widget tree was building".
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      if (opener != null && opener.isNotEmpty) {
+        ref.read(selectedThreadProvider.notifier).state = ChatThread.draftId;
+        ref.read(chatViewModelProvider(ChatThread.draftId).notifier).send(opener);
+      }
+    });
   }
 
   @override
@@ -67,36 +78,65 @@ class _ChatViewState extends ConsumerState<ChatView> {
         context.go(Routes.subscribe);
       case ChatOutcome.signedOut:
         context.go(Routes.onboarding);
+      case ChatOutcome.threadGone:
+        // Not a redirect off the screen — the user still wants to talk to Astro, they just
+        // cannot have that conversation back.
+        _newChat();
     }
+  }
+
+  /// Starts a fresh conversation.
+  ///
+  /// The draft instance is invalidated first: tapping "New chat" while already on an unsent one
+  /// must clear it, and without this the key would not change so nothing would happen.
+  void _newChat() {
+    ref.invalidate(chatViewModelProvider(ChatThread.draftId));
+    ref.read(selectedThreadProvider.notifier).state = ChatThread.draftId;
   }
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(chatViewModelProvider);
-    final model = ref.read(chatViewModelProvider.notifier);
+    final selected = ref.watch(selectedThreadProvider);
+    final state = ref.watch(chatViewModelProvider(selected));
+    final model = ref.read(chatViewModelProvider(selected).notifier);
 
-    ref.listen(chatViewModelProvider.select((s) => s.error), (_, error) {
+    ref.listen(chatViewModelProvider(selected).select((s) => s.error), (_, error) {
       if (error == null || !mounted) return;
       showAppSnackBar(context, error, error: true);
       // Cleared once shown, or a later rebuild would show it a second time.
       model.errorShown();
     });
 
-    ref.listen(chatViewModelProvider.select((s) => s.outcome), (_, outcome) {
+    ref.listen(chatViewModelProvider(selected).select((s) => s.outcome), (_, outcome) {
       if (outcome != null) _handle(outcome);
     });
 
     return Scaffold(
+      key: _scaffold,
+      // On the right, so the back button keeps the left corner it has on every other screen.
+      endDrawer: ChatDrawer(
+        // The server's id once there is one, not the provider key — a draft keeps the key
+        // `draft` for the life of the visit, and without this the conversation the user is
+        // actually in would sit unhighlighted in the list right after its first reply.
+        selectedId: state.threadId ?? selected,
+        onNewChat: _newChat,
+        onOpen: (id) {
+          model.stopSpeech();
+          ref.read(selectedThreadProvider.notifier).state = id;
+        },
+      ),
       body: AstralBackground(
         surface: AstralSurface.home,
         child: SafeArea(
           child: Column(
             children: [
               _Header(
+                title: state.title,
                 onBack: () {
                   model.stopSpeech();
                   context.canPop() ? context.pop() : context.go(Routes.home);
                 },
+                onHistory: () => _scaffold.currentState?.openEndDrawer(),
               ),
 
               Expanded(
@@ -110,6 +150,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
                             state: state,
                             controller: _scroll,
                             onSpeak: model.toggleSpeech,
+                            onRevealed: model.revealed,
                           ),
               ),
 
@@ -127,9 +168,18 @@ class _ChatViewState extends ConsumerState<ChatView> {
 }
 
 class _Header extends StatelessWidget {
-  const _Header({required this.onBack});
+  const _Header({
+    required this.title,
+    required this.onBack,
+    required this.onHistory,
+  });
+
+  /// The conversation's name, once it has one. Falls back to the screen's own title, which is
+  /// what a new chat shows.
+  final String title;
 
   final VoidCallback onBack;
+  final VoidCallback onHistory;
 
   @override
   Widget build(BuildContext context) {
@@ -143,14 +193,28 @@ class _Header extends StatelessWidget {
             semanticLabel: 'Back',
             onTap: onBack,
           ),
-          const Expanded(
-            child: AccentHeading(
-              lead: ChatCopy.titleLead,
-              accent: ChatCopy.titleAccent,
-            ),
+          Expanded(
+            child: title.isEmpty
+                ? const AccentHeading(
+                    lead: ChatCopy.titleLead,
+                    accent: ChatCopy.titleAccent,
+                  )
+                : Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: AppText.section,
+                    ),
+                  ),
           ),
-          // Balances the back button so the title sits centred.
-          const SizedBox(width: AppShape.avatar),
+          CircleIconButton(
+            icon: Icons.menu_rounded,
+            semanticLabel: ChatCopy.openConversations,
+            onTap: onHistory,
+          ),
         ],
       ),
     );
@@ -237,11 +301,13 @@ class _Transcript extends StatelessWidget {
     required this.state,
     required this.controller,
     required this.onSpeak,
+    required this.onRevealed,
   });
 
   final ChatState state;
   final ScrollController controller;
   final ValueChanged<AstroMessage> onSpeak;
+  final ValueChanged<String> onRevealed;
 
   @override
   Widget build(BuildContext context) {
@@ -264,10 +330,17 @@ class _Transcript extends StatelessWidget {
           child: message.isUser
               ? _UserBubble(text: message.text)
               : _AstroBubble(
+                  // Keyed by message id so the list cannot recycle one reply's half-finished
+                  // reveal into the widget showing another.
+                  key: ValueKey(message.id),
                   message: message,
                   canSpeak: state.canSpeak,
                   speaking: state.speakingId == message.id,
+                  // Only the reply that just arrived. Everything else — history, the cache, a
+                  // bubble scrolled back into view — is already finished.
+                  revealing: state.revealingId == message.id,
                   onSpeak: () => onSpeak(message),
+                  onRevealed: () => onRevealed(message.id),
                 ),
         );
       },
@@ -305,16 +378,111 @@ class _UserBubble extends StatelessWidget {
   }
 }
 
-/// A reply: the oṃ disc, then the title, the opening and its labelled sections.
+/// A reply: who is speaking and how to hear them, then the answer, then the reasoning.
+///
+/// The listen control sits in the header rather than at the foot of the bubble. It used to be
+/// last, which meant the one genuinely delightful thing this app does — a pandit's voice reading
+/// your counsel — was the thing you found only after scrolling past everything else.
 class _AstroBubble extends StatelessWidget {
   const _AstroBubble({
+    super.key,
     required this.message,
+    required this.canSpeak,
+    required this.speaking,
+    required this.revealing,
+    required this.onSpeak,
+    required this.onRevealed,
+  });
+
+  final AstroMessage message;
+  final bool canSpeak;
+  final bool speaking;
+
+  /// True only for the reply that just arrived. See [ChatReveal.active].
+  final bool revealing;
+
+  final VoidCallback onSpeak;
+  final VoidCallback onRevealed;
+
+  @override
+  Widget build(BuildContext context) {
+    return ChatReveal(
+      active: revealing,
+      verdict: message.verdict,
+      onFinished: onRevealed,
+      builder: (context, verdict, progress) => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: AppShape.card,
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _SpeakerRow(
+              canSpeak: canSpeak,
+              speaking: speaking,
+              onSpeak: onSpeak,
+            ),
+
+            // The answer, before anything that justifies it. Absent on replies written before
+            // the field existed, which then render exactly as replies used to.
+            if (message.verdict.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _VerdictCard(emoji: message.titleEmoji, text: verdict),
+            ],
+
+            RevealedPart(
+              progress: progress,
+              index: 0,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 12),
+                  // The title keeps its emoji only when the verdict card above has not taken it.
+                  if (message.title.isNotEmpty) ...[
+                    _Titled(
+                      emoji: message.verdict.isEmpty ? message.titleEmoji : '',
+                      text: message.title,
+                      heading: true,
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+                  Text(message.text, style: AppText.body.copyWith(height: 1.45)),
+                ],
+              ),
+            ),
+
+            for (final (index, section) in message.sections.indexed)
+              RevealedPart(
+                progress: progress,
+                index: index + 1,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: 12),
+                    _Titled(emoji: section.emoji, text: section.heading),
+                    const SizedBox(height: 3),
+                    Text(section.body, style: AppText.body.copyWith(height: 1.45)),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Who is talking, and the control that makes them talk out loud.
+class _SpeakerRow extends StatelessWidget {
+  const _SpeakerRow({
     required this.canSpeak,
     required this.speaking,
     required this.onSpeak,
   });
 
-  final AstroMessage message;
   final bool canSpeak;
   final bool speaking;
   final VoidCallback onSpeak;
@@ -322,43 +490,66 @@ class _AstroBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const BrandMark(size: 34),
-        const SizedBox(width: 10),
+        const BrandMark(size: 26),
+        const SizedBox(width: 8),
         Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: AppShape.card,
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (message.title.isNotEmpty) ...[
-                  _Titled(emoji: message.titleEmoji, text: message.title, heading: true),
-                  const SizedBox(height: 6),
-                ],
-                Text(message.text, style: AppText.body.copyWith(height: 1.45)),
-
-                for (final section in message.sections) ...[
-                  const SizedBox(height: 12),
-                  _Titled(emoji: section.emoji, text: section.heading),
-                  const SizedBox(height: 3),
-                  Text(section.body, style: AppText.body.copyWith(height: 1.45)),
-                ],
-
-                if (canSpeak) ...[
-                  const SizedBox(height: 12),
-                  _ListenLink(speaking: speaking, onTap: onSpeak),
-                ],
-              ],
+          child: Text(
+            ChatCopy.speaker,
+            style: AppText.tileLabel.copyWith(
+              color: AppColors.muted,
+              letterSpacing: 0.6,
             ),
           ),
         ),
+        // Left out entirely when the device has no speech engine, rather than shown inert.
+        if (canSpeak) _ListenLink(speaking: speaking, onTap: onSpeak),
       ],
+    );
+  }
+}
+
+/// The answer, set apart from the reasoning that follows it.
+///
+/// A card rather than a first paragraph in bold: the whole point of the change is that someone
+/// who reads one thing reads the answer, and a run of prose does not survive being skimmed.
+class _VerdictCard extends StatelessWidget {
+  const _VerdictCard({required this.emoji, required this.text});
+
+  final String emoji;
+
+  /// Arrives a character at a time while the reply is being revealed.
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(13, 12, 13, 13),
+      decoration: BoxDecoration(
+        color: AppColors.goldWash,
+        borderRadius: AppShape.control,
+        border: Border.all(color: AppColors.gold.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (emoji.isNotEmpty) ...[
+            Text(emoji, style: AppText.title.copyWith(fontSize: 17)),
+            const SizedBox(width: 8),
+          ],
+          Expanded(
+            child: Text(
+              text,
+              style: AppText.title.copyWith(
+                fontSize: 16,
+                height: 1.4,
+                color: AppColors.navy,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -388,10 +579,11 @@ class _Titled extends StatelessWidget {
   }
 }
 
-/// Small enough to sit inside a bubble without competing with it.
+/// Small enough to sit inside a bubble's header without competing with it.
 ///
-/// Not the shared [SpeakButton], which is a pill sized for the bottom of a reading screen — one
-/// of those under every reply would turn the transcript into a column of buttons.
+/// Not the shared `SpeakButton`, which is a pill sized for the bottom of a reading screen — one
+/// of those on every reply would turn the transcript into a column of buttons. It does share
+/// [AudioBars] with it, so "this is playing" looks the same everywhere in the app.
 class _ListenLink extends StatelessWidget {
   const _ListenLink({required this.speaking, required this.onTap});
 
@@ -400,28 +592,41 @@ class _ListenLink extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: AppShape.pill,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              speaking ? Icons.stop_circle_outlined : Icons.volume_up_rounded,
-              size: 17,
-              color: AppColors.goldDeep,
+    return Semantics(
+      button: true,
+      label: speaking ? ChatCopy.stopListening : ChatCopy.listen,
+      excludeSemantics: true,
+      child: Material(
+        color: speaking ? AppColors.goldWash : Colors.transparent,
+        borderRadius: AppShape.pill,
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 5, horizontal: 9),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (speaking)
+                  const AudioBars(speaking: true, color: AppColors.goldDeep, size: 14)
+                else
+                  const Icon(
+                    Icons.volume_up_rounded,
+                    size: 16,
+                    color: AppColors.goldDeep,
+                  ),
+                const SizedBox(width: 6),
+                Text(
+                  speaking ? ChatCopy.stopListening : ChatCopy.listen,
+                  style: AppText.meta.copyWith(
+                    fontSize: 13,
+                    color: AppColors.goldDeep,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 6),
-            Text(
-              speaking ? ChatCopy.stopListening : ChatCopy.listen,
-              style: AppText.meta.copyWith(
-                color: AppColors.goldDeep,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );

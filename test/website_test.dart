@@ -7,7 +7,6 @@ import 'package:astrolok/website/policy_docs.dart';
 import 'package:astrolok/website/site_app.dart';
 import 'package:astrolok/website/site_copy.dart';
 import 'package:astrolok/website/site_router.dart';
-import 'package:astrolok/widgets/terms_footer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -16,8 +15,8 @@ import 'package:google_fonts/google_fonts.dart';
 /// the layout most of the site's shape decisions are about.
 ///
 /// The routing cases are the point of this file: the site's whole job is that the policy URLs
-/// already shipped inside the app — `https://astrolok.app/privacy` in `terms_footer.dart`,
-/// `/help` in `profile_view.dart` — open the page they promise.
+/// shipped inside the app — `defaultAppConfig`'s `privacy_url`, `terms_url` and `help_url`,
+/// which the onboarding footer and the account menu open — reach the page they promise.
 void main() {
   /// A 1440x2400 window: wide enough for the desktop breakpoint, tall enough that a whole page
   /// lays out without scrolling, so `find.text` sees every section.
@@ -258,7 +257,13 @@ void main() {
     test('the support email is the one the app opens', () {
       expect(SitePlaceholders.supportEmail, contains('@'));
       expect(SitePlaceholders.supportEmail, endsWith(SitePlaceholders.siteDomain));
-      expect(SitePlaceholders.supportEmail, TermsFooter.supportEmail);
+      // The app opens `support_url` from config, which ships as a mailto: at this address.
+      // Config can point it somewhere else entirely — that is the feature — but what a build
+      // carries and what the contact page prints must not disagree.
+      expect(
+        defaultAppConfig.configLink('support_url'),
+        contains(SitePlaceholders.supportEmail),
+      );
     });
 
     test('store links are still deliberately absent', () {
@@ -273,11 +278,24 @@ void main() {
     // This is the whole reason the site exists. `terms_footer.dart` shows these on the
     // onboarding sheets and `profile_view.dart` in the account menu; they were dead before
     // the site, and this pins them to routes that actually resolve.
+    //
+    // They come from the `app_config` table now, so config can point a build anywhere and
+    // this cannot follow it there. What it can still guarantee is the part that ships: the
+    // defaults baked into the binary, which are also what a blank row falls back to.
+    const shipped = ['privacy_url', 'terms_url', 'help_url'];
+
     test('point at this site', () {
-      expect(TermsFooter.siteUrl, 'https://${SitePlaceholders.siteDomain}');
+      for (final key in shipped) {
+        expect(
+          defaultAppConfig.configLink(key),
+          startsWith('https://${SitePlaceholders.siteDomain}/'),
+          reason: key,
+        );
+      }
     });
 
-    for (final url in [TermsFooter.privacyUrl, TermsFooter.termsUrl, TermsFooter.helpUrl]) {
+    for (final key in shipped) {
+      final url = defaultAppConfig.configLink(key);
       testWidgets('$url resolves to a real page', (tester) async {
         final path = Uri.parse(url).path;
         await pumpSite(tester, at: path);

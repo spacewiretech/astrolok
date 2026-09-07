@@ -17,7 +17,6 @@ abstract final class PalmCopy {
   static const frameDetected = 'Hand Detected';
 
   static const scanAction = 'Scan Palm';
-  static const galleryAction = 'Upload from gallery';
   static const privacyNote = 'Your images are private and secure';
 
   static const tipLighting = 'Good\nLighting';
@@ -27,8 +26,11 @@ abstract final class PalmCopy {
   static const cameraDenied = 'Astrolok needs camera access to read your palm.';
   static const cameraDeniedForever =
       'Camera access is off for Astrolok. Turn it on in Settings to read your palm.';
+  /// No longer offers a gallery upload as the way out, because this screen no longer has one.
+  /// Telling someone to upload a photo next to a screen with no upload button is worse than
+  /// telling them plainly that this device cannot do it.
   static const cameraUnavailable =
-      "This device's camera isn't available. You can upload a photo instead.";
+      "This device's camera isn't available, and a palm has to be photographed here.";
   static const allowCamera = 'Allow camera';
   static const openSettings = 'Open Settings';
 

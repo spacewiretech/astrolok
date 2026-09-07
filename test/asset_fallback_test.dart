@@ -99,6 +99,8 @@ void main() {
       Img.onboard2,
       Img.onboard3,
       Img.promoChatAstro,
+      Img.promoPalmReading,
+      Img.promoFaceReading,
       Img.readingChat,
       Img.readingPalm,
       Img.readingFace,

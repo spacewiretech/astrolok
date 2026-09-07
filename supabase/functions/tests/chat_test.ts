@@ -2,6 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 
 import {
   buildUserPrompt,
+  CHAT_SCHEMA,
   normaliseChatReply,
   SYSTEM_PROMPT,
 } from "../_shared/astro_chat.ts";
@@ -23,6 +24,7 @@ import { computeChart } from "../_shared/jyotish.ts";
 function reply(over: Record<string, unknown> = {}) {
   return {
     reply: {
+      verdict: "Love comes to you through work you already share with someone.",
       title_emoji: "✨",
       title: "Your Love Reading",
       opening: "Your Chandra sits in Rohini, and Rohini does not give its trust quickly.",
@@ -81,6 +83,64 @@ Deno.test("a reply with only an opening is still a reply", () => {
   assertEquals(result.sections, []);
   assertEquals(result.options, []);
   assertEquals(result.remember, []);
+});
+
+Deno.test("the verdict survives normalisation, which is the whole point of it", () => {
+  const result = normaliseChatReply(reply())!;
+
+  assertEquals(
+    result.verdict,
+    "Love comes to you through work you already share with someone.",
+  );
+});
+
+Deno.test("a reply that lost its verdict still ships, as replies did before the field", () => {
+  // The schema requires it, but this function's contract is that it never throws and degrades to
+  // less. This case is also every row written before the field existed.
+  const result = normaliseChatReply({
+    reply: { title: "The Season Ahead", opening: "Guru turns toward your tenth house." },
+  })!;
+
+  assert(result !== null);
+  assertEquals(result.verdict, "");
+  assertEquals(result.opening, "Guru turns toward your tenth house.");
+});
+
+Deno.test("a verdict that runs on is clamped rather than shown whole", () => {
+  const result = normaliseChatReply({
+    reply: { verdict: "word ".repeat(200), opening: "Rohini does not hurry." },
+  })!;
+
+  assert(result !== null);
+  assert(result.verdict.length <= 200);
+});
+
+Deno.test("a verdict is generated before anything it would have to justify", () => {
+  // Load-bearing rather than cosmetic: structured output is generated in the order given, so this
+  // is what stops the answer becoming a summary of reasoning already written — which is the
+  // hedging the field exists to end. A refactor that reordered these would silently undo it.
+  const ordering = CHAT_SCHEMA.properties.reply.propertyOrdering;
+
+  assertEquals(ordering[0], "verdict");
+  assert(ordering.indexOf("verdict") < ordering.indexOf("opening"));
+  assert(CHAT_SCHEMA.properties.reply.required.includes("verdict"));
+});
+
+Deno.test("the sage is told to answer before it explains", () => {
+  assert(SYSTEM_PROMPT.includes("ANSWER FIRST"));
+  assert(SYSTEM_PROMPT.includes("Verdict, then reasons"));
+});
+
+Deno.test("a question no chart can settle is answered, not deflected", () => {
+  // The past-life question is the one this app is actually asked, and a shrug about the soul
+  // being unknowable is what it used to return.
+  assert(SYSTEM_PROMPT.includes("WHEN THE QUESTION IS NOT ONE A CHART CAN SETTLE"));
+  assert(SYSTEM_PROMPT.includes("does not deflect"));
+
+  // And answering confidently must not have cost the boundaries — the block that stops a
+  // confident voice turning into a promise about somebody's marriage or health.
+  assert(SYSTEM_PROMPT.includes("BOUNDARIES — these are absolute"));
+  assert(SYSTEM_PROMPT.includes("Never use deterministic verbs"));
 });
 
 Deno.test("a malformed payload yields null rather than throwing", () => {

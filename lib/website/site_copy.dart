@@ -11,8 +11,10 @@ abstract final class SitePlaceholders {
   static const address =
       '15th Cross Rd, 6th Sector, HSR Layout, Bengaluru, Karnataka 560102';
 
-  /// Also the address `lib/features/profile/profile_view.dart` opens from "Contact us", so the
-  /// two are kept the same on purpose.
+  /// Also the address the app's "Contact us" opens, via the `support_url` default in
+  /// `lib/data/repositories/app_config_repository.dart` — kept the same on purpose, and pinned
+  /// by `test/website_test.dart`. Config can point the app's row elsewhere without touching
+  /// this; the site is the one place that always prints a working inbox.
   static const supportEmail = 'contact@astrolok.app';
 
   /// TODO(astrolok): a real number before launch. Cashfree's merchant checklist asks for one,

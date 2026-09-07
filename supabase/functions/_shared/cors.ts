@@ -46,7 +46,11 @@ export function fail(
     | "no_face"
     // The reading model is unreachable, overloaded, or answered with something unusable.
     // Retryable, and nothing is wrong with the user's photo.
-    | "ai_unavailable",
+    | "ai_unavailable"
+    // The thing asked for is gone — a chat thread deleted on another device, say. Distinct from
+    // `unauthorized`, which would send the user back to sign-in, and from `server_error`, which
+    // would invite a retry that cannot succeed. The app drops what it was holding and moves on.
+    | "not_found",
   message: string,
   status = 400,
 ): Response {

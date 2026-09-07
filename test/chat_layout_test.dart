@@ -3,6 +3,7 @@ import 'package:astrolok/data/models/astro_message.dart';
 import 'package:astrolok/data/providers.dart';
 import 'package:astrolok/data/repositories/chat_repository.dart';
 import 'package:astrolok/features/chat/chat_view.dart';
+import 'package:astrolok/features/chat/chat_viewmodel.dart';
 import 'package:astrolok/features/profile/memory_view.dart';
 import 'package:astrolok/widgets/safe_asset.dart';
 import 'package:flutter/material.dart';
@@ -50,6 +51,16 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pump(const Duration(milliseconds: 400));
   }
+
+  /// Opens the screen on a real conversation rather than on an unsent one.
+  ///
+  /// A draft has nothing to fetch, so it never calls the repository and shows the topic pills —
+  /// correct behaviour, and it would make every transcript test below pass vacuously against an
+  /// empty screen.
+  List<Override> onThread(ChatRepository repository) => [
+        chatRepositoryProvider.overrideWithValue(repository),
+        selectedThreadProvider.overrideWith((_) => 'thread-1'),
+      ];
 
   /// A transcript long enough, and with sections long enough, to find a wrapping bug.
   ///
@@ -100,7 +111,7 @@ void main() {
         ),
       );
     }
-    return ChatThread(messages: messages, remaining: 20);
+    return ChatThread(id: 'thread-1', messages: messages, remaining: 20);
   }
 
   group('the opening screen', () {
@@ -123,10 +134,7 @@ void main() {
   group('the transcript', () {
     testWidgets('lays out a long conversation on a small phone', (tester) async {
       final thread = longThread();
-      await pumpAt(tester, small, const ChatView(), overrides: [
-        chatRepositoryProvider
-            .overrideWithValue(_StubChatRepository(messages: thread.messages)),
-      ]);
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(_StubChatRepository(messages: thread.messages)));
 
       // Proves the transcript actually rendered. Without this the test passes vacuously on an
       // empty screen, which is exactly what it did the first time it was written.
@@ -146,10 +154,7 @@ void main() {
 
     testWidgets('renders a reply title, body and every section', (tester) async {
       final thread = longThread();
-      await pumpAt(tester, tall, const ChatView(), overrides: [
-        chatRepositoryProvider
-            .overrideWithValue(_StubChatRepository(messages: thread.messages)),
-      ]);
+      await pumpAt(tester, tall, const ChatView(), overrides: onThread(_StubChatRepository(messages: thread.messages)));
 
       expect(find.text('What Your Chart Says of Work'), findsWidgets);
       expect(find.text('Career Strengths'), findsWidgets);
@@ -160,10 +165,7 @@ void main() {
       // Chips accumulating down a transcript would turn the screen into a form, and answering a
       // question from six turns back would land somewhere the user did not expect.
       final thread = longThread();
-      await pumpAt(tester, tall, const ChatView(), overrides: [
-        chatRepositoryProvider
-            .overrideWithValue(_StubChatRepository(messages: thread.messages)),
-      ]);
+      await pumpAt(tester, tall, const ChatView(), overrides: onThread(_StubChatRepository(messages: thread.messages)));
 
       expect(find.text('What of my family?'), findsOneWidget);
       // The other turns' chips are dropped: only the newest offers any.
@@ -191,9 +193,7 @@ void main() {
         ),
       ];
 
-      await pumpAt(tester, small, const ChatView(), overrides: [
-        chatRepositoryProvider.overrideWithValue(_StubChatRepository(messages: messages)),
-      ]);
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(_StubChatRepository(messages: messages)));
 
       // The newest turn is at the visual bottom, so it is the one built first. Finding it
       // proves the transcript rendered — without an assertion like this the test would pass on
@@ -215,23 +215,172 @@ void main() {
     });
   });
 
+  group('the answer, before the reasoning', () {
+    testWidgets('a verdict is shown above the reply it explains', (tester) async {
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(
+        _StubChatRepository(
+          messages: [
+            AstroMessage(
+              id: 'a',
+              role: ChatRole.astro,
+              createdAt: DateTime(2026, 9, 4),
+              verdict: 'You were a keeper of records, near water.',
+              titleEmoji: '🌙',
+              title: 'Your Previous Birth',
+              text: 'Your Chandra sits in Rohini, whose symbol is the cart.',
+            ),
+          ],
+        ),
+      ));
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('You were a keeper of records, near water.'), findsOneWidget);
+
+      // The answer must be physically above the explanation, not merely present.
+      final verdict = tester.getTopLeft(
+        find.text('You were a keeper of records, near water.'),
+      );
+      final reasoning = tester.getTopLeft(
+        find.text('Your Chandra sits in Rohini, whose symbol is the cart.'),
+      );
+      expect(verdict.dy, lessThan(reasoning.dy));
+    });
+
+    testWidgets('a reply written before verdicts existed still renders', (tester) async {
+      // Every row already in the database is this case.
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(
+        _StubChatRepository(
+          messages: [
+            AstroMessage(
+              id: 'a',
+              role: ChatRole.astro,
+              createdAt: DateTime(2026, 9, 4),
+              titleEmoji: '✨',
+              title: 'The Season Ahead',
+              text: 'Guru turns toward your tenth house.',
+            ),
+          ],
+        ),
+      ));
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('The Season Ahead'), findsOneWidget);
+      expect(find.text('Guru turns toward your tenth house.'), findsOneWidget);
+    });
+
+    testWidgets('the listen control sits above the reply, not under it', (tester) async {
+      await pumpAt(tester, tall, const ChatView(), overrides: onThread(
+        _StubChatRepository(
+          messages: [
+            AstroMessage(
+              id: 'a',
+              role: ChatRole.astro,
+              createdAt: DateTime(2026, 9, 4),
+              verdict: 'Patience, not courage.',
+              title: 'The Season Ahead',
+              text: 'Guru turns toward your tenth house this season.',
+            ),
+          ],
+        ),
+      ));
+
+      expect(tester.takeException(), isNull);
+
+      // Only rendered when the device reports a speech engine, which the test harness does not —
+      // so the assertion is that the transcript laid out either way, and that when the control is
+      // there it is above the text rather than below it.
+      final listen = find.text('Listen');
+      if (listen.evaluate().isEmpty) return;
+
+      final control = tester.getTopLeft(listen);
+      final body = tester.getTopLeft(
+        find.text('Guru turns toward your tenth house this season.'),
+      );
+      expect(control.dy, lessThan(body.dy));
+    });
+  });
+
+  group('the conversations drawer', () {
+    final threads = [
+      ChatThreadSummary(
+        id: 'thread-1',
+        title: 'Your Previous Birth',
+        preview: 'You were a keeper of records, near water.',
+        lastMessageAt: DateTime.now().subtract(const Duration(hours: 2)),
+      ),
+      ChatThreadSummary(
+        id: 'thread-2',
+        title: 'What Your Chart Says Of Work',
+        preview: 'Stay where you are a while longer.',
+        lastMessageAt: DateTime.now().subtract(const Duration(days: 4)),
+      ),
+    ];
+
+    for (final (label, size) in [('a small phone', small), ('a tall phone', tall)]) {
+      testWidgets('lists every conversation under its heading on $label', (tester) async {
+        await pumpAt(tester, size, const ChatView(), overrides: onThread(
+          _StubChatRepository(threadList: threads),
+        ));
+
+        await tester.tap(find.bySemanticsLabel('Your conversations'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+
+        expect(tester.takeException(), isNull);
+        expect(find.text('New chat'), findsOneWidget);
+        expect(find.text('Your Previous Birth'), findsOneWidget);
+        expect(find.text('What Your Chart Says Of Work'), findsOneWidget);
+
+        // Grouped, not one flat list — the whole reason a sidebar of forty is readable.
+        expect(find.text('Today'), findsOneWidget);
+        expect(find.text('Previous 7 days'), findsOneWidget);
+
+        // And it is reachable: what Astro remembers is not per-conversation, so it lives here.
+        expect(find.text('What Astro remembers'), findsOneWidget);
+      });
+    }
+
+    testWidgets('a conversation deleted elsewhere opens a new one', (tester) async {
+      // Real whenever someone deletes a thread on another device, or it ages out. The user still
+      // wants to talk to Astro; they just cannot have that conversation back.
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(_GoneChatRepository()));
+
+      expect(tester.takeException(), isNull);
+      // Landed on the new-chat screen rather than an empty transcript.
+      expect(find.text(ChatTopic.love.label), findsOneWidget);
+    });
+
+    testWidgets('says so plainly when there are no conversations yet', (tester) async {
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(
+        _StubChatRepository(),
+      ));
+
+      await tester.tap(find.bySemanticsLabel('Your conversations'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(tester.takeException(), isNull);
+      expect(find.textContaining('Nothing here yet'), findsOneWidget);
+      // Still the thing they came to do.
+      expect(find.text('New chat'), findsOneWidget);
+    });
+  });
+
   group('the composer', () {
     testWidgets('closes when the day is spent, and says why', (tester) async {
-      await pumpAt(tester, small, const ChatView(), overrides: [
-        chatRepositoryProvider.overrideWithValue(
-          _StubChatRepository(
-            remaining: 0,
-            messages: [
-              AstroMessage(
-                id: 'a',
-                role: ChatRole.astro,
-                createdAt: DateTime(2026, 9, 4),
-                text: 'The last answer of the day.',
-              ),
-            ],
-          ),
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(
+        _StubChatRepository(
+          remaining: 0,
+          messages: [
+            AstroMessage(
+              id: 'a',
+              role: ChatRole.astro,
+              createdAt: DateTime(2026, 9, 4),
+              text: 'The last answer of the day.',
+            ),
+          ],
         ),
-      ]);
+      ));
 
       expect(tester.takeException(), isNull);
       expect(find.textContaining('asked Astro everything for today'), findsOneWidget);
@@ -261,7 +410,11 @@ void main() {
     });
 
     testWidgets('says so plainly when there is nothing yet', (tester) async {
-      await pumpAt(tester, small, const MemoryView());
+      // Overridden rather than left to the default: the walkable fake seeds a fact so the app
+      // has something to show on a fresh checkout, and this test is about the empty case.
+      await pumpAt(tester, small, const MemoryView(), overrides: [
+        chatRepositoryProvider.overrideWithValue(_StubChatRepository()),
+      ]);
 
       expect(tester.takeException(), isNull);
       expect(find.textContaining('Nothing yet'), findsOneWidget);
@@ -276,20 +429,43 @@ void main() {
 /// `FakeChatRepository` is the walkable-app fake and reports a fresh allowance, which is exactly
 /// wrong for the two states below. Rather than bend it with flags that only tests would use,
 /// these stand in.
+/// A repository whose one conversation is gone, for the deleted-elsewhere path.
+class _GoneChatRepository extends _StubChatRepository {
+  @override
+  Future<ChatSnapshot> history(String threadId) async =>
+      throw const ChatThreadGoneException('That conversation is no longer here.');
+}
+
 class _StubChatRepository implements ChatRepository {
-  _StubChatRepository({this.messages = const [], this.remaining, this.facts = const []});
+  _StubChatRepository({
+    this.messages = const [],
+    this.remaining,
+    this.facts = const [],
+    this.threadList = const [],
+  });
 
   final List<AstroMessage> messages;
   final int? remaining;
   final List<AstroFact> facts;
+  final List<ChatThreadSummary> threadList;
 
   @override
-  Future<ChatSnapshot> history() async =>
+  Future<ChatSnapshot> history(String threadId) async =>
       ChatSnapshot(messages: messages, facts: facts, remaining: remaining);
 
   @override
-  Future<ChatReply> send(String message) async =>
+  Future<ChatThreadList> threads() async =>
+      ChatThreadList(threads: threadList, facts: facts, remaining: remaining);
+
+  @override
+  Future<ChatReply> send(String message, {String? threadId}) async =>
       throw UnimplementedError('these tests never send');
+
+  @override
+  Future<ChatThreadList> renameThread(String id, String title) async => threads();
+
+  @override
+  Future<ChatThreadList> deleteThread(String id) async => threads();
 
   @override
   Future<List<AstroFact>> forget({String? key}) async =>

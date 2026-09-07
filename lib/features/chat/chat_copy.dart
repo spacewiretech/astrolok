@@ -41,9 +41,50 @@ abstract final class ChatCopy {
   static const listen = 'Listen';
   static const stopListening = 'Stop';
 
+  /// Astro's name over each reply, beside the listen control.
+  static const speaker = 'Astro';
+
+  // ---------------------------------------------------------------- conversations
+
+  static const conversations = 'Your conversations';
+  static const newChat = 'New chat';
+  static const openConversations = 'Your conversations';
+
+  /// For a conversation whose first reply never landed, so the server never named it.
+  static const untitledThread = 'New conversation';
+
+  static const threadsEmpty =
+      'Nothing here yet. Every conversation you start with Astro is kept.';
+
+  static const renameThread = 'Rename';
+  static const renameThreadTitle = 'Rename this conversation';
+  static const renameThreadHint = 'What to call it';
+  static const renameThreadConfirm = 'Rename';
+
+  static const deleteThread = 'Delete';
+  static const deleteThreadTitle = 'Delete this conversation?';
+
+  /// Says plainly what survives, because it is not obvious and the difference matters: the
+  /// transcript goes, the memory does not.
+  static const deleteThreadBody =
+      'This conversation goes for good. What Astro remembers about you stays.';
+  static const deleteThreadConfirm = 'Delete it';
+  static const deleteThreadDismiss = 'Keep it';
+  static const deleteThreadFailed = "Couldn't delete that conversation.";
+
+  // The four buckets the sidebar groups conversations into.
+  static const ageToday = 'Today';
+  static const ageYesterday = 'Yesterday';
+  static const ageWeek = 'Previous 7 days';
+  static const ageOlder = 'Older';
+
   // ---------------------------------------------------------------- failures
 
   static const sendFailed = 'That did not reach Astro. Please try again.';
+
+  /// The conversation was deleted elsewhere, or aged out. Not a retry — the screen opens a new
+  /// one, and this explains why what they tapped is not what they got.
+  static const threadGone = 'That conversation is no longer here. Starting a new one.';
 
   // ---------------------------------------------------------------- memory
 

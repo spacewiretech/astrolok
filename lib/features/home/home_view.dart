@@ -53,8 +53,8 @@ class HomeView extends ConsumerWidget {
               ],
 
               const SizedBox(height: 20),
-              // One slide until the Palm and Face cards are exported the same way. The dot row
-              // hides itself at one, so the strip does not advertise pages that do not exist.
+              // The three cards each open the reading they advertise, in the same order as the
+              // Explore rows below, so the strip and the list never disagree about what exists.
               PromoCarousel(
                 slides: [
                   PromoSlide(
@@ -64,6 +64,18 @@ class HomeView extends ConsumerWidget {
                     label: 'Chat with Astro. Ask anything about your life, love, career or '
                         'future. Start chat.',
                     onTap: () => context.push(Routes.chat),
+                  ),
+                  PromoSlide(
+                    image: Img.promoPalmReading,
+                    label: "Palm Reading. Your palm holds a story. Let's discover yours. "
+                        'Discover now.',
+                    onTap: () => context.push(Routes.palmCapture),
+                  ),
+                  PromoSlide(
+                    image: Img.promoFaceReading,
+                    label: "Face Reading. Your face holds a story. Let's discover yours. "
+                        'Discover now.',
+                    onTap: () => context.push(Routes.faceCapture),
                   ),
                 ],
               ),

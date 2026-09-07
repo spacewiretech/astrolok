@@ -65,8 +65,13 @@ abstract final class Routes {
   /// `:part` is a [FacePartKind] name. Use [facePartFor].
   static const facePart = '/face/reading/:id/part/:part';
 
-  /// The conversation with Astro. One thread, so no id — an opening question is handed over in
-  /// `extra`, the way the scan screens take their prepared image.
+  /// The conversations with Astro. One route for all of them: which is on screen lives in
+  /// `selectedThreadProvider`, not here, because a conversation that has not been sent yet has no
+  /// id to put in a URL — and replacing the route once the server supplied one would remount the
+  /// screen with the first reply still in flight. See `ChatViewModel` for the whole argument.
+  ///
+  /// An opening question is handed over in `extra`, the way the scan screens take their prepared
+  /// image; it always starts a new conversation.
   static const chat = '/chat';
 
   /// The account. Nested so that popping from Downloads lands on the profile.

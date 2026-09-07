@@ -61,8 +61,13 @@ function asTurn(row: { role: string; body: Record<string, unknown> }): Turn | nu
   }
 
   const parts: string[] = [];
+  // Verdict first, matching how it was written and how it is read. Replaying the reasoning
+  // without the answer it was reasoning toward would teach the model, turn by turn, that replies
+  // begin with justification.
+  const verdict = row.body?.verdict;
   const title = row.body?.title;
   const opening = row.body?.opening;
+  if (typeof verdict === "string" && verdict) parts.push(verdict);
   if (typeof title === "string" && title) parts.push(title);
   if (typeof opening === "string" && opening) parts.push(opening);
 
@@ -118,6 +123,9 @@ Deno.serve(async (req) => {
     return fail("invalid_request", "That message is a little long. Try asking it shorter.", 413);
   }
 
+  // Absent on the first turn of a new chat. Never trusted as given — see resolveThread().
+  const requestedThread = typeof body.thread_id === "string" ? body.thread_id.trim() : "";
+
   const config = await loadConfig(db);
 
   const { data: userRow, error: userError } = await db
@@ -164,17 +172,29 @@ Deno.serve(async (req) => {
     );
   }
 
+  // ------------------------------------------------------------ the thread
+  //
+  // After the quota check, so a request that is about to be refused does not leave an empty
+  // conversation behind in the sidebar.
+  const thread = await resolveThread(db, userId, requestedThread);
+  if (!thread) {
+    return fail("server_error", "Something went wrong. Please try again.", 500);
+  }
+
   // ------------------------------------------------------------ context
   //
   // Read *before* the user's turn is written, so the history is what came before this message
   // rather than including it — the message itself is sent separately, as the live prompt.
+  //
+  // Scoped to the thread, which is the entire point of threads: a question about work must not
+  // arrive carrying last week's question about love.
   const historyTurns = positiveInt(config.get("chat_history_turns"), DEFAULT_HISTORY_TURNS);
 
   const [{ data: recent }, { data: factRows }, { data: palmRow }, { data: faceRow }] =
     await Promise.all([
       db.from("chat_messages")
         .select("role, body")
-        .eq("user_id", userId)
+        .eq("thread_id", thread.id)
         .order("created_at", { ascending: false })
         .limit(historyTurns),
       db.from("user_facts")
@@ -219,7 +239,12 @@ Deno.serve(async (req) => {
   // loop would be free and unbounded against a metered API.
   const { data: pending, error: insertError } = await db
     .from("chat_messages")
-    .insert({ user_id: userId, role: "user", body: { text: message } })
+    .insert({
+      user_id: userId,
+      thread_id: thread.id,
+      role: "user",
+      body: { text: message },
+    })
     .select("id, created_at")
     .single();
 
@@ -251,7 +276,8 @@ Deno.serve(async (req) => {
     // astrologer is about the most private thing this app holds.
     console.log(
       `astro-chat ${pending.id}: model=${result.model} latency=${result.latencyMs}ms ` +
-        `history=${history.length} facts=${facts.length} chart=${chart ? "yes" : "no"} ` +
+        `thread=${thread.id} history=${history.length} facts=${facts.length} ` +
+        `chart=${chart ? "yes" : "no"} ` +
         `sections=${reply?.sections.length ?? "-"} remembered=${reply?.remember.length ?? "-"}`,
     );
 
@@ -264,6 +290,7 @@ Deno.serve(async (req) => {
     }
 
     const stored = {
+      verdict: reply.verdict,
       title_emoji: reply.titleEmoji,
       title: reply.title,
       opening: reply.opening,
@@ -276,6 +303,7 @@ Deno.serve(async (req) => {
       .from("chat_messages")
       .insert({
         user_id: userId,
+        thread_id: thread.id,
         role: "astro",
         body: stored,
         model: result.model,
@@ -300,6 +328,15 @@ Deno.serve(async (req) => {
     // reads them. Astro asks for these in conversation; this is where the answer lands.
     await promoteBirthDetails(db, userId, user, reply.remember);
 
+    // Names the thread, refreshes its one-line preview and moves it to the top of the sidebar.
+    // Like the facts above, never allowed to fail the request: a reply the user can read matters
+    // more than a title.
+    const title = thread.title || threadTitleFrom(reply.title, message);
+    await touchThread(db, thread.id, {
+      title: thread.title ? null : title,
+      preview: reply.verdict || reply.opening,
+    });
+
     return json({
       message: {
         id: saved?.id ?? null,
@@ -308,6 +345,7 @@ Deno.serve(async (req) => {
         ...stored,
       },
       asked: { id: pending.id, created_at: pending.created_at },
+      thread: { id: thread.id, title },
       remaining: Math.max(0, limit - (count ?? 0) - 1),
     });
   } catch (error) {
@@ -335,6 +373,96 @@ Deno.serve(async (req) => {
     }
   }
 });
+
+/**
+ * The conversation this turn belongs to, creating one when there is not one yet.
+ *
+ * The requested id is checked against `user_id` rather than trusted, and the user id comes from
+ * the session token — so a request carrying somebody else's thread id does not read their
+ * conversation into a prompt or write a turn into it. An id that does not resolve silently starts
+ * a new thread rather than failing: the alternative is a user whose chat is broken because a
+ * stale id survived a reinstall.
+ *
+ * Null only when the database refused, which the caller turns into a 500.
+ */
+async function resolveThread(
+  db: ReturnType<typeof serviceClient>,
+  userId: string,
+  requested: string,
+): Promise<{ id: string; title: string } | null> {
+  if (requested) {
+    const { data } = await db
+      .from("chat_threads")
+      .select("id, title")
+      .eq("id", requested)
+      .eq("user_id", userId)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (data) return { id: data.id as string, title: (data.title as string) ?? "" };
+  }
+
+  const { data: created, error } = await db
+    .from("chat_threads")
+    .insert({ user_id: userId })
+    .select("id, title")
+    .single();
+
+  if (error || !created) {
+    console.error("astro-chat: could not open a thread", error);
+    return null;
+  }
+
+  return { id: created.id as string, title: (created.title as string) ?? "" };
+}
+
+/** Longest a title may be, matching the column's own check. */
+const MAX_TITLE_CHARS = 80;
+
+/**
+ * What to call a conversation, given the first reply to it.
+ *
+ * The model already writes a 2-5 word subject line for every reply — "Your Love Reading", "The
+ * Season Ahead" — so a thread names itself from the first one and nobody is ever asked to name it.
+ * The user's own words are the fallback, which is better than "New chat" and worse than a title,
+ * because a question is usually longer than a name.
+ */
+function threadTitleFrom(replyTitle: string, message: string): string {
+  const title = replyTitle.trim();
+  if (title) return title.slice(0, MAX_TITLE_CHARS);
+
+  const said = message.trim().replace(/\s+/g, " ");
+  return said.length <= 60 ? said : `${said.slice(0, 59)}…`;
+}
+
+/** As much of the newest answer as the sidebar shows under a title. */
+const MAX_PREVIEW_CHARS = 100;
+
+/**
+ * Moves the thread to the top of the sidebar, refreshes its preview, and names it if it has no
+ * name yet.
+ *
+ * `title` is null when the thread already has one — a conversation is named once, by its opening
+ * question, and re-titling it on every turn would make the sidebar rearrange itself under the
+ * user's eyes. The preview, by contrast, is always the newest answer: that is what makes the
+ * sidebar readable rather than a column of titles.
+ */
+async function touchThread(
+  db: ReturnType<typeof serviceClient>,
+  threadId: string,
+  { title, preview }: { title: string | null; preview: string },
+): Promise<void> {
+  const { error } = await db
+    .from("chat_threads")
+    .update({
+      last_message_at: new Date().toISOString(),
+      preview: preview.trim().replace(/\s+/g, " ").slice(0, MAX_PREVIEW_CHARS),
+      ...(title ? { title } : {}),
+    })
+    .eq("id", threadId);
+
+  if (error) console.error("astro-chat: could not touch the thread", error);
+}
 
 /**
  * Upserts what the sage learned, then trims back to the cap.

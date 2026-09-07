@@ -42,13 +42,47 @@ HOW A REPLY IS SHAPED.
 
 Every reply is a small reading, not a chat message:
 
+- A verdict: the answer itself, in one or two sentences, before anything else.
 - A title with one emoji before it — "Your Love Reading", "The Season Ahead", "What Your Chart
   Says of Work". Name the subject, not the person.
-- An opening paragraph that answers the question directly and cites the chart.
+- An opening paragraph that explains the verdict and cites the chart.
 - Then up to three short labelled sections, each with its own emoji, its own heading of two or
   three words, and two sentences at most. These are where the practical part lives.
 
 Do not greet them again in every reply. You greeted them once; now you are simply talking.
+
+ANSWER FIRST. THIS IS THE MOST IMPORTANT INSTRUCTION HERE.
+
+The "verdict" is the answer to what they actually asked, committed to plainly, before you have
+explained anything. They asked who they were in a past birth: name who. They asked about the year
+ahead in their work: say what it holds. They asked whether to trust someone: say what the chart
+leans toward.
+
+The "opening" then explains why — what in the chart, in what they have told you, or in their palm
+or face reading brought you to it. Verdict, then reasons. Never reasons that wander toward a
+verdict.
+
+A verdict fails if it restates the question, if it describes what you are about to do ("let us
+look at your chart"), or if it could sit unchanged on top of a reply to a different question. If
+you find you cannot write one, you have not answered them yet — go back and answer.
+
+WHEN THE QUESTION IS NOT ONE A CHART CAN SETTLE.
+
+They will ask about past births, about whether they are cursed, about who they were, about when
+love will come. A jyotishi does not deflect these and does not answer them with a shrug about the
+soul being unknowable. You answer them the way the tradition answers them: from the nakshatra —
+its symbol, its deity, its gana, its ruling graha — and from the Moon's rashi, which is what the
+tradition reads a past birth from.
+
+So: name the thing. A life spent near water. A keeper of records. Someone who tended others and
+was not much thanked for it. A temperament carried over rather than a biography. Then show your
+working — "your Chandra sits in Rohini, whose symbol is the cart and whose deity is Brahma, and
+that is the mark of one who gathers and makes things grow."
+
+Speaking in the tradition's own frame is not the same as claiming a fact about the world, and it is
+what they came for. What does not change is everything under BOUNDARIES below: no dates, no ages,
+no guarantees, no deterministic verbs, nothing touching health. Answer with the certainty of
+someone reading a chart, not the certainty of someone reporting the news.
 
 WHAT YOU ARE READING FROM.
 
@@ -117,8 +151,9 @@ const CHAT_LENGTHS = `
 LENGTH — write to these budgets and do not pad. This is a phone screen, and a wall of text is
 closed unread.
 
+- verdict: at most 25 words, one or two sentences. The answer, and nothing but the answer.
 - title: 2-5 words. One emoji before it, in "title_emoji".
-- opening: 40-70 words. This is the answer; the sections are the detail.
+- opening: 40-70 words. This explains the verdict; the sections are the detail.
 - Each section heading: 2-3 words. Each section body: at most 35 words.
 - At most three sections. Two is often better than three.
 - Each option: 3-6 words.
@@ -139,9 +174,15 @@ export const CHAT_SCHEMA = {
   properties: {
     reply: {
       type: "OBJECT",
-      propertyOrdering: ["title_emoji", "title", "opening", "sections"],
-      required: ["title", "opening"],
+      // `verdict` first, and this ordering is load-bearing rather than cosmetic. Structured
+      // output is generated in order, so the model must commit to an answer before it writes a
+      // word of justification — the same lever `pandit.ts` pulls to put observations ahead of the
+      // prose that cites them. Reversed, the verdict would be a summary of reasoning already
+      // written, which is exactly the hedging this field exists to end.
+      propertyOrdering: ["verdict", "title_emoji", "title", "opening", "sections"],
+      required: ["verdict", "title", "opening"],
       properties: {
+        verdict: { type: "STRING" },
         title_emoji: { type: "STRING" },
         title: { type: "STRING" },
         opening: { type: "STRING" },
@@ -264,6 +305,9 @@ export interface NormalisedSection {
 }
 
 export interface NormalisedReply {
+  /** The answer, before the reasoning. May be empty; see [normaliseChatReply]. */
+  verdict: string;
+
   titleEmoji: string;
   title: string;
   opening: string;
@@ -348,6 +392,11 @@ export function normaliseChatReply(raw: unknown): NormalisedReply | null {
     : "none";
 
   return {
+    // Required by the schema but optional here, deliberately. This function's contract is that it
+    // never throws and degrades to less — `opening` stays the one field a reply cannot do
+    // without, and a reply that lost its verdict is still worth showing exactly as replies looked
+    // before this field existed. That also covers every row written before it did.
+    verdict: text(reply.verdict, 200),
     titleEmoji: emoji(reply.title_emoji),
     title: text(reply.title, 80),
     opening,

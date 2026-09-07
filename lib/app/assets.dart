@@ -20,9 +20,12 @@ abstract final class Img {
 
   static const onboardHero = [onboard1, onboard2, onboard3];
 
-  /// Home's promo card, exported flattened — artwork, heading and button are all pixels, so
-  /// the card carries its own Semantics label.
+  /// Home's promo cards, exported flattened — artwork, heading and button are all pixels, so
+  /// each card carries its own Semantics label. All three are 712x346, which is the aspect
+  /// [PromoCarousel] lays the strip out at.
   static const promoChatAstro = '$_base/promo_chat_astro.png';
+  static const promoPalmReading = '$_base/promo_palm_reading.png';
+  static const promoFaceReading = '$_base/promo_face_reading.png';
 
   /// Thumbnails for the Explore Readings rows, cropped from the home render at a common
   /// 190px square so all three render at the same scale in a 64pt box.
