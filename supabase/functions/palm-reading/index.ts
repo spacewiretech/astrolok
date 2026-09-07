@@ -8,6 +8,7 @@ import {
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
 import { GeminiError, geminiSettings, readImage } from "../_shared/gemini.ts";
+import { ageFrom, firstName } from "../_shared/person.ts";
 import {
   buildUserPrompt,
   FOCUS_KEYS,
@@ -49,25 +50,6 @@ const REJECT_MESSAGES: Record<string, string> = {
   obstructed: "Something is covering your palm. Open your hand fully and try again.",
   incomplete: "We couldn't read enough of that palm. Try again with your hand fully open.",
 };
-
-function ageFrom(dob: string | null): number | null {
-  if (!dob) return null;
-  const born = new Date(`${dob}T00:00:00Z`);
-  if (Number.isNaN(born.getTime())) return null;
-
-  const now = new Date();
-  let age = now.getUTCFullYear() - born.getUTCFullYear();
-  const monthDelta = now.getUTCMonth() - born.getUTCMonth();
-  if (monthDelta < 0 || (monthDelta === 0 && now.getUTCDate() < born.getUTCDate())) age -= 1;
-
-  return age >= 0 && age < 130 ? age : null;
-}
-
-/** First name only. The prompt addresses the user directly; a full legal name reads oddly. */
-function firstName(name: string | null): string | null {
-  const first = (name ?? "").trim().split(/\s+/)[0];
-  return first.length > 0 ? first : null;
-}
 
 Deno.serve(async (req) => {
   const cors = preflight(req);

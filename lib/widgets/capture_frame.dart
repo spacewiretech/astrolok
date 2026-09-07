@@ -56,6 +56,9 @@ class CaptureViewfinder extends StatelessWidget {
 
   final bool cameraReady;
   final CameraFailure? cameraFailure;
+
+  /// The **sensor's** ratio (width / height), which is landscape on every phone. What gets
+  /// drawn is not: see [_displayAspectRatio].
   final double previewAspectRatio;
 
   /// Built lazily and only when the camera is ready, so a screen whose camera never started
@@ -69,8 +72,23 @@ class CaptureViewfinder extends StatelessWidget {
   final CameraCopy copy;
   final VoidCallback onRetryPermission;
 
+  /// The shape the preview is actually drawn in, which is the sensor turned on its side while
+  /// the phone is upright: a 16:9 sensor fills a 9:16 box in portrait.
+  ///
+  /// This has to match, because `CameraPreview` is itself an `AspectRatio` — it wraps the
+  /// texture in one and picks this same ratio internally. Handing it a box shaped like the raw
+  /// sensor ratio did not letterbox the picture, it flattened it: an `AspectRatio` under tight
+  /// constraints silently takes the size it is given, so a portrait frame was stretched across
+  /// a landscape box, roughly 3× too wide.
+  double _displayAspectRatio(BuildContext context) {
+    final upright = MediaQuery.orientationOf(context) == Orientation.portrait;
+    return upright ? 1 / previewAspectRatio : previewAspectRatio;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final displayAspectRatio = _displayAspectRatio(context);
+
     return Column(
       children: [
         AspectRatio(
@@ -88,13 +106,13 @@ class CaptureViewfinder extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 if (cameraReady)
-                  // The SizedBox gives the preview its true aspect ratio first; FittedBox then
-                  // crops it to the square, which is the same geometry the crop assumes.
+                  // The SizedBox gives the preview its true shape first; FittedBox then crops
+                  // it to the square, which is the same geometry the crop assumes.
                   FittedBox(
                     fit: BoxFit.cover,
                     clipBehavior: Clip.hardEdge,
                     child: SizedBox(
-                      width: 100.0 * previewAspectRatio,
+                      width: 100.0 * displayAspectRatio,
                       height: 100,
                       child: previewBuilder(),
                     ),

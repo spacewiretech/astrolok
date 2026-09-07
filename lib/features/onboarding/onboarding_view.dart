@@ -8,6 +8,8 @@ import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../data/providers.dart';
+import '../../data/repositories/app_config_repository.dart';
 import '../../widgets/astral_background.dart';
 import '../../widgets/otp_field.dart';
 import '../../widgets/phone_field.dart';
@@ -167,6 +169,16 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
     );
   }
 
+  /// Both sheets end with the same footer, and its links come from config so a policy URL can
+  /// be corrected without an app release. Defaults stand in until config resolves.
+  Widget get _termsFooter {
+    final config = ref.watch(appConfigProvider).valueOrNull ?? defaultAppConfig;
+    return TermsFooter(
+      termsUrl: config.configLink('terms_url'),
+      privacyUrl: config.configLink('privacy_url'),
+    );
+  }
+
   Widget _phoneSheet(OnboardingState state) {
     final model = ref.read(onboardingViewModelProvider.notifier);
 
@@ -183,7 +195,7 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
           onPressed: state.canSendOtp ? model.sendOtp : null,
         ),
         const SizedBox(height: 16),
-        const TermsFooter(),
+        _termsFooter,
       ],
     );
   }
@@ -235,7 +247,7 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
           onPressed: state.canSaveName ? _saveName : null,
         ),
         const SizedBox(height: 16),
-        const TermsFooter(),
+        _termsFooter,
       ],
     );
   }

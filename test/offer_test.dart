@@ -30,6 +30,38 @@ void main() {
     test('configInt survives a value that is not a number', () {
       expect({'cashfree_trial_days': 'soon'}.configInt('cashfree_trial_days'), 1);
     });
+
+    test('configLink refuses to hand back a blank', () {
+      // The case configString does not cover: the key is present, so it never reaches the
+      // default, and the menu row would be left opening nothing. One cleared cell in the
+      // Supabase dashboard is all it takes.
+      expect({'terms_url': ''}.configLink('terms_url'), 'https://astrolok.app/terms');
+      expect({'terms_url': '   '}.configLink('terms_url'), 'https://astrolok.app/terms');
+      expect(<String, String>{}.configLink('help_url'), 'https://astrolok.app/help');
+    });
+
+    test('configLink prefers config and trims it', () {
+      expect(
+        {'privacy_url': '  https://example.com/privacy  '}.configLink('privacy_url'),
+        'https://example.com/privacy',
+      );
+      // Any scheme: support is allowed to move off email without an app release.
+      expect(
+        {'support_url': 'https://wa.me/919000000000'}.configLink('support_url'),
+        'https://wa.me/919000000000',
+      );
+    });
+
+    test('the shipped links are URIs a phone can actually open', () {
+      // A bare domain parses fine and then opens nothing, so scheme is the thing to assert.
+      for (final key in ['help_url', 'privacy_url', 'terms_url']) {
+        expect(Uri.parse(defaultAppConfig.configLink(key)).scheme, 'https', reason: key);
+      }
+      final support = Uri.parse(defaultAppConfig.configLink('support_url'));
+      expect(support.scheme, 'mailto');
+      // Encoded, not raw: a literal space in the subject fails to open on some devices.
+      expect(defaultAppConfig.configLink('support_url'), isNot(contains(' ')));
+    });
   });
 
   group('SubscriptionOffer', () {

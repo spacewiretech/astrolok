@@ -16,10 +16,8 @@ import '../../widgets/safe_asset.dart';
 
 /// The signed-in, paid-for home.
 ///
-/// Palm Reading, Face Reading and the profile button all route into their own flows. Chat with
-/// Astro is still designed rather than built — it needs a backend that does not exist yet — so
-/// it answers with "Coming soon" rather than being a chevron that does nothing, which reads as
-/// a bug.
+/// Every row here now goes somewhere. The "coming soon" snackbar this screen used to answer
+/// with is gone, and with it the last unbuilt thing on Home.
 class HomeView extends ConsumerWidget {
   const HomeView({super.key});
 
@@ -55,8 +53,8 @@ class HomeView extends ConsumerWidget {
               ],
 
               const SizedBox(height: 20),
-              // One slide until the Palm and Face cards are exported the same way. The dot row
-              // hides itself at one, so the strip does not advertise pages that do not exist.
+              // The three cards each open the reading they advertise, in the same order as the
+              // Explore rows below, so the strip and the list never disagree about what exists.
               PromoCarousel(
                 slides: [
                   PromoSlide(
@@ -65,7 +63,19 @@ class HomeView extends ConsumerWidget {
                     // screen reader gets. It has to say what the image says.
                     label: 'Chat with Astro. Ask anything about your life, love, career or '
                         'future. Start chat.',
-                    onTap: () => _soon(context, 'Chat with Astro'),
+                    onTap: () => context.push(Routes.chat),
+                  ),
+                  PromoSlide(
+                    image: Img.promoPalmReading,
+                    label: "Palm Reading. Your palm holds a story. Let's discover yours. "
+                        'Discover now.',
+                    onTap: () => context.push(Routes.palmCapture),
+                  ),
+                  PromoSlide(
+                    image: Img.promoFaceReading,
+                    label: "Face Reading. Your face holds a story. Let's discover yours. "
+                        'Discover now.',
+                    onTap: () => context.push(Routes.faceCapture),
                   ),
                 ],
               ),
@@ -79,7 +89,7 @@ class HomeView extends ConsumerWidget {
                 title: 'Chat with Astro',
                 subtitle: 'Ask anything about your life, love,career or future',
                 fallbackIcon: Icons.chat_bubble_outline_rounded,
-                onTap: () => _soon(context, 'Chat with Astro'),
+                onTap: () => context.push(Routes.chat),
               ),
               const SizedBox(height: 14),
               ReadingCard(
@@ -102,12 +112,6 @@ class HomeView extends ConsumerWidget {
         ),
       ),
     );
-  }
-
-  void _soon(BuildContext context, String what) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text('$what is coming soon.')));
   }
 }
 

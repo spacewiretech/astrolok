@@ -17,6 +17,11 @@ dependencies:
   flutter_riverpod: ^2.6.1
   go_router: ^17.5.0
 
+  # Clean `/privacy` URLs on the marketing site instead of `/#/privacy`. Web-only, and only
+  # reached through `lib/website/url_strategy.dart`'s conditional export.
+  flutter_web_plugins:
+    sdk: flutter
+
   # Backend. Supabase proxies OTP through Edge Functions so the Fast2SMS key stays off-device;
   # http is the direct-to-Fast2SMS fallback for builds with no Supabase configured.
   supabase_flutter: ^2.17.2

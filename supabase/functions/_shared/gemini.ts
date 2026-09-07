@@ -148,25 +148,28 @@ async function post(
   return await response.json() as GeminiResponse;
 }
 
+/** One turn of a conversation. `model` is Gemini's name for its own side. */
+export interface Turn {
+  role: "user" | "model";
+  text: string;
+}
+
+/**
+ * The request body, given whatever `contents` the caller has assembled.
+ *
+ * Parameterised over `contents` rather than over an image, because that array is the only thing
+ * a photo reading and a chat turn genuinely disagree about — everything below it is the same
+ * generation config and the same safety settings.
+ */
 function requestBody(
-  imageBase64: string,
-  mimeType: string,
+  contents: unknown[],
   systemPrompt: string,
-  userPrompt: string,
   schema: unknown,
   maxOutputTokens: number,
 ) {
   return {
     systemInstruction: { parts: [{ text: systemPrompt }] },
-    contents: [{
-      role: "user",
-      parts: [
-        // Image before text: Gemini's own guidance for single-image prompts, and it visibly
-        // improves how well the reading sticks to what is actually in the photo.
-        { inline_data: { mime_type: mimeType, data: imageBase64 } },
-        { text: userPrompt },
-      ],
-    }],
+    contents,
     generationConfig: {
       responseMimeType: "application/json",
       responseSchema: schema,
@@ -231,22 +234,70 @@ export interface ImageReadRequest {
   schema: unknown;
 }
 
+export interface ChatRequest {
+  systemPrompt: string;
+  schema: unknown;
+
+  /** Everything said so far, oldest first. The newest user turn is [userPrompt], not this. */
+  history: Turn[];
+
+  /** What the user has just said, wrapped by the caller with whatever context it wants to add. */
+  userPrompt: string;
+}
+
 export interface GeminiRawResult {
   parsed: Record<string, unknown>;
   model: string;
   latencyMs: number;
 }
 
+/** The time and token budgets one kind of call gets. */
+interface Budget {
+  firstTokens: number;
+  retryTokens: number;
+  timeoutMs: number;
+  retryTimeoutMs: number;
+  retryDeadlineMs: number;
+}
+
+/** A multimodal reading: ~1200 output tokens, 10-20 seconds. */
+const READING_BUDGET: Budget = {
+  firstTokens: 4096,
+  retryTokens: 6144,
+  timeoutMs: TIMEOUT_MS,
+  retryTimeoutMs: RETRY_TIMEOUT_MS,
+  retryDeadlineMs: RETRY_DEADLINE_MS,
+};
+
 /**
- * One reading of one photograph.
+ * A chat turn: a few hundred output tokens, 2-5 seconds.
  *
- * Retries once — on a bigger token cap after a truncation, on the fallback model after an
- * overload, or simply again after unparseable JSON (temperature is above zero, so the second
- * attempt is genuinely a different sample rather than the same failure repeated).
+ * Its own budget rather than the reading's, because someone is watching a cursor blink. Waiting
+ * forty seconds for a sentence would feel broken, and a caller who wanted the reading's patience
+ * would be waiting on a request that had already failed.
  */
-export async function readImage(
+const CHAT_BUDGET: Budget = {
+  firstTokens: 1536,
+  retryTokens: 2560,
+  timeoutMs: 20_000,
+  retryTimeoutMs: 12_000,
+  retryDeadlineMs: 14_000,
+};
+
+/**
+ * The call, the retry, and the rules for when a retry is worth making.
+ *
+ * Shared by both entry points so the policy exists once: a bigger token cap after a truncation,
+ * the fallback model after an overload, or simply another sample after unparseable JSON —
+ * temperature is above zero, so a second attempt is genuinely different rather than the same
+ * failure repeated.
+ */
+async function send(
   settings: GeminiSettings,
-  request: ImageReadRequest,
+  contents: unknown[],
+  systemPrompt: string,
+  schema: unknown,
+  budget: Budget,
 ): Promise<GeminiRawResult> {
   if (!settings.apiKey) {
     throw new GeminiError(
@@ -263,14 +314,7 @@ export async function readImage(
     const response = await post(
       model,
       settings.apiKey,
-      requestBody(
-        request.imageBase64,
-        request.mimeType,
-        request.systemPrompt,
-        request.userPrompt,
-        request.schema,
-        maxTokens,
-      ),
+      requestBody(contents, systemPrompt, schema, maxTokens),
       timeoutMs,
     );
     return JSON.parse(textFrom(response)) as Record<string, unknown>;
@@ -278,7 +322,7 @@ export async function readImage(
 
   try {
     return {
-      parsed: await attempt(settings.model, 4096, TIMEOUT_MS),
+      parsed: await attempt(settings.model, budget.firstTokens, budget.timeoutMs),
       model: settings.model,
       latencyMs: Date.now() - startedAt,
     };
@@ -287,7 +331,7 @@ export async function readImage(
     const error = first instanceof GeminiError ? first : null;
 
     // Out of time, or a failure a second identical call cannot fix.
-    if (elapsed > RETRY_DEADLINE_MS || error?.isConfigurationProblem) throw first;
+    if (elapsed > budget.retryDeadlineMs || error?.isConfigurationProblem) throw first;
 
     const truncated = error?.detail.startsWith("MAX_TOKENS") ?? false;
     const useFallback = (error?.isTransient ?? false) && settings.fallbackModel !== "";
@@ -299,11 +343,55 @@ export async function readImage(
     );
 
     return {
-      parsed: await attempt(model, truncated ? 6144 : 4096, RETRY_TIMEOUT_MS),
+      parsed: await attempt(
+        model,
+        truncated ? budget.retryTokens : budget.firstTokens,
+        budget.retryTimeoutMs,
+      ),
       model,
       latencyMs: Date.now() - startedAt,
     };
   }
+}
+
+/** One reading of one photograph. */
+export function readImage(
+  settings: GeminiSettings,
+  request: ImageReadRequest,
+): Promise<GeminiRawResult> {
+  const contents = [{
+    role: "user",
+    parts: [
+      // Image before text: Gemini's own guidance for single-image prompts, and it visibly
+      // improves how well the reading sticks to what is actually in the photo.
+      { inline_data: { mime_type: request.mimeType, data: request.imageBase64 } },
+      { text: request.userPrompt },
+    ],
+  }];
+
+  return send(settings, contents, request.systemPrompt, request.schema, READING_BUDGET);
+}
+
+/**
+ * One turn of a conversation.
+ *
+ * The history is sent as real alternating turns rather than flattened into one prompt, because
+ * that is what the model is trained on: it tracks who said what, and it will not mistake
+ * something it said earlier for something the user asserted.
+ */
+export function converse(
+  settings: GeminiSettings,
+  request: ChatRequest,
+): Promise<GeminiRawResult> {
+  const contents = [
+    ...request.history.map((turn) => ({
+      role: turn.role,
+      parts: [{ text: turn.text }],
+    })),
+    { role: "user", parts: [{ text: request.userPrompt }] },
+  ];
+
+  return send(settings, contents, request.systemPrompt, request.schema, CHAT_BUDGET);
 }
 
 // ---------------------------------------------------------------- shared normalising

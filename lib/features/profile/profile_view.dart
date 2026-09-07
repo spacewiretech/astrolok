@@ -11,10 +11,11 @@ import '../../app/theme/app_typography.dart';
 import '../../data/entitlement.dart';
 import '../../data/models/app_user.dart';
 import '../../data/providers.dart';
+import '../../data/repositories/app_config_repository.dart';
 import '../../widgets/app_snackbar.dart';
 import '../../widgets/astral_background.dart';
 import '../../widgets/circle_icon_button.dart';
-import '../../widgets/terms_footer.dart';
+import '../chat/chat_copy.dart';
 
 /// The account.
 ///
@@ -37,6 +38,9 @@ class ProfileView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(entitlementProvider);
+    // The four external rows below open whatever config says. Defaults stand in until it
+    // resolves, so the menu is never briefly full of rows that open nothing.
+    final config = ref.watch(appConfigProvider).valueOrNull ?? defaultAppConfig;
 
     return Scaffold(
       body: AstralBackground(
@@ -110,32 +114,37 @@ class ProfileView extends ConsumerWidget {
                           onTap: () => context.push(Routes.downloads),
                         ),
                         _MenuRow(
+                          icon: Icons.auto_awesome_outlined,
+                          label: ChatCopy.memoryHeading,
+                          onTap: () => context.push(Routes.memory),
+                        ),
+                        _MenuRow(
                           icon: Icons.phone_outlined,
                           label: 'Contact us',
+                          // Launched with whatever scheme config gives it, so support can
+                          // move off email without an app release.
                           onTap: () => _open(
                             context,
-                            Uri.parse(
-                              'mailto:support@astrolok.app'
-                              '?subject=${Uri.encodeComponent('Astrolok support')}',
-                            ),
+                            Uri.parse(config.configLink('support_url')),
                           ),
                         ),
                         _MenuRow(
                           icon: Icons.info_outline_rounded,
                           label: 'Help & FAQ',
                           onTap: () =>
-                              _open(context, Uri.parse('https://astrolok.app/help')),
+                              _open(context, Uri.parse(config.configLink('help_url'))),
                         ),
                         _MenuRow(
                           icon: Icons.shield_outlined,
                           label: 'Privacy Policy',
                           onTap: () =>
-                              _open(context, Uri.parse(TermsFooter.privacyUrl)),
+                              _open(context, Uri.parse(config.configLink('privacy_url'))),
                         ),
                         _MenuRow(
                           icon: Icons.receipt_long_outlined,
                           label: 'Terms & Conditions',
-                          onTap: () => _open(context, Uri.parse(TermsFooter.termsUrl)),
+                          onTap: () =>
+                              _open(context, Uri.parse(config.configLink('terms_url'))),
                         ),
                       ],
                     ),

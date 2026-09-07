@@ -8,15 +8,23 @@ import '../app/theme/app_typography.dart';
 /// "By continuing you agree to our Terms of Service and Privacy Policy."
 ///
 /// Both links must actually open something before launch — an agreement pointing at nothing is
-/// not an agreement, and both stores reject a signup flow whose policy link is dead. The URLs
-/// are constants here so there is one place to set them.
+/// not an agreement, and both stores reject a signup flow whose policy link is dead.
+///
+/// The URLs are passed in rather than held here: they live in the `app_config` table so they
+/// can be corrected without an app release, with `defaultAppConfig` carrying the fallbacks that
+/// ship in the build. Nothing under `lib/widgets/` reads a provider, so the caller resolves
+/// them — see `lib/features/onboarding/onboarding_view.dart`.
 class TermsFooter extends StatefulWidget {
-  const TermsFooter({super.key, this.lead = 'By continuing you agree to our'});
+  const TermsFooter({
+    super.key,
+    required this.termsUrl,
+    required this.privacyUrl,
+    this.lead = 'By continuing you agree to our',
+  });
 
+  final String termsUrl;
+  final String privacyUrl;
   final String lead;
-
-  static const termsUrl = 'https://astrolok.app/terms';
-  static const privacyUrl = 'https://astrolok.app/privacy';
 
   @override
   State<TermsFooter> createState() => _TermsFooterState();
@@ -25,8 +33,11 @@ class TermsFooter extends StatefulWidget {
 class _TermsFooterState extends State<TermsFooter> {
   /// Recognisers hold gesture state, so they are built once and disposed — rebuilding them
   /// inside `build` leaks one per frame.
-  late final _terms = TapGestureRecognizer()..onTap = () => _open(TermsFooter.termsUrl);
-  late final _privacy = TapGestureRecognizer()..onTap = () => _open(TermsFooter.privacyUrl);
+  ///
+  /// The URL is read through `widget` at tap time rather than captured here, so config
+  /// arriving after the first frame is picked up without rebuilding the recognisers.
+  late final _terms = TapGestureRecognizer()..onTap = () => _open(widget.termsUrl);
+  late final _privacy = TapGestureRecognizer()..onTap = () => _open(widget.privacyUrl);
 
   @override
   void dispose() {

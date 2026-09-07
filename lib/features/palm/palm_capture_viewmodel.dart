@@ -83,22 +83,22 @@ class PalmCaptureViewModel extends AutoDisposeNotifier<PalmCaptureState> {
 
   /// Takes a photo, prepares it, and returns what the scan screen needs. Null on failure, with
   /// the reason already in `state.error`.
-  Future<PalmScanRequest?> capture() => _prepare(() => _camera.capture());
-
-  /// The gallery path. Also the only way to get a photo on a simulator, which has no camera.
-  Future<PalmScanRequest?> pickFromGallery() => _prepare(pickPhotoFromGallery);
-
-  Future<PalmScanRequest?> _prepare(Future<Uint8List?> Function() source) async {
+  ///
+  /// The camera is the only source. There is no gallery path here on purpose — a palm is read
+  /// from a photo taken on the spot — which is why this is no longer the shared `_prepare` the
+  /// face flow still has.
+  Future<PalmScanRequest?> capture() async {
     if (state.busy) return null;
     state = state.copyWith(busy: true, clearError: true);
 
     try {
-      final raw = await source();
+      final raw = await _camera.capture();
       if (raw == null) {
-        // Covers a cancelled gallery pick as well as a failed shutter, so it must not read as
-        // an error in the cancelled case — hence no message on an empty result from the
-        // picker. The camera path sets one below.
-        state = state.copyWith(busy: false);
+        // A failed shutter, and now unambiguously that: this branch used to be shared with a
+        // cancelled gallery pick, which must not read as an error, so it stayed silent — and
+        // a failed capture said nothing at all. `DeviceCamera.capture` swallows its own
+        // exceptions and returns null, so the catch below never covered this.
+        state = state.copyWith(busy: false, error: PalmCopy.captureFailed);
         return null;
       }
 

@@ -20,9 +20,12 @@ abstract final class Img {
 
   static const onboardHero = [onboard1, onboard2, onboard3];
 
-  /// Home's promo card, exported flattened — artwork, heading and button are all pixels, so
-  /// the card carries its own Semantics label.
+  /// Home's promo cards, exported flattened — artwork, heading and button are all pixels, so
+  /// each card carries its own Semantics label. All three are 712x346, which is the aspect
+  /// [PromoCarousel] lays the strip out at.
   static const promoChatAstro = '$_base/promo_chat_astro.png';
+  static const promoPalmReading = '$_base/promo_palm_reading.png';
+  static const promoFaceReading = '$_base/promo_face_reading.png';
 
   /// Thumbnails for the Explore Readings rows, cropped from the home render at a common
   /// 190px square so all three render at the same scale in a 64pt box.
@@ -96,6 +99,20 @@ abstract final class FaceIcon {
   static const faceShape = '$_base/face_shape.png';
   static const nose = '$_base/face_nose.png';
   static const lips = '$_base/face_lips.png';
+}
+
+/// The chat's two glyphs.
+///
+/// Both are small and flat, and both already carry their own colour — the send disc is navy with
+/// a gold chevron, the spark is gold — so nothing tints them at the use site.
+abstract final class ChatIcon {
+  static const _base = 'assets/icons';
+
+  /// The circular send button at the right of the composer.
+  static const send = '$_base/chat_send.png';
+
+  /// The four-pointed star at the left of the composer, before "Ask Astro".
+  static const spark = '$_base/chat_spark.png';
 }
 
 /// Vector assets. Still to be exported — every reference falls back to a Material icon, which

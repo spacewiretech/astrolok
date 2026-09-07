@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/astro_message.dart';
 import '../models/face_reading.dart';
 import '../models/palm_reading.dart';
 
@@ -100,6 +101,32 @@ abstract class ReadingStore<T> {
     }
   }
 
+  /// Drops one entry, if it is here.
+  ///
+  /// Without this, something the user deleted on the server would come back from the cache on the
+  /// next cold start — which reads as the deletion having silently failed.
+  Future<void> remove(String id) async {
+    try {
+      final existing = await all();
+      final kept = [
+        for (final reading in existing)
+          if (idOf(reading) != id) reading,
+      ];
+      if (kept.length == existing.length) return;
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(
+        storageKey,
+        jsonEncode({
+          'v': version,
+          'readings': [for (final r in kept) encode(r)],
+        }),
+      );
+    } catch (error) {
+      debugPrint('[$logTag] could not drop the cached entry: $error');
+    }
+  }
+
   Future<void> clear() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -133,6 +160,56 @@ class PalmReadingStore extends ReadingStore<PalmReading> {
 
   @override
   String idOf(PalmReading reading) => reading.id;
+}
+
+/// The conversations, cached so a cold start paints instantly and yesterday's counsel is still
+/// readable with no signal.
+///
+/// One entry per thread, each holding its whole transcript — not `ReadingStore<AstroMessage>`
+/// where each turn is an entry: `_keep` is a non-overridable `static const` 10, which as "ten
+/// conversations" is generous and as "ten messages" would silently eat the eleventh. The cost is
+/// re-encoding a transcript on every turn, which at a few tens of kilobytes is not worth a second
+/// storage class.
+///
+/// The ten newest conversations are cached; older ones still open, they just wait for the server
+/// the first time. That matches [ReadingImageStore], which keeps ten of everything else.
+class ChatThreadStore extends ReadingStore<ChatThread> {
+  const ChatThreadStore();
+
+  @override
+  String get storageKey => 'astrolok.chat_thread';
+
+  /// Bumped to 2 when the conversation became conversations. A version 1 payload held a single
+  /// thread under a fixed id and no verdicts, so it is dropped whole rather than half-parsed into
+  /// a sidebar that would show one untitled row. The transcript is not lost — it is on the
+  /// server, and the first `chat-history` call brings it back with its real thread.
+  @override
+  int get version => 2;
+
+  @override
+  String get logTag => 'chat';
+
+  @override
+  ChatThread? parse(Object? raw) => ChatThread.fromServer(raw);
+
+  @override
+  Map<String, dynamic> encode(ChatThread thread) => thread.toJson();
+
+  @override
+  String idOf(ChatThread thread) => thread.id;
+
+  /// One conversation, or null when it has not been cached.
+  Future<ChatThread?> load(String id) => byId(id);
+
+  /// Every cached conversation, newest first, as the sidebar lists them.
+  ///
+  /// What lets the drawer show something on a cold start instead of a spinner. `all()` already
+  /// returns them newest-first — `save` prepends — so this only drops the ones with nothing to
+  /// preview.
+  Future<List<ChatThreadSummary>> recent() async => [
+        for (final thread in await all())
+          if (!thread.isEmpty) thread.summary,
+      ];
 }
 
 class FaceReadingStore extends ReadingStore<FaceReading> {

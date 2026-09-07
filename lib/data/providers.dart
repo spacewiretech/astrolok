@@ -7,6 +7,7 @@ import '../app/env.dart';
 import 'camera/reading_camera.dart';
 import 'cashfree/cashfree_checkout.dart';
 import 'cashfree/upi_app_preference.dart';
+import 'fake/fake_astro_chat.dart';
 import 'fake/fake_auth_repository.dart';
 import 'fake/fake_face_reading.dart';
 import 'fake/fake_palm_reading.dart';
@@ -18,6 +19,7 @@ import 'local/reading_image_store.dart';
 import 'local/reading_store.dart';
 import 'repositories/app_config_repository.dart';
 import 'repositories/auth_repository.dart';
+import 'repositories/chat_repository.dart';
 import 'repositories/face_repository.dart';
 import 'repositories/palm_repository.dart';
 import 'repositories/subscription_repository.dart';
@@ -25,6 +27,7 @@ import 'supabase/edge_functions.dart';
 import 'supabase/session_store.dart';
 import 'supabase/supabase_app_config_repository.dart';
 import 'supabase/supabase_auth_repository.dart';
+import 'supabase/supabase_chat_repository.dart';
 import 'supabase/supabase_face_repository.dart';
 import 'supabase/supabase_palm_repository.dart';
 import 'supabase/supabase_subscription_repository.dart';
@@ -182,6 +185,28 @@ final faceImageStoreProvider =
 
 final faceReadingStoreProvider =
     Provider<FaceReadingStore>((ref) => const FaceReadingStore());
+
+// ---------------------------------------------------------------- astro chat
+
+/// Talks to Astro, through the Edge Functions that hold the Gemini key.
+///
+/// Same rule and same reasons as the two reading repositories: no direct-to-Gemini rung, because
+/// that would mean shipping the key inside the app.
+final chatRepositoryProvider = Provider<ChatRepository>((ref) {
+  if (Env.hasSupabase) {
+    return SupabaseChatRepository(
+      SupabaseEdgeFunctions(Supabase.instance.client),
+      ref.watch(sessionStoreProvider),
+    );
+  }
+
+  debugPrint('[chat] Supabase is not configured; Astro is scripted.');
+  return FakeChatRepository();
+});
+
+/// The conversation, cached so a cold start paints before the network answers.
+final chatThreadStoreProvider =
+    Provider<ChatThreadStore>((ref) => const ChatThreadStore());
 
 // ---------------------------------------------------------------- narration
 

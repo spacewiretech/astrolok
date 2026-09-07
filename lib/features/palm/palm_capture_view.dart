@@ -59,13 +59,6 @@ class _PalmCaptureViewState extends ConsumerState<PalmCaptureView>
     context.push(Routes.palmScan, extra: request);
   }
 
-  Future<void> _fromGallery() async {
-    final request =
-        await ref.read(palmCaptureViewModelProvider.notifier).pickFromGallery();
-    if (!mounted || request == null) return;
-    context.push(Routes.palmScan, extra: request);
-  }
-
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(palmCaptureViewModelProvider);
@@ -202,21 +195,15 @@ class _PalmCaptureViewState extends ConsumerState<PalmCaptureView>
                 ),
                 child: Column(
                   children: [
+                    // Camera only. The face flow still offers a gallery upload; a palm does
+                    // not, so on a device with no working camera this screen is a dead end by
+                    // design rather than by oversight — which is why `cameraUnavailable` no
+                    // longer offers a photo upload as the way out.
                     PrimaryButton(
                       label: PalmCopy.scanAction,
                       tone: ButtonTone.navy,
                       busy: state.busy,
                       onPressed: state.canCapture ? _scan : null,
-                    ),
-                    const SizedBox(height: 10),
-                    // Not optional. A simulator has no camera at all, so without this there is
-                    // no way to reach the scan or results screens on one — and on a real device
-                    // it is the answer for anyone whose hand will not hold still.
-                    PrimaryButton(
-                      label: PalmCopy.galleryAction,
-                      tone: ButtonTone.outline,
-                      onPressed:
-                          state.busy || state.limitReached != null ? null : _fromGallery,
                     ),
                     const SizedBox(height: 12),
                     const PrivacyNote(label: PalmCopy.privacyNote),

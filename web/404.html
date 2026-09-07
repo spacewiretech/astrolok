@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Astrolok</title>
+
+  <!--
+    The portable half of the deep-link fix.
+
+    `usePathUrlStrategy()` gives clean URLs like /privacy, which the app itself ships in
+    `lib/widgets/terms_footer.dart`. For those to survive a hard load the host has to answer an
+    unknown path with `index.html`. A host configured with that rewrite never reaches this file.
+
+    A host without one serves this page instead — that is what a custom 404 is for, and
+    GitHub Pages, S3 and most static CDNs will. So stash the path the visitor actually asked
+    for and hand it to `index.html`, which puts it back in the URL bar before Flutter boots.
+
+    This is the safety net, not the plan: a rewrite returns 200 where this returns 404, which
+    matters to crawlers and to the policy URLs given to Play Console and Cashfree. The README
+    has the one-line rule for each host.
+  -->
+  <script>
+    (function () {
+      try {
+        sessionStorage.setItem(
+          'astrolok:redirect',
+          location.pathname + location.search + location.hash
+        );
+      } catch (e) {
+        // Storage blocked. The replace below still lands the visitor on the site.
+      }
+      location.replace('/');
+    })();
+  </script>
+</head>
+<body>
+  <noscript>
+    <p>
+      This page has moved. Go to <a href="/">astrolok.app</a>, or straight to the
+      <a href="/privacy">Privacy Policy</a> or <a href="/terms">Terms &amp; Conditions</a>.
+    </p>
+  </noscript>
+</body>
+</html>

@@ -69,6 +69,15 @@ class PalmLineView extends ConsumerWidget {
                       model.stopSpeech();
                       context.canPop() ? context.pop() : context.go(Routes.home);
                     },
+                    onAskAstro: () {
+                      // The narration has to stop before the chat opens: the speech engine is
+                      // app-wide, so a line left playing would talk over the sage.
+                      model.stopSpeech();
+                      context.push(
+                        Routes.chat,
+                        extra: PalmCopy.askAstroSeedFor(entry.title.toLowerCase()),
+                      );
+                    },
                   ),
       ),
     );
@@ -86,6 +95,7 @@ class _Line extends StatelessWidget {
     required this.onSpeak,
     required this.onExport,
     required this.onBack,
+    required this.onAskAstro,
   });
 
   final PalmLine line;
@@ -97,6 +107,7 @@ class _Line extends StatelessWidget {
   final VoidCallback onSpeak;
   final VoidCallback onExport;
   final VoidCallback onBack;
+  final VoidCallback onAskAstro;
 
   @override
   Widget build(BuildContext context) {
@@ -202,8 +213,9 @@ class _Line extends StatelessWidget {
             label: 'Ask Astro about your ${line.title.toLowerCase()}',
             tone: ButtonTone.navy,
             icon: Icons.chat_bubble_outline_rounded,
-            onPressed: () =>
-                showAppSnackBar(context, 'Chat with Astro is coming soon.'),
+            // Seeded with this line specifically, so the conversation opens where the button
+            // promised rather than at the top of the reading.
+            onPressed: onAskAstro,
           ),
         ),
       ],
