@@ -58,13 +58,29 @@ final analyticsProvider = Provider<Analytics>((ref) => const NoopAnalytics());
 /// already started Mixpanel from the cached config — which is every launch after the first — but
 /// it is what covers the first launch on a device, where there was no cache to read.
 final analyticsBootstrapProvider = FutureProvider<void>((ref) async {
-  final config = await ref.watch(appConfigProvider.future);
+  var config = await ref.watch(appConfigProvider.future);
 
   final analytics = ref.read(analyticsProvider);
   analytics.registerSuper({
     P.env: config.configString('env'),
     P.backendMode: backendMode,
   });
+
+  // A row added to `app_config` after this install last cached is invisible for the whole
+  // six-hour TTL, because a fresh cache is served without asking the server at all. That is
+  // correct for a value that changed and wrong for a key that did not exist yet: on the day
+  // `mixpanel_token` was added, every already-installed app ran blind until its cache aged out.
+  //
+  // The test is *absence*, not emptiness. A missing key means this cache predates the row; a
+  // present-but-blank one is someone having deliberately cleared it, and re-fetching on every
+  // launch to rediscover that would make the off switch cost a request per launch.
+  if (!config.containsKey(mixpanelTokenKey)) {
+    try {
+      config = await ref.read(appConfigRepositoryProvider).load(force: true);
+    } catch (error) {
+      debugPrint('[analytics] forced config refresh failed: $error');
+    }
+  }
 
   if (analytics is MixpanelAnalytics) {
     await analytics.start(config[mixpanelTokenKey]);

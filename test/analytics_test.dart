@@ -2,6 +2,9 @@ import 'package:astrolok/data/analytics/analytics.dart';
 import 'package:astrolok/data/analytics/analytics_events.dart';
 import 'package:astrolok/data/analytics/mixpanel_analytics.dart';
 import 'package:astrolok/data/models/app_user.dart';
+import 'package:astrolok/data/providers.dart';
+import 'package:astrolok/data/repositories/app_config_repository.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// The parts of analytics that can be checked without a platform channel.
@@ -163,6 +166,8 @@ void main() {
     });
   });
 
+  _bootstrapTests();
+
   group('trackedTap', () {
     test('a disabled control cannot report a tap it never received', () {
       // Returns null so the button stays disabled. Wrapping a null handler in a closure would
@@ -177,6 +182,75 @@ void main() {
       trackedTap(() => tapped = true, id: 'subscribe', label: 'Try Now')!();
 
       expect(tapped, isTrue);
+    });
+  });
+}
+
+/// Records how it was called, so the bootstrap's cache-bypass rule can be asserted.
+class _RecordingConfig implements AppConfigRepository {
+  _RecordingConfig(this._cached, this._server);
+
+  /// What the disk cache holds — the value the six-hour TTL keeps serving.
+  final Map<String, String> _cached;
+
+  /// What the server would answer if actually asked.
+  final Map<String, String> _server;
+
+  final List<bool> calls = [];
+
+  @override
+  Future<Map<String, String>> load({bool force = false}) async {
+    calls.add(force);
+    return force ? _server : _cached;
+  }
+}
+
+Future<void> _runBootstrap(_RecordingConfig config) async {
+  final container = ProviderContainer(overrides: [
+    appConfigRepositoryProvider.overrideWithValue(config),
+  ]);
+  addTearDown(container.dispose);
+  await container.read(analyticsBootstrapProvider.future);
+}
+
+void _bootstrapTests() {
+  group('the bootstrap and a cache that predates a config row', () {
+    test('a cache with no mixpanel_token is bypassed once', () async {
+      // The failure this exists to prevent. `mixpanel_token` was added to app_config after these
+      // installs had already cached; a fresh cache is served without asking the server, so every
+      // one of them ran blind for the whole six-hour TTL with the events piling up unsent.
+      final config = _RecordingConfig(
+        {'env': 'production'},
+        {'env': 'production', mixpanelTokenKey: 'tok'},
+      );
+
+      await _runBootstrap(config);
+
+      expect(config.calls, [false, true], reason: 'cached read, then a forced one');
+    });
+
+    test('a token that is present but blank is left alone', () async {
+      // Clearing the cell is the documented off switch. Re-fetching to rediscover that on every
+      // launch would make turning analytics off cost a request per launch.
+      final config = _RecordingConfig(
+        {'env': 'production', mixpanelTokenKey: ''},
+        {'env': 'production', mixpanelTokenKey: ''},
+      );
+
+      await _runBootstrap(config);
+
+      expect(config.calls, [false], reason: 'no forced re-fetch');
+    });
+
+    test('a cached token is used without a second call', () async {
+      final config = _RecordingConfig(
+        {'env': 'production', mixpanelTokenKey: 'tok'},
+        {'env': 'production', mixpanelTokenKey: 'tok'},
+      );
+
+      await _runBootstrap(config);
+
+      expect(config.calls, [false]);
     });
   });
 }

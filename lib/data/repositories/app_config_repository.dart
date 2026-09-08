@@ -3,7 +3,12 @@
 /// Everything that is not a credential lives here — environment name, limits, paywall copy —
 /// so it can be changed without shipping a new app version.
 abstract interface class AppConfigRepository {
-  Future<Map<String, String>> load();
+  /// [force] skips the disk cache and asks the server.
+  ///
+  /// For the one case the cache cannot serve: a key that did not exist when this install last
+  /// cached, which is indistinguishable from a key the server does not have. Everything else
+  /// should take the cache — the splash waits on this call.
+  Future<Map<String, String>> load({bool force = false});
 }
 
 /// The Mixpanel project token, served as a config row rather than compiled in.

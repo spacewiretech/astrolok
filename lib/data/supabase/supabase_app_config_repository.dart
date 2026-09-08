@@ -25,11 +25,11 @@ class SupabaseAppConfigRepository implements AppConfigRepository {
   static const _timeout = Duration(seconds: 8);
 
   @override
-  Future<Map<String, String>> load() async {
+  Future<Map<String, String>> load({bool force = false}) async {
     final prefs = await SharedPreferences.getInstance();
     final cached = _readCache(prefs);
 
-    if (cached != null && _isFresh(prefs)) return cached;
+    if (!force && cached != null && _isFresh(prefs)) return cached;
 
     try {
       final rows = await _client
@@ -107,6 +107,6 @@ class FakeAppConfigRepository implements AppConfigRepository {
   final Map<String, String> overrides;
 
   @override
-  Future<Map<String, String>> load() async =>
+  Future<Map<String, String>> load({bool force = false}) async =>
       {...defaultAppConfig, ...overrides};
 }
