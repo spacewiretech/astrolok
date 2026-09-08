@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/models/astro_message.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/chat_repository.dart';
@@ -44,6 +46,8 @@ class ChatThreadsViewModel extends AsyncNotifier<List<ChatThreadSummary>> {
   /// Deliberately not `ref.invalidateSelf()`: that would drop back to [AsyncLoading] and put the
   /// drawer's spinner over a list the user is looking at. What is on screen stays there until the
   /// server has something better to say, and stays there too when it has nothing to say at all.
+  /// Pull-to-refresh in the drawer. Deliberately not tracked: it is a gesture people make
+  /// reflexively on any list, and the count would say nothing about the conversations.
   Future<void> refresh() async {
     try {
       final list = await ref.read(chatRepositoryProvider).threads();
@@ -107,6 +111,12 @@ class ChatThreadsViewModel extends AsyncNotifier<List<ChatThreadSummary>> {
     try {
       final list = await ref.read(chatRepositoryProvider).renameThread(id, trimmed);
       state = AsyncData(list.threads);
+      // Only on the server's confirmation. The optimistic rename above is undone on failure, and
+      // counting that would report renames that never happened.
+      analytics.track(Ev.chatThreadRenamed, {
+        P.threadId: id,
+        P.chars: trimmed.length,
+      });
     } catch (error) {
       debugPrint('[chat] could not rename the conversation: $error');
       // Put the old name back rather than leaving a name the server does not have.
@@ -131,6 +141,12 @@ class ChatThreadsViewModel extends AsyncNotifier<List<ChatThreadSummary>> {
       // deletion would look as though it had silently failed.
       await ref.read(chatThreadStoreProvider).remove(id);
       state = AsyncData(list.threads);
+      analytics.track(Ev.chatThreadDeleted, {
+        P.threadId: id,
+        // What is left afterwards. Someone deleting their last conversation is a different
+        // signal from someone tidying one out of twelve.
+        P.threadCount: list.threads.length,
+      });
       return true;
     } catch (error) {
       debugPrint('[chat] could not delete the conversation: $error');

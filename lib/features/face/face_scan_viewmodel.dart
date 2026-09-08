@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/face_repository.dart';
 import 'face_capture_viewmodel.dart';
@@ -43,9 +45,15 @@ class FaceScanViewModel extends AutoDisposeNotifier<FaceScanState> {
     final request = _request;
     if (request == null) return;
 
+    _attempt += 1;
+
     state = FaceScanState(startedAt: DateTime.now());
     await _run();
   }
+
+  /// Which try this is. A reading that only succeeds on the second attempt is a very different
+  /// product experience from one that succeeds first time, and both end as `Reading Succeeded`.
+  int _attempt = 1;
 
   Future<void> _run() async {
     final request = _request;
@@ -55,6 +63,13 @@ class FaceScanViewModel extends AutoDisposeNotifier<FaceScanState> {
     state = state.copyWith(stage: FacePrepStage.sent, clearError: true, slow: false);
 
     final startedAt = DateTime.now();
+
+    analytics.track(Ev.readingScanStarted, {
+      P.feature: ReadingFeature.face,
+      P.focus: request.focus.name,
+      P.bytes: request.image.length,
+      P.attempt: _attempt,
+    });
 
     try {
       final reading = await ref
@@ -82,6 +97,17 @@ class FaceScanViewModel extends AutoDisposeNotifier<FaceScanState> {
         reading: saved,
         outcome: FaceScanOutcome.ready,
       );
+
+      analytics.track(Ev.readingSucceeded, {
+        P.feature: ReadingFeature.face,
+        P.readingId: saved.id,
+        P.focus: request.focus.name,
+        P.sectionCount: saved.parts.length,
+        P.attempt: _attempt,
+        // To the model's answer, not to the screen: `_holdMinimum` pads short waits so the
+        // progress animation reads as work, and that padding would flatter this number.
+        P.ms: DateTime.now().difference(startedAt).inMilliseconds,
+      });
     } on NoFaceDetectedException catch (e) {
       // Nothing went wrong — the photo simply was not a face — so the capture is dropped and
       // the user goes back to the viewfinder rather than being shown an error state.
@@ -120,12 +146,28 @@ class FaceScanViewModel extends AutoDisposeNotifier<FaceScanState> {
     }
   }
 
+  /// The one exit every failure takes, so no branch can end without saying why.
+  ///
+  /// [outcome] is the honest reason: `rejected` is a photo that was not a face and is not a
+  /// system failure at all, `limitReached` is the daily quota, `notEntitled` and `signedOut` are
+  /// the gate, and only `failed` is something broken.
   Future<void> _settle(
     DateTime startedAt,
     String message,
     FaceScanOutcome outcome, {
     bool stay = false,
   }) async {
+    // Before the dwell padding, so a failure's `ms` is the real time to the answer.
+    analytics.track(Ev.readingFailed, {
+      P.feature: ReadingFeature.face,
+      P.outcome: outcome.name,
+      P.message: message,
+      P.focus: _request?.focus.name,
+      P.attempt: _attempt,
+      P.blocked: !stay,
+      P.ms: DateTime.now().difference(startedAt).inMilliseconds,
+    });
+
     await _holdMinimum(startedAt);
     if (_disposed) return;
 

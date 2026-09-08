@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/assets.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
@@ -176,6 +178,11 @@ class _Reading extends StatelessWidget {
                   line: line,
                   onTap: () {
                     model.stopSpeech();
+                    analytics.track(Ev.readingDetailOpened, {
+                      P.feature: ReadingFeature.palm,
+                      P.readingId: readingId,
+                      P.detail: line.kind.name,
+                    });
                     context.push(Routes.palmLineFor(readingId, line.kind));
                   },
                 ),
@@ -195,6 +202,11 @@ class _Reading extends StatelessWidget {
                   model.stopSpeech();
                   // Seeded, so the chat opens already discussing this reading rather than on a
                   // blank screen. The server loads the newest reading for grounding anyway.
+                  analytics.track(Ev.askAstroTapped, {
+                    P.feature: ReadingFeature.palm,
+                    P.readingId: readingId,
+                    P.source: 'palm_reading',
+                  });
                   context.push(Routes.chat, extra: PalmCopy.askAstroSeed);
                 },
               ),

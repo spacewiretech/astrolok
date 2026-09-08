@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/assets.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
@@ -185,6 +187,11 @@ class _Reading extends StatelessWidget {
                   part: part,
                   onTap: () {
                     model.stopSpeech();
+                    analytics.track(Ev.readingDetailOpened, {
+                      P.feature: ReadingFeature.face,
+                      P.readingId: readingId,
+                      P.detail: part.kind.name,
+                    });
                     context.push(Routes.facePartFor(readingId, part.kind));
                   },
                 ),
@@ -202,6 +209,11 @@ class _Reading extends StatelessWidget {
                 subtitle: FaceCopy.askAstroSubtitle,
                 onTap: () {
                   model.stopSpeech();
+                  analytics.track(Ev.askAstroTapped, {
+                    P.feature: ReadingFeature.face,
+                    P.readingId: readingId,
+                    P.source: 'face_reading',
+                  });
                   context.push(Routes.chat, extra: FaceCopy.askAstroSeed);
                 },
               ),

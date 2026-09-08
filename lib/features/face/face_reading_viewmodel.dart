@@ -8,6 +8,8 @@ import 'package:share_plus/share_plus.dart';
 import '../../data/entitlement.dart';
 import '../../data/pdf/reading_pdf.dart';
 import '../../data/pdf/reading_pdf_requests.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/providers.dart';
 import 'face_copy.dart';
 import 'face_reading_state.dart';
@@ -56,6 +58,14 @@ class FaceReadingViewModel
 
     state = state.copyWith(reading: reading, image: bytes, loading: false);
 
+    analytics.track(Ev.readingViewed, {
+      P.feature: ReadingFeature.face,
+      P.readingId: reading.id,
+      // Whether the photo survived alongside the text. A reading shown without its image is a
+      // worse screen, and the image store is the part most likely to have lost it.
+      P.state: bytes == null ? 'no_image' : 'with_image',
+    });
+
     // Asked after the reading is on screen, so a slow engine check never delays it. The button
     // appears once the answer is yes, and simply never appears when it is no.
     final canSpeak = await ref.read(readingSpeechProvider).prepare();
@@ -66,6 +76,16 @@ class FaceReadingViewModel
   /// Starts or stops narration of [text].
   Future<void> toggleSpeech(String text) async {
     final speech = ref.read(readingSpeechProvider);
+
+    analytics.track(
+      state.speaking ? Ev.readingNarrationStopped : Ev.readingNarrated,
+      {
+        P.feature: ReadingFeature.face,
+        P.readingId: state.reading?.id,
+        P.surface: 'reading',
+        P.chars: text.length,
+      },
+    );
 
     if (state.speaking) {
       await speech.stop();
@@ -133,6 +153,14 @@ class FaceReadingViewModel
       if (_disposed) return;
 
       state = state.copyWith(exporting: false);
+
+      // After the share sheet returns, not before it opens: this counts an export the user
+      // actually saw through, which is the only kind worth counting.
+      analytics.track(Ev.readingPdfExported, {
+        P.feature: ReadingFeature.face,
+        P.readingId: reading.id,
+        P.bytes: bytes.length,
+      });
     } catch (error) {
       debugPrint('[face] pdf export failed: $error');
       if (_disposed) return;

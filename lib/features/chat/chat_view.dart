@@ -7,6 +7,8 @@ import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/models/astro_message.dart';
 import '../../widgets/app_snackbar.dart';
 import '../../widgets/astral_background.dart';
@@ -61,11 +63,21 @@ class _ChatViewState extends ConsumerState<ChatView> {
       // Home usually has the conversations loaded by now, but this screen is also reached straight
       // from a reading's "Ask Astro". Warmed here so the drawer never has to fetch for itself; it
       // is a no-op once the list is up.
-      ref.read(chatThreadsProvider);
+      final threads = ref.read(chatThreadsProvider);
+
+      analytics.track(Ev.chatOpened, {
+        // An opener means the user arrived from a reading's "Ask Astro" with a question already
+        // written, which is a different conversation from one started cold on Home.
+        P.hasOpener: opener != null && opener.isNotEmpty,
+        P.source: opener != null && opener.isNotEmpty ? 'reading' : 'direct',
+        P.threadCount: threads.valueOrNull?.length,
+      });
 
       if (opener != null && opener.isNotEmpty) {
         ref.read(selectedThreadProvider.notifier).state = ChatThread.draftId;
-        ref.read(chatViewModelProvider(ChatThread.draftId).notifier).send(opener);
+        ref
+            .read(chatViewModelProvider(ChatThread.draftId).notifier)
+            .send(opener, entry: 'opener');
       }
     });
   }
@@ -96,6 +108,10 @@ class _ChatViewState extends ConsumerState<ChatView> {
   /// The draft instance is invalidated first: tapping "New chat" while already on an unsent one
   /// must clear it, and without this the key would not change so nothing would happen.
   void _newChat() {
+    // The intent to start one, not a thread on the server — a draft only becomes real on its
+    // first turn. `Chat Message Sent` with turn_index 0 is what says they went through with it,
+    // and the gap between the two is people opening a blank chat and thinking better of it.
+    analytics.track(Ev.chatThreadCreated, {P.source: 'drawer'});
     ref.invalidate(chatViewModelProvider(ChatThread.draftId));
     ref.read(selectedThreadProvider.notifier).state = ChatThread.draftId;
   }
@@ -127,6 +143,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
         selectedId: state.threadId ?? selected,
         onNewChat: _newChat,
         onOpen: (id) {
+          analytics.track(Ev.chatThreadSwitched, {P.threadId: id});
           model.stopSpeech();
           ref.read(selectedThreadProvider.notifier).state = id;
         },
@@ -142,7 +159,10 @@ class _ChatViewState extends ConsumerState<ChatView> {
                   model.stopSpeech();
                   context.canPop() ? context.pop() : context.go(Routes.home);
                 },
-                onHistory: () => _scaffold.currentState?.openEndDrawer(),
+                onHistory: () {
+                  analytics.track(Ev.chatDrawerOpened);
+                  _scaffold.currentState?.openEndDrawer();
+                },
               ),
 
               Expanded(
@@ -151,7 +171,10 @@ class _ChatViewState extends ConsumerState<ChatView> {
                         child: CircularProgressIndicator(color: AppColors.gold),
                       )
                     : state.isEmpty
-                        ? _Opening(onPick: (topic) => model.send(topic.opener))
+                        ? _Opening(onPick: (topic) {
+                            analytics.track(Ev.chatTopicTapped, {P.topic: topic.name});
+                            model.send(topic.opener, entry: 'topic');
+                          })
                         : _Transcript(
                             state: state,
                             controller: _scroll,
@@ -162,7 +185,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
 
               ChatComposer(
                 state: state,
-                onSend: model.send,
+                onSend: (message, entry) => model.send(message, entry: entry),
                 onDraftRestored: model.pendingRestored,
               ),
             ],

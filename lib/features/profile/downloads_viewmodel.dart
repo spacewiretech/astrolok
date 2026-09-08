@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/providers.dart';
 
 /// One entry in the Downloads list: a reading held on this device.
@@ -64,6 +66,13 @@ class DownloadsViewModel extends AutoDisposeAsyncNotifier<List<SavedReading>> {
           focusLabel: reading.focus.label,
         ),
     ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    // Split by feature rather than one total: whether a user keeps coming back for palm or for
+    // face says which of the two is actually carrying the product.
+    analytics.track(Ev.downloadsViewed, {
+      P.palmCount: entries.where((e) => e.kind == SavedReadingKind.palm).length,
+      P.faceCount: entries.where((e) => e.kind == SavedReadingKind.face).length,
+    });
 
     return entries;
   }

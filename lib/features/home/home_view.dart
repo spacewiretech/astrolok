@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/assets.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
@@ -19,18 +21,43 @@ import '../chat/chat_threads_viewmodel.dart';
 ///
 /// Every row here now goes somewhere. The "coming soon" snackbar this screen used to answer
 /// with is gone, and with it the last unbuilt thing on Home.
-class HomeView extends ConsumerWidget {
+class HomeView extends ConsumerStatefulWidget {
   const HomeView({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeView> createState() => _HomeViewState();
+}
+
+class _HomeViewState extends ConsumerState<HomeView> {
+  /// So the view event fires once per visit rather than on every rebuild.
+  bool _reported = false;
+
+  @override
+  Widget build(BuildContext context) {
     final user = ref.watch(entitlementProvider);
 
     // The conversations, fetched here rather than by the drawer that shows them. The list is the
     // same on every open, and loading it while the user is reading Home is the difference between
     // a drawer that opens and a drawer that loads. `read`, not `watch` — Home has nothing to
     // redraw when it lands, and the provider is kept alive, so this one read outlives the screen.
-    ref.read(chatThreadsProvider);
+    final threads = ref.read(chatThreadsProvider);
+
+    // Once per visit, not per rebuild. What the user already has decides what Home is for: an
+    // account with three readings and a chat history is a returning user, and one with none is
+    // still deciding whether the app does anything.
+    if (!_reported) {
+      _reported = true;
+      analytics.track(Ev.homeViewed, {
+        P.threadCount: threads.valueOrNull?.length,
+        P.billingState: user?.billingState?.name,
+        P.paymentType: user?.paymentType.name,
+      });
+      if (user?.billingState != null) {
+        // Shown while there is still time to fix the mandate. How many people see this and how
+        // many act on it is the difference between a warning and decoration.
+        analytics.track(Ev.billingIssueShown, {P.billingState: user!.billingState!.name});
+      }
+    }
 
     return Scaffold(
       body: AstralBackground(
@@ -43,7 +70,10 @@ class HomeView extends ConsumerWidget {
                 children: [
                   const BrandLogo(size: 42),
                   const Spacer(),
-                  _ProfileButton(onTap: () => context.push(Routes.profile)),
+                  _ProfileButton(onTap: () {
+                    analytics.track(Ev.elementTapped, {P.elementId: 'profile_button'});
+                    context.push(Routes.profile);
+                  }),
                 ],
               ),
               const SizedBox(height: 28),
@@ -70,19 +100,19 @@ class HomeView extends ConsumerWidget {
                     // screen reader gets. It has to say what the image says.
                     label: 'Chat with Astro. Ask anything about your life, love, career or '
                         'future. Start chat.',
-                    onTap: () => context.push(Routes.chat),
+                    onTap: () => _openReading(context, Routes.chat, 'chat', 'carousel'),
                   ),
                   PromoSlide(
                     image: Img.promoPalmReading,
                     label: "Palm Reading. Your palm holds a story. Let's discover yours. "
                         'Discover now.',
-                    onTap: () => context.push(Routes.palmCapture),
+                    onTap: () => _openReading(context, Routes.palmCapture, 'palm', 'carousel'),
                   ),
                   PromoSlide(
                     image: Img.promoFaceReading,
                     label: "Face Reading. Your face holds a story. Let's discover yours. "
                         'Discover now.',
-                    onTap: () => context.push(Routes.faceCapture),
+                    onTap: () => _openReading(context, Routes.faceCapture, 'face', 'carousel'),
                   ),
                 ],
               ),
@@ -96,7 +126,7 @@ class HomeView extends ConsumerWidget {
                 title: 'Chat with Astro',
                 subtitle: 'Ask anything about your life, love,career or future',
                 fallbackIcon: Icons.chat_bubble_outline_rounded,
-                onTap: () => context.push(Routes.chat),
+                onTap: () => _openReading(context, Routes.chat, 'chat', 'card'),
               ),
               const SizedBox(height: 14),
               ReadingCard(
@@ -104,7 +134,7 @@ class HomeView extends ConsumerWidget {
                 title: 'Palm Reading',
                 subtitle: 'Discover what your palm reveals about your life.',
                 fallbackIcon: Icons.back_hand_outlined,
-                onTap: () => context.push(Routes.palmCapture),
+                onTap: () => _openReading(context, Routes.palmCapture, 'palm', 'card'),
               ),
               const SizedBox(height: 14),
               ReadingCard(
@@ -112,13 +142,31 @@ class HomeView extends ConsumerWidget {
                 title: 'Face Reading',
                 subtitle: 'Discover what your face reveals.',
                 fallbackIcon: Icons.face_retouching_natural_outlined,
-                onTap: () => context.push(Routes.faceCapture),
+                onTap: () => _openReading(context, Routes.faceCapture, 'face', 'card'),
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  /// Opens one of the three destinations, recording which surface sent them.
+  ///
+  /// The carousel and the cards below it advertise exactly the same three things, so without
+  /// [surface] the two are one number and there is no way to tell whether the strip at the top
+  /// of the screen earns the space it takes.
+  void _openReading(
+    BuildContext context,
+    String route,
+    String destination,
+    String surface,
+  ) {
+    analytics.track(Ev.readingCardTapped, {
+      P.destination: destination,
+      P.source: surface,
+    });
+    context.push(route);
   }
 }
 

@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/assets.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
@@ -75,6 +77,14 @@ class FacePartView extends ConsumerWidget {
                       // The speech engine is app-wide, so a feature left playing would talk
                       // over the sage.
                       model.stopSpeech();
+                      analytics.track(Ev.askAstroTapped, {
+                        P.feature: ReadingFeature.face,
+                        P.readingId: readingId,
+                        // The detail screen is a far warmer entry to the chat than the summary:
+                        // the user has already drilled into one specific thing.
+                        P.source: 'face_detail',
+                        P.detail: part?.name,
+                      });
                       context.push(
                         Routes.chat,
                         extra: FaceCopy.askAstroSeedFor(entry.kind.possessive),

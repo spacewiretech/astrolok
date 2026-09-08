@@ -8,6 +8,8 @@ import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/entitlement.dart';
 import '../../data/models/app_user.dart';
 import '../../data/providers.dart';
@@ -112,12 +114,19 @@ class ProfileView extends ConsumerWidget {
                         _MenuRow(
                           icon: Icons.file_download_outlined,
                           label: 'Downloads',
-                          onTap: () => context.push(Routes.downloads),
+                          onTap: () {
+                            analytics.track(Ev.elementTapped,
+                                {P.elementId: 'profile_downloads'});
+                            context.push(Routes.downloads);
+                          },
                         ),
                         _MenuRow(
                           icon: Icons.auto_awesome_outlined,
                           label: ChatCopy.memoryHeading,
-                          onTap: () => context.push(Routes.memory),
+                          onTap: () {
+                            analytics.track(Ev.elementTapped, {P.elementId: 'profile_memory'});
+                            context.push(Routes.memory);
+                          },
                         ),
                         _MenuRow(
                           icon: Icons.phone_outlined,
@@ -127,25 +136,26 @@ class ProfileView extends ConsumerWidget {
                           onTap: () => _open(
                             context,
                             Uri.parse(config.configLink('support_url')),
+                            'support',
                           ),
                         ),
                         _MenuRow(
                           icon: Icons.info_outline_rounded,
                           label: 'Help & FAQ',
                           onTap: () =>
-                              _open(context, Uri.parse(config.configLink('help_url'))),
+                              _open(context, Uri.parse(config.configLink('help_url')), 'help'),
                         ),
                         _MenuRow(
                           icon: Icons.shield_outlined,
                           label: 'Privacy Policy',
                           onTap: () =>
-                              _open(context, Uri.parse(config.configLink('privacy_url'))),
+                              _open(context, Uri.parse(config.configLink('privacy_url')), 'privacy'),
                         ),
                         _MenuRow(
                           icon: Icons.receipt_long_outlined,
                           label: 'Terms & Conditions',
                           onTap: () =>
-                              _open(context, Uri.parse(config.configLink('terms_url'))),
+                              _open(context, Uri.parse(config.configLink('terms_url')), 'terms'),
                         ),
                       ],
                     ),
@@ -162,12 +172,28 @@ class ProfileView extends ConsumerWidget {
     );
   }
 
-  static Future<void> _open(BuildContext context, Uri uri) async {
+  /// [link] names the row — `support`, `help`, `privacy`, `terms`. All four leave the app, so
+  /// this is the last thing they do here, and which one they left through is the whole question:
+  /// a spike in `support` is a product problem somewhere upstream of this screen.
+  static Future<void> _open(BuildContext context, Uri uri, String link) async {
     final opened =
         await launchUrl(uri, mode: LaunchMode.externalApplication).catchError((_) => false);
+
+    analytics.track(Ev.supportLinkOpened, {
+      P.link: link,
+      // Both stores check these at review time, and a dead one fails a review — so a failure
+      // here needs to be visible before a reviewer finds it.
+      P.result: opened ? 'opened' : 'failed',
+    });
+
     // A device with no mail client, or no browser. Silence would look like a dead row.
     if (!opened && context.mounted) {
-      showAppSnackBar(context, "Couldn't open that on this device.", error: true);
+      showAppSnackBar(
+        context,
+        "Couldn't open that on this device.",
+        error: true,
+        source: 'open_$link',
+      );
     }
   }
 }
@@ -293,7 +319,10 @@ class _RenewLink extends StatelessWidget {
     return Align(
       alignment: Alignment.centerLeft,
       child: TextButton(
-        onPressed: () => context.push(Routes.subscribe),
+        onPressed: () {
+          analytics.track(Ev.renewTapped);
+          context.push(Routes.subscribe);
+        },
         style: TextButton.styleFrom(
           padding: EdgeInsets.zero,
           minimumSize: Size.zero,
@@ -404,8 +433,14 @@ class _LogOutButton extends ConsumerWidget {
     return Center(
       child: TextButton(
         onPressed: () async {
+          // Before the reset, or it lands on the fresh anonymous identity rather than on the
+          // account that actually left.
+          analytics.track(Ev.signedOut, {P.source: 'profile'});
           await ref.read(authRepositoryProvider).signOut();
           forgetConversations(ref);
+          // Mints a new anonymous id and drops the identity super properties, so the next user
+          // of this handset does not inherit the last one's account.
+          analytics.reset();
           if (context.mounted) context.go(Routes.onboarding);
         },
         child: Text(

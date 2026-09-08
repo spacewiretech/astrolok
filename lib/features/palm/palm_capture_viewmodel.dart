@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/camera/reading_camera.dart';
 import '../../data/camera/reading_image.dart';
 import '../../data/models/palm_reading.dart';
@@ -61,6 +63,7 @@ class PalmCaptureViewModel extends AutoDisposeNotifier<PalmCaptureState> {
 
   /// Opens the camera. Safe to call again — the retry button after a denial does.
   Future<void> startCamera() async {
+    final first = !_cameraReported;
     await _camera.initialize();
     if (_disposed) return;
 
@@ -69,9 +72,38 @@ class PalmCaptureViewModel extends AutoDisposeNotifier<PalmCaptureState> {
       cameraFailure: _camera.failure,
       clearFailure: _camera.failure == null,
     );
+
+    // The top of the reading funnel. Reported after initialize rather than on mount, because a
+    // capture screen with no working camera is not a capture opportunity — and the split between
+    // the two is the permission question this app has no other way to answer.
+    if (first) {
+      _cameraReported = true;
+      analytics.track(Ev.readingCaptureOpened, {
+        P.feature: ReadingFeature.palm,
+        P.cameraReady: _camera.isReady,
+      });
+    }
+    analytics.track(Ev.cameraPermissionResult, {
+      P.feature: ReadingFeature.palm,
+      P.result: _camera.isReady ? 'granted' : 'denied',
+      P.error: _camera.failure,
+      // A retry after a denial, which is the user going to Settings and coming back.
+      P.trigger: first ? 'open' : 'retry',
+    });
   }
 
+  bool _cameraReported = false;
+
   void setFocus(PalmFocus focus) {
+    // What the user says they want read. The single most useful property on a palm reading:
+    // it is a stated intent, volunteered before any result exists to bias it.
+    if (focus != state.focus) {
+      analytics.track(Ev.readingFocusSelected, {
+        P.feature: ReadingFeature.palm,
+        P.focus: focus.name,
+        P.previousFocus: state.focus.name,
+      });
+    }
     state = state.copyWith(focus: focus, clearError: true);
   }
 
@@ -90,6 +122,7 @@ class PalmCaptureViewModel extends AutoDisposeNotifier<PalmCaptureState> {
   Future<PalmScanRequest?> capture() async {
     if (state.busy) return null;
     state = state.copyWith(busy: true, clearError: true);
+    final startedAt = DateTime.now();
 
     try {
       final raw = await _camera.capture();
@@ -99,6 +132,11 @@ class PalmCaptureViewModel extends AutoDisposeNotifier<PalmCaptureState> {
         // a failed capture said nothing at all. `DeviceCamera.capture` swallows its own
         // exceptions and returns null, so the catch below never covered this.
         state = state.copyWith(busy: false, error: PalmCopy.captureFailed);
+        analytics.track(Ev.readingCaptureFailed, {
+          P.feature: ReadingFeature.palm,
+          P.reason: 'shutter_failed',
+          P.focus: state.focus.name,
+        });
         return null;
       }
 
@@ -107,6 +145,11 @@ class PalmCaptureViewModel extends AutoDisposeNotifier<PalmCaptureState> {
 
       if (prepared == null) {
         state = state.copyWith(busy: false, error: PalmCopy.imageUnreadable);
+        analytics.track(Ev.readingCaptureFailed, {
+          P.feature: ReadingFeature.palm,
+          P.reason: 'unreadable',
+          P.focus: state.focus.name,
+        });
         return null;
       }
 
@@ -119,11 +162,27 @@ class PalmCaptureViewModel extends AutoDisposeNotifier<PalmCaptureState> {
       if (_disposed) return null;
 
       state = state.copyWith(busy: false);
+
+      analytics.track(Ev.readingPhotoCaptured, {
+        P.feature: ReadingFeature.palm,
+        P.focus: state.focus.name,
+        // The downscaled size that actually goes to the model. A drift upward here is a cost
+        // and latency problem long before it is a visible one.
+        P.bytes: prepared.bytes.length,
+        P.msToCapture: DateTime.now().difference(startedAt).inMilliseconds,
+      });
+
       return PalmScanRequest(image: prepared.bytes, focus: state.focus);
     } catch (error) {
       debugPrint('[palm] capture failed: $error');
       if (_disposed) return null;
       state = state.copyWith(busy: false, error: PalmCopy.captureFailed);
+      analytics.track(Ev.readingCaptureFailed, {
+        P.feature: ReadingFeature.palm,
+        P.reason: 'exception',
+        P.error: error.toString(),
+        P.focus: state.focus.name,
+      });
       return null;
     }
   }

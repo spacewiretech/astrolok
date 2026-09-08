@@ -151,8 +151,8 @@ abstract final class Ev {
   /// cross-sell, and the only way to tell an organic chat from a prompted one.
   static const askAstroTapped = 'Ask Astro Tapped';
 
-  /// Palm only — the face flow has no focus picker.
-  static const palmFocusSelected = 'Palm Focus Selected';
+  /// What the user says they want read, chosen before the photo. Both flows have the picker.
+  static const readingFocusSelected = 'Reading Focus Selected';
 
   // ---------------------------------------------------------------- chat
 

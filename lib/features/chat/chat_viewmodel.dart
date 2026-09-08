@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/models/astro_message.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/chat_repository.dart';
 import 'chat_copy.dart';
@@ -127,9 +129,23 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
   /// every messaging app has taught people to expect. On failure it is taken back out and handed
   /// to the composer through [ChatState.pending] rather than left sitting in the transcript
   /// looking answered.
-  Future<void> send(String message) async {
+  Future<void> send(String message, {String entry = 'composer'}) async {
     final trimmed = message.trim();
     if (trimmed.isEmpty || state.sending || state.exhausted) return;
+
+    final startedAt = DateTime.now();
+    // Counted before the send, so a turn that fails still has its question counted. The two
+    // together are the only way to see a conversation that ended because the app broke.
+    final turnIndex = state.messages.where((m) => m.role == ChatRole.user).length;
+
+    analytics.track(Ev.chatMessageSent, {
+      P.threadId: state.threadId,
+      // Which affordance produced the message. A topic pill, a quick reply and a typed sentence
+      // are three different levels of intent, and the openers make the first two very cheap.
+      P.entryMethod: entry,
+      P.chars: trimmed.length,
+      P.turnIndex: turnIndex,
+    });
 
     // Anything the sage is speaking is now about the previous turn.
     await stopSpeech();
@@ -166,6 +182,21 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
         // The one message allowed to animate itself in.
         revealingId: reply.message.id,
       );
+      analytics.track(Ev.chatReplyReceived, {
+        P.threadId: reply.threadId,
+        P.turnIndex: turnIndex,
+        P.ms: DateTime.now().difference(startedAt).inMilliseconds,
+        // The shape of the answer. A reply with no sections and no options is a thin one, and
+        // thin replies are what a conversation dies on.
+        P.sectionCount: reply.message.sections.length,
+        P.hasVerdict: reply.message.verdict.isNotEmpty,
+        P.optionCount: reply.message.options.length,
+        P.askFor: reply.message.askFor.name,
+        // How much of the daily allowance is left. The turn where this hits zero is the turn a
+        // conversation ends against its will.
+        P.count: reply.remaining,
+      });
+
       final cached = await _cache();
 
       // The sidebar has a new conversation in it, or an existing one has moved to the top and
@@ -192,12 +223,23 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
   }
 
   /// Takes a failed turn back out of the transcript and returns the words to the composer.
+  ///
+  /// The single failure exit, so every way a turn can fail is counted with its reason —
+  /// `limit_reached` and `not_entitled` are the product working as designed, and only the rest
+  /// are something broken.
   void _rollBack(
     AstroMessage mine,
     String message, {
     int? remaining,
     ChatOutcome? outcome,
   }) {
+    analytics.track(Ev.chatReplyFailed, {
+      P.threadId: state.threadId,
+      P.reason: outcome?.name ?? (remaining == 0 ? 'limit_reached' : 'failed'),
+      P.message: message,
+      P.chars: mine.text.length,
+    });
+
     if (_disposed) return;
 
     state = state.copyWith(
@@ -212,6 +254,18 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
 
   /// Starts or stops narration of one message.
   Future<void> toggleSpeech(AstroMessage message) async {
+    analytics.track(
+      state.speakingId == message.id
+          ? Ev.readingNarrationStopped
+          : Ev.readingNarrated,
+      {
+        P.feature: ReadingFeature.chat,
+        P.surface: 'chat',
+        P.threadId: state.threadId,
+        P.sectionCount: message.sections.length,
+      },
+    );
+
     final speech = ref.read(readingSpeechProvider);
 
     if (state.speakingId == message.id) {
