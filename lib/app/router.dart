@@ -1,3 +1,4 @@
+import 'analytics_observer.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/models/face_reading.dart';
@@ -112,6 +113,10 @@ extension SplashDestinationRoute on SplashDestination {
 /// where it goes next, so there is no global redirect to keep in sync.
 final appRouter = GoRouter(
   initialLocation: Routes.splash,
+  // One observer covers every screen and modal in the table below, which is the whole
+  // reason for doing it here rather than in eighteen initStates: a screen added next month
+  // is instrumented the moment it is routable.
+  observers: [analyticsObserver],
   routes: [
     GoRoute(path: Routes.splash, builder: (context, state) => const SplashView()),
 

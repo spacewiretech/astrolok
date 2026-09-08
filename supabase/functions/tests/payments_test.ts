@@ -15,8 +15,12 @@ import {
   CashfreeSettings,
   dedupeKey,
   disputeFrom,
+  cancelledBy,
+  isCancelledStatus,
   isDisputeLost,
+  isExpiredStatus,
   isLiveStatus,
+  isPausedStatus,
   paymentFrom,
   refundFrom,
   snapshotOf,
@@ -26,7 +30,12 @@ import {
   webhookSignature,
 } from "../_shared/cashfree.ts";
 import { isEntitled, isInTrial, UserRow } from "../_shared/entitlement.ts";
-import { isFailedCharge, paymentKind } from "../_shared/subscription_sync.ts";
+import {
+  isFailedCharge,
+  paymentKind,
+  transitionName,
+  userUpdatesFor,
+} from "../_shared/subscription_sync.ts";
 
 const NOW = new Date("2026-09-01T12:00:00Z");
 
@@ -407,4 +416,95 @@ Deno.test("a scheduled charge is not a failed one", () => {
   assert(isFailedCharge("FAILED"));
   assert(isFailedCharge("USER_DROPPED"));
   assert(isFailedCharge("cancelled"), "case-insensitive");
+});
+
+// ---------------------------------------------------------------- cancellation states
+
+Deno.test("a mandate the user revoked in their UPI app reads as cancelled", () => {
+  // The whole reason these predicates exist. Cashfree reports a merchant cancel as `CANCELLED`
+  // and a user revoking the mandate in GPay/PhonePe as `CUSTOMER_CANCELLED`, and only the first
+  // was ever compared against — so the far more common case fell through every check.
+  assert(isCancelledStatus("CANCELLED"));
+  assert(isCancelledStatus("CUSTOMER_CANCELLED"));
+  assertFalse(isCancelledStatus("ACTIVE"));
+  assertFalse(isCancelledStatus("ON_HOLD"));
+
+  assert(isPausedStatus("PAUSED"));
+  assert(isPausedStatus("CUSTOMER_PAUSED"));
+  assertFalse(isPausedStatus("ACTIVE"));
+
+  // LINK_EXPIRED is the non-seamless twin of EXPIRED: the authorisation link went unused.
+  assert(isExpiredStatus("COMPLETED"));
+  assert(isExpiredStatus("EXPIRED"));
+  assert(isExpiredStatus("LINK_EXPIRED"));
+  assertFalse(isExpiredStatus("CANCELLED"));
+});
+
+Deno.test("who ended the mandate is recoverable from the status alone", () => {
+  assertEquals(cancelledBy("CUSTOMER_CANCELLED"), "customer");
+  assertEquals(cancelledBy("CANCELLED"), "merchant");
+});
+
+Deno.test("a customer-revoked mandate revokes entitlement, not just analytics", () => {
+  // The regression this guards. Before the predicates, `userUpdatesFor` switched on the status
+  // word, `CUSTOMER_CANCELLED` hit `default:`, and the account kept `payment_type` untouched —
+  // staying fully entitled on a subscription the bank would never debit again.
+  const paidUntil = "2026-10-01T00:00:00.000Z";
+  const updates = userUpdatesFor(
+    user({ payment_type: "active", current_period_end: paidUntil }),
+    snapshotOf({
+      subscription_id: "sub_1",
+      subscription_status: "CUSTOMER_CANCELLED",
+    }),
+    settings,
+  );
+
+  assertEquals(updates.payment_type, "cancelled");
+  // Paid time is honoured: the user keeps the month they already bought.
+  assertEquals(updates.current_period_end, undefined);
+  assert(updates.cancelled_at, "the cancellation instant is stamped once");
+});
+
+Deno.test("a customer-paused mandate is recorded as a billing problem", () => {
+  const updates = userUpdatesFor(
+    user({ payment_type: "active" }),
+    snapshotOf({ subscription_id: "sub_1", subscription_status: "CUSTOMER_PAUSED" }),
+    settings,
+  );
+
+  assertEquals(updates.billing_state, "paused");
+  // Pausing is not cancelling: entitlement is left alone and simply stops advancing.
+  assertEquals(updates.payment_type, undefined);
+});
+
+Deno.test("a transition gets a name a report can group by", () => {
+  assertEquals(transitionName("INITIALIZED", "ACTIVE"), "activated");
+  assertEquals(transitionName("ON_HOLD", "ACTIVE"), "recovered");
+  assertEquals(transitionName("CUSTOMER_PAUSED", "ACTIVE"), "recovered");
+  assertEquals(transitionName("ACTIVE", "ON_HOLD"), "mandate_on_hold");
+  assertEquals(transitionName("ACTIVE", "CUSTOMER_CANCELLED"), "cancelled");
+  assertEquals(transitionName("ACTIVE", "CUSTOMER_PAUSED"), "paused");
+  assertEquals(transitionName("ACTIVE", "LINK_EXPIRED"), "expired");
+  // Deliberately still counted rather than dropped: an unnamed transition arriving in volume is
+  // how a status Cashfree adds after this was written gets noticed at all.
+  assertEquals(transitionName("ACTIVE", "SOME_NEW_CASHFREE_STATE"), "other");
+});
+
+Deno.test("the legacy camelCase subscription id is still found", () => {
+  // An endpoint configured against the older Subscriptions API version sends `subscriptionId`
+  // where this one sends `subscription_id`. A delivery whose id is not found is not an error —
+  // it is acknowledged as `ignored`, so a mandate would go on being cancelled with nothing
+  // here ever noticing.
+  assertEquals(
+    subscriptionIdsFrom({ data: { subscriptionId: "sub_legacy" } }).subscriptionId,
+    "sub_legacy",
+  );
+  assertEquals(
+    subscriptionIdsFrom({ data: { cfSubscriptionId: 4242 } }).cfSubscriptionId,
+    "4242",
+  );
+  assertEquals(
+    subscriptionIdsFrom({ data: { subReferenceId: 99 } }).cfSubscriptionId,
+    "99",
+  );
 });

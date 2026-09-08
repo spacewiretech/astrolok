@@ -4,6 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../app/env.dart';
+import 'analytics/analytics.dart';
+import 'analytics/analytics_events.dart';
+import 'analytics/mixpanel_analytics.dart';
 import 'camera/reading_camera.dart';
 import 'cashfree/cashfree_checkout.dart';
 import 'cashfree/upi_app_preference.dart';
@@ -39,6 +42,44 @@ import 'tts/reading_speech.dart';
 final fakeSessionProvider = Provider<FakeSession>((ref) => FakeSession.instance);
 
 final sessionStoreProvider = Provider<SessionStore>((ref) => SessionStore());
+
+// ---------------------------------------------------------------- analytics
+
+/// Where events go.
+///
+/// Defaults to the no-op so tests and any build that never ran `bootMobileApp` behave exactly as
+/// they did before analytics existed. Boot overrides it with the same instance installed in the
+/// global holder, so the two can never disagree about which sink is live.
+final analyticsProvider = Provider<Analytics>((ref) => const NoopAnalytics());
+
+/// Starts Mixpanel once the fetched config arrives, and stamps the environment onto every event.
+///
+/// Watched by [AstrolokApp] so it runs for the life of the app. It is a no-op whenever boot
+/// already started Mixpanel from the cached config — which is every launch after the first — but
+/// it is what covers the first launch on a device, where there was no cache to read.
+final analyticsBootstrapProvider = FutureProvider<void>((ref) async {
+  final config = await ref.watch(appConfigProvider.future);
+
+  final analytics = ref.read(analyticsProvider);
+  analytics.registerSuper({
+    P.env: config.configString('env'),
+    P.backendMode: backendMode,
+  });
+
+  if (analytics is MixpanelAnalytics) {
+    await analytics.start(config[mixpanelTokenKey]);
+  }
+});
+
+/// Which rung of the repository ladder below is live.
+///
+/// On every event, because without it a developer running against the fakes — where any code
+/// signs in and the paywall charges nothing — pollutes the same funnels as production traffic.
+String get backendMode {
+  if (Env.hasSupabase) return BackendMode.supabase;
+  if (Env.isConfigured) return BackendMode.fast2sms;
+  return BackendMode.fake;
+}
 
 /// Runtime config, served from `app_config` and cached on disk.
 final appConfigRepositoryProvider = Provider<AppConfigRepository>((ref) {

@@ -53,6 +53,30 @@ class SupabaseAppConfigRepository implements AppConfigRepository {
     }
   }
 
+  /// The cached config, with no client and no network.
+  ///
+  /// Exists for exactly one caller: the boot sequence, which needs the Mixpanel token before
+  /// `runApp` and cannot wait on a fetch to get it. Static because at that point there may be no
+  /// `SupabaseClient` to construct a repository around — `Supabase.initialize` is allowed to have
+  /// failed, and a checkout with no `app.env` never called it at all.
+  ///
+  /// Returns null rather than [defaultAppConfig] on a first launch, so the caller can tell "no
+  /// token yet, queue the events" apart from "a token that happens to be blank".
+  static Future<Map<String, String>?> readCachedConfig() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_cacheKey);
+      if (raw == null) return null;
+      final decoded = jsonDecode(raw) as Map<String, dynamic>;
+      return {
+        for (final entry in decoded.entries) entry.key: entry.value.toString(),
+      };
+    } catch (error) {
+      debugPrint('app_config cache read failed: $error');
+      return null;
+    }
+  }
+
   bool _isFresh(SharedPreferences prefs) {
     final at = prefs.getInt(_cacheAtKey);
     if (at == null) return false;

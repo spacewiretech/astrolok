@@ -2,7 +2,7 @@ name: astrolok
 description: "Astrology, palm reading and astro talk."
 publish_to: 'none'
 
-version: 1.0.0+2
+version: 1.0.0+3
 
 environment:
   sdk: ^3.12.2
@@ -66,6 +66,16 @@ dependencies:
   # share sheet, and share_plus above already covers the sharing.
   flutter_tts: ^4.2.5
   pdf: ^3.13.0
+
+  # Product analytics. The project token is deliberately not compiled in — it comes from the
+  # `app_config` table at runtime, so tracking can be turned off server-side without a release,
+  # and a checkout with no token simply runs on the no-op implementation.
+  mixpanel_flutter: ^2.13.0
+
+  # Version and build number, for the one question the Mixpanel SDK cannot answer on its own:
+  # whether this launch is a first install or an upgrade. Everything else about the handset —
+  # model, OS, screen, carrier — the SDK already sends without being asked.
+  package_info_plus: ^10.2.1
 
 dev_dependencies:
   flutter_test:

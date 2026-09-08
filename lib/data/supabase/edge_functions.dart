@@ -4,6 +4,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../analytics/analytics.dart';
+import '../analytics/analytics_events.dart';
+
 /// What a caller is told when a function could not be reached or answered with nothing usable.
 ///
 /// Deliberately says nothing about verification. This file is shared by all twelve functions,
@@ -53,8 +56,47 @@ class SupabaseEdgeFunctions implements EdgeFunctions {
   final SupabaseClient _client;
   final Duration timeout;
 
+  /// Reports every failed call, then rethrows unchanged.
+  ///
+  /// This is the one place all fourteen Edge Function calls pass through, already holding the
+  /// function name, the timing and the mapped error code — so backend health is answerable
+  /// without a single line of per-feature instrumentation. Which is the point: a screen that
+  /// forgets to track its own failure is exactly the screen whose failures matter.
+  ///
+  /// Failures only. The successes are the other 99% of calls and would be pure volume; a feature
+  /// that wants its own latency records it as a property of its own outcome event instead.
   @override
   Future<Map<String, dynamic>> call(
+    String name, {
+    Map<String, dynamic>? body,
+    String? bearerToken,
+    bool delete = false,
+    Duration? timeout,
+  }) async {
+    final startedAt = DateTime.now();
+    try {
+      return await _call(
+        name,
+        body: body,
+        bearerToken: bearerToken,
+        delete: delete,
+        timeout: timeout,
+      );
+    } on EdgeError catch (error) {
+      analytics.track(Ev.edgeCallFailed, {
+        P.function: name,
+        // Null for a transport failure that never reached the function, which is the single most
+        // useful split here: "our backend said no" and "the user has no signal" are different
+        // problems with the same user-visible message.
+        P.code: error.code,
+        P.message: error.message,
+        P.ms: DateTime.now().difference(startedAt).inMilliseconds,
+      });
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> _call(
     String name, {
     Map<String, dynamic>? body,
     String? bearerToken,

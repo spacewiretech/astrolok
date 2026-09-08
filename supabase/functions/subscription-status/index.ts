@@ -1,5 +1,6 @@
 import { cashfreeSettings } from "../_shared/cashfree.ts";
 import { loadConfig } from "../_shared/config.ts";
+import { configureMixpanel } from "../_shared/mixpanel.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
 import {
@@ -33,6 +34,7 @@ Deno.serve(async (req) => {
   if (!userId) return fail("unauthorized", "Please sign in again.", 401);
 
   const config = await loadConfig(db);
+  configureMixpanel(config, "subscription-status");
   const graceHours = graceHoursFrom(config);
 
   const subscription = await latestSubscription(db, userId);

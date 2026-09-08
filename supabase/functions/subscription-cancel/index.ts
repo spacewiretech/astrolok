@@ -1,5 +1,6 @@
 import { cancelSubscription, CashfreeError, cashfreeSettings } from "../_shared/cashfree.ts";
 import { loadConfig } from "../_shared/config.ts";
+import { configureMixpanel } from "../_shared/mixpanel.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
 import {
@@ -8,7 +9,11 @@ import {
   graceHoursFrom,
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
-import { latestSubscription, syncSubscription } from "../_shared/subscription_sync.ts";
+import {
+  latestSubscription,
+  syncSubscription,
+  trackCancellation,
+} from "../_shared/subscription_sync.ts";
 
 /**
  * Cancels the caller's UPI mandate so no further ₹499 is debited.
@@ -29,6 +34,7 @@ Deno.serve(async (req) => {
   if (!userId) return fail("unauthorized", "Please sign in again.", 401);
 
   const config = await loadConfig(db);
+  configureMixpanel(config, "subscription-cancel");
   const graceHours = graceHoursFrom(config);
 
   let settings;
@@ -54,6 +60,33 @@ Deno.serve(async (req) => {
       "Could not cancel the subscription. Please try again.",
       502,
     );
+  }
+
+  // Fired here, before the read-back below, because this is the only place that knows *why* the
+  // mandate ended. Cashfree reports our own cancel back as a plain `CANCELLED`, indistinguishable
+  // from a merchant cancel made for any other reason — so if this were left to the sync, a user
+  // deliberately churning through our own screen would be filed under `merchant`.
+  //
+  // The `cancel:<subscription id>` insert id is what makes the double-report safe: the sync below
+  // will raise the same event a second later, and Mixpanel collapses the two onto this one.
+  {
+    const { data: priorUser } = await db
+      .from("users")
+      .select(USER_COLUMNS)
+      .eq("user_id", userId)
+      .maybeSingle();
+    const prior = priorUser ? asUserRow(priorUser) : null;
+
+    await trackCancellation({
+      userId,
+      subscriptionId: subscription.subscription_id,
+      cancelledBy: "user_in_app",
+      cfStatus: subscription.status,
+      fromStatus: subscription.status,
+      wasInTrial: prior?.payment_type === "trial",
+      entitledUntil: prior?.current_period_end ?? null,
+      startedAt: prior?.subscription_started_at ?? subscription.authorized_at,
+    });
   }
 
   // Read the result back rather than assuming the cancel took effect, so the status we report

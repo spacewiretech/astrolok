@@ -7,6 +7,7 @@ import {
   snapshotOf,
 } from "../_shared/cashfree.ts";
 import { loadConfig } from "../_shared/config.ts";
+import { configureMixpanel } from "../_shared/mixpanel.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
 import {
@@ -16,7 +17,11 @@ import {
   isEntitled,
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
-import { isResumable, latestSubscription } from "../_shared/subscription_sync.ts";
+import {
+  isResumable,
+  latestSubscription,
+  trackCancellation,
+} from "../_shared/subscription_sync.ts";
 
 /**
  * Opens a Cashfree UPI Autopay mandate: ₹3 now, then ₹499/month starting after the trial.
@@ -51,6 +56,7 @@ Deno.serve(async (req) => {
   if (!userId) return fail("unauthorized", "Please sign in again.", 401);
 
   const config = await loadConfig(db);
+  configureMixpanel(config, "subscription-start");
   const graceHours = graceHoursFrom(config);
 
   let settings;
@@ -142,6 +148,18 @@ Deno.serve(async (req) => {
         failure_reason: "replaced by a new mandate",
       })
       .eq("id", existing.id);
+
+    // Housekeeping, but a real mandate really ended — and the user never asked for it. Counted
+    // separately from a churn cancel by `cancelled_by`, so a run of these reads as what it is: a
+    // user who had to start checkout again because the first mandate stopped working.
+    await trackCancellation({
+      userId,
+      subscriptionId: existing.subscription_id,
+      cancelledBy: "system",
+      cfStatus: "CANCELLED",
+      fromStatus: existing.status,
+      reason: "replaced_by_new_mandate",
+    });
   }
 
   const now = new Date();
