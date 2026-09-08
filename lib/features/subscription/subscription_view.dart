@@ -9,6 +9,8 @@ import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
 import '../../data/models/subscription_offer.dart';
 import '../../data/models/upi_app.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/app_config_repository.dart';
 import '../../widgets/astral_background.dart';
@@ -34,6 +36,10 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
   /// Starts muted. A paywall that plays sound the instant it opens is the fastest way to make
   /// someone close the app.
   bool _muted = true;
+
+  /// So the view event fires once per visit rather than on every rebuild — and once the offer
+  /// has actually loaded, because "saw the paywall" and "saw a spinner" are different things.
+  bool _viewReported = false;
 
   static const _features = [
     Feature(
@@ -63,6 +69,17 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
     final state = ref.watch(subscriptionViewModelProvider);
     final config = ref.watch(appConfigProvider).valueOrNull ?? defaultAppConfig;
     final offer = state.offer;
+
+    // The denominator of the whole purchase funnel.
+    if (!_viewReported && !state.loading) {
+      _viewReported = true;
+      analytics.track(Ev.paywallViewed, {
+        P.trialAvailable: state.trialAvailable,
+        P.state: offer == null ? 'error' : 'loaded',
+        P.upiAppCount: state.upiApps.length,
+        P.paymentType: state.user?.paymentType.name,
+      });
+    }
 
     return Scaffold(
       body: AstralBackground(
@@ -132,7 +149,10 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
       child: Row(
         children: [
           _CircleButton(
-            onTap: () => setState(() => _muted = !_muted),
+            onTap: () {
+              analytics.track(Ev.promoVideoToggled, {P.muted: !_muted});
+              setState(() => _muted = !_muted);
+            },
             semanticLabel: _muted ? 'Unmute video' : 'Mute video',
             child: SafeSvg(
               _muted ? Svg.soundOff : Svg.soundOn,
@@ -381,10 +401,18 @@ class _UpiChip extends ConsumerWidget {
   }
 
   Future<void> _pick(BuildContext context, WidgetRef ref) async {
+    analytics.track(Ev.upiPickerOpened, {
+      P.appId: state.selectedAppId,
+      P.availableCount: state.upiApps.length,
+    });
+
     final chosen = await showModalBottomSheet<UpiApp>(
       context: context,
       backgroundColor: AppColors.surface,
       barrierColor: AppColors.scrim,
+      // Named so the navigator observer reports it as a real surface rather than an anonymous
+      // route. Picking a UPI app is one of the more interesting things a user does here.
+      routeSettings: const RouteSettings(name: 'upi-picker'),
       shape: const RoundedRectangleBorder(borderRadius: AppShape.sheetTop),
       builder: (context) => SafeArea(
         child: Column(
@@ -456,8 +484,14 @@ class _LogOutButton extends ConsumerWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () async {
+          // Before the reset, or it would be attributed to the fresh anonymous identity rather
+          // than to the account that actually left.
+          analytics.track(Ev.signedOut, {P.source: 'paywall'});
           await ref.read(authRepositoryProvider).signOut();
           forgetConversations(ref);
+          // Mints a new anonymous id and drops the identity super properties, so the next user
+          // of this handset does not inherit the last one's account.
+          analytics.reset();
           if (context.mounted) context.go(Routes.onboarding);
         },
         child: Padding(

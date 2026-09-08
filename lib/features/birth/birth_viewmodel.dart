@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/analytics/analytics_events.dart';
 import '../../data/entitlement.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/auth_repository.dart';
@@ -105,11 +106,29 @@ class BirthViewModel extends Notifier<BirthState> {
     return BirthState(day: existing.day, month: existing.month, year: existing.year);
   }
 
-  void setDay(int value) => state = state.copyWith(day: value, clearError: true);
+  /// Wheels the user has moved, so engagement with the picker is reported once per wheel rather
+  /// than on every detent — a single spin of the year wheel fires dozens of callbacks.
+  final Set<String> _wheelsTouched = {};
+
+  void _wheelTouched(String field) {
+    if (!_wheelsTouched.add(field)) return;
+    // The first movement of any wheel is the user starting to answer, which is the numerator
+    // for the drop-off on this screen.
+    if (_wheelsTouched.length == 1) {
+      ref.read(analyticsProvider).track(Ev.birthEntryStarted);
+    }
+    ref.read(analyticsProvider).track(Ev.birthWheelChanged, {P.field: field});
+  }
+
+  void setDay(int value) {
+    _wheelTouched('day');
+    state = state.copyWith(day: value, clearError: true);
+  }
 
   /// Clamps the day when the new month is shorter — picking 31 January then switching to
   /// February must not leave an impossible date on screen.
   void setMonth(int value) {
+    _wheelTouched('month');
     var next = state.copyWith(month: value, clearError: true);
     final day = next.day;
     if (day != null && day > next.daysInMonth) {
@@ -119,6 +138,7 @@ class BirthViewModel extends Notifier<BirthState> {
   }
 
   void setYear(int value) {
+    _wheelTouched('year');
     var next = state.copyWith(year: value, clearError: true);
     // Same clamp as [setMonth]: 29 February is only a date in some years.
     final day = next.day;
@@ -138,9 +158,21 @@ class BirthViewModel extends Notifier<BirthState> {
       final user = await ref.read(authRepositoryProvider).saveBirthDate(date);
       ref.read(entitlementProvider.notifier).set(user);
       state = state.copyWith(busy: false);
-      return destinationForUser(user);
+      final destination = destinationForUser(user);
+
+      // The year and the age, not the date. Age is the single most useful cohort this app has —
+      // what a 22-year-old and a 55-year-old want from a reading are different products — and it
+      // is derivable here without storing a full date of birth as an event property.
+      ref.read(analyticsProvider).track(Ev.birthDateSubmitted, {
+        P.birthYear: date.year,
+        P.ageYears: _ageYears(date),
+        P.destination: destination.name,
+      });
+
+      return destination;
     } on OtpSendException catch (e) {
       state = state.copyWith(busy: false, error: e.message);
+      ref.read(analyticsProvider).track(Ev.birthSaveFailed, {P.message: e.message});
       return null;
     } catch (error) {
       debugPrint('[birth] could not save the date of birth: $error');
@@ -148,8 +180,19 @@ class BirthViewModel extends Notifier<BirthState> {
         busy: false,
         error: 'Could not save your date of birth. Please try again.',
       );
+      ref.read(analyticsProvider).track(Ev.birthSaveFailed, {P.error: error.toString()});
       return null;
     }
+  }
+
+  /// Whole years, counting the birthday itself.
+  static int _ageYears(DateTime date) {
+    final now = DateTime.now();
+    var age = now.year - date.year;
+    final hadBirthday = now.month > date.month ||
+        (now.month == date.month && now.day >= date.day);
+    if (!hadBirthday) age -= 1;
+    return age;
   }
 }
 

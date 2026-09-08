@@ -381,8 +381,14 @@ abstract final class BackendMode {
 }
 
 /// Which of the two mirrored reading flows an event belongs to, for [P.feature].
-abstract final class Feature {
+///
+/// Named `ReadingFeature` rather than `Feature` because `Feature` is already a widget in
+/// `lib/widgets/feature_pills.dart`, and the paywall imports both.
+abstract final class ReadingFeature {
   static const palm = 'palm';
   static const face = 'face';
+
+  /// Not a reading, but narration and the "Ask Astro" bridge are shared with the chat, and those
+  /// events want one vocabulary across all three surfaces.
   static const chat = 'chat';
 }

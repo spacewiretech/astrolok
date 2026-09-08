@@ -214,7 +214,7 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
           onChanged: model.setCode,
           // Auto-submitting on the last digit is what makes an autofilled code feel instant;
           // a wrong one still lands on the error path below.
-          onCompleted: (_) => _verify(),
+          onCompleted: (_) => _verify(entryMethod: 'auto_complete'),
         ),
         const SizedBox(height: 20),
         PrimaryButton(
@@ -252,8 +252,12 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
     );
   }
 
-  Future<void> _verify() async {
-    final next = await ref.read(onboardingViewModelProvider.notifier).verifyOtp();
+  /// [entryMethod] separates a code the OS auto-filled from the SMS from one the user typed.
+  /// Only the view knows which happened, and the difference is how the SMS sender id is doing.
+  Future<void> _verify({String entryMethod = 'button'}) async {
+    final next = await ref
+        .read(onboardingViewModelProvider.notifier)
+        .verifyOtp(entryMethod: entryMethod);
     if (!mounted) return;
     // Null means the flow stayed here — a rejected code, or the name sheet taking over.
     if (next == null) {
