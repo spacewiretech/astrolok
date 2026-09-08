@@ -19,6 +19,7 @@ import 'chat_copy.dart';
 import 'chat_drawer.dart';
 import 'chat_reveal.dart';
 import 'chat_state.dart';
+import 'chat_threads_viewmodel.dart';
 import 'chat_viewmodel.dart';
 
 /// The conversation with Astro.
@@ -56,6 +57,11 @@ class _ChatViewState extends ConsumerState<ChatView> {
     // "modified a provider while the widget tree was building".
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+
+      // Home usually has the conversations loaded by now, but this screen is also reached straight
+      // from a reading's "Ask Astro". Warmed here so the drawer never has to fetch for itself; it
+      // is a no-op once the list is up.
+      ref.read(chatThreadsProvider);
 
       if (opener != null && opener.isNotEmpty) {
         ref.read(selectedThreadProvider.notifier).state = ChatThread.draftId;

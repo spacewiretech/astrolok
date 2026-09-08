@@ -101,7 +101,7 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
 
       // And out of the cache and the sidebar, or it would still be listed to tap again.
       await ref.read(chatThreadStoreProvider).remove(arg);
-      ref.invalidate(chatThreadsProvider);
+      ref.read(chatThreadsProvider.notifier).forget(arg);
       return;
     } catch (error) {
       // A history that will not load is not worth an error screen when there is a cache to show,
@@ -166,11 +166,15 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
         // The one message allowed to animate itself in.
         revealingId: reply.message.id,
       );
-      await _cache();
+      final cached = await _cache();
 
       // The sidebar has a new conversation in it, or an existing one has moved to the top and
-      // changed its preview. Either way what it is showing is now stale.
-      ref.invalidate(chatThreadsProvider);
+      // changed its preview. Told rather than re-fetched: the summary written to the cache is the
+      // same one the drawer would have got back from the server. Reading `.notifier` builds the
+      // list if nothing has warmed it yet — one fetch, not one per drawer open.
+      if (cached != null) {
+        ref.read(chatThreadsProvider.notifier).noteTurn(cached.summary);
+      }
     } on ChatLimitReachedException catch (e) {
       // Not a failure the user can retry past, so the message comes back out and the composer
       // closes with the server's own explanation.
@@ -249,21 +253,24 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
     if (state.revealingId == id) state = state.copyWith(clearRevealing: true);
   }
 
-  Future<void> _cache() async {
+  /// Writes the conversation to the cache, and hands it back so the caller can put the same
+  /// conversation in the sidebar without asking the server for it a second time.
+  Future<ChatThread?> _cache() async {
     final id = state.threadId;
     // A draft that has not reached the server has no id to key a cache entry on, and caching it
     // under a fixed one would have every new conversation overwrite the last.
-    if (id == null) return;
+    if (id == null) return null;
 
-    await ref.read(chatThreadStoreProvider).save(
-          ChatThread(
-            id: id,
-            title: state.title,
-            messages: state.messages,
-            remaining: state.remaining,
-            updatedAt: DateTime.now(),
-          ),
-        );
+    final thread = ChatThread(
+      id: id,
+      title: state.title,
+      messages: state.messages,
+      remaining: state.remaining,
+      updatedAt: DateTime.now(),
+    );
+
+    await ref.read(chatThreadStoreProvider).save(thread);
+    return thread;
   }
 }
 
@@ -275,3 +282,14 @@ final chatViewModelProvider =
 /// Held in a provider rather than in the route, so a draft does not have to be given a URL it
 /// does not have an id for yet. Same cross-screen-signal pattern as `palmRejectionProvider`.
 final selectedThreadProvider = StateProvider<String>((_) => ChatThread.draftId);
+
+/// Drops the signed-in user's conversations, for sign-out to call.
+///
+/// The sidebar list is kept alive for the whole app run — that is what makes the drawer open
+/// without fetching — and the selected thread is a plain [StateProvider], so neither goes away on
+/// its own. Without this, the next person to sign in on this device would open the drawer onto the
+/// last person's conversations.
+void forgetConversations(WidgetRef ref) {
+  ref.invalidate(chatThreadsProvider);
+  ref.read(selectedThreadProvider.notifier).state = ChatThread.draftId;
+}

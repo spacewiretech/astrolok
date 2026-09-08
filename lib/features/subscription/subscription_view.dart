@@ -16,6 +16,7 @@ import '../../widgets/feature_pills.dart';
 import '../../widgets/primary_button.dart';
 import '../../widgets/promo_video.dart';
 import '../../widgets/safe_asset.dart';
+import '../chat/chat_viewmodel.dart';
 import 'subscription_viewmodel.dart';
 
 /// The paywall.
@@ -456,6 +457,7 @@ class _LogOutButton extends ConsumerWidget {
       child: InkWell(
         onTap: () async {
           await ref.read(authRepositoryProvider).signOut();
+          forgetConversations(ref);
           if (context.mounted) context.go(Routes.onboarding);
         },
         child: Padding(

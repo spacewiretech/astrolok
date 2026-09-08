@@ -2,6 +2,12 @@
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET"/>
 
+    <!-- The app is advertised through Facebook Ads, which attributes installs by advertising ID.
+         Declared by hand rather than pulled in with an SDK: Play reads this permission off the
+         uploaded bundle to decide whether to ask the advertising-ID questions in Data safety, and
+         without it the store treats the app as not touching the ad ID at all. -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
+
     <!-- Palm reading photographs the user's hand. -->
     <uses-permission android:name="android.permission.CAMERA"/>
 

@@ -16,6 +16,7 @@ import '../../widgets/app_snackbar.dart';
 import '../../widgets/astral_background.dart';
 import '../../widgets/circle_icon_button.dart';
 import '../chat/chat_copy.dart';
+import '../chat/chat_viewmodel.dart';
 
 /// The account.
 ///
@@ -404,6 +405,7 @@ class _LogOutButton extends ConsumerWidget {
       child: TextButton(
         onPressed: () async {
           await ref.read(authRepositoryProvider).signOut();
+          forgetConversations(ref);
           if (context.mounted) context.go(Routes.onboarding);
         },
         child: Text(

@@ -13,6 +13,7 @@ import '../../widgets/brand_logo.dart';
 import '../../widgets/promo_carousel.dart';
 import '../../widgets/reading_card.dart';
 import '../../widgets/safe_asset.dart';
+import '../chat/chat_threads_viewmodel.dart';
 
 /// The signed-in, paid-for home.
 ///
@@ -24,6 +25,12 @@ class HomeView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(entitlementProvider);
+
+    // The conversations, fetched here rather than by the drawer that shows them. The list is the
+    // same on every open, and loading it while the user is reading Home is the difference between
+    // a drawer that opens and a drawer that loads. `read`, not `watch` — Home has nothing to
+    // redraw when it lands, and the provider is kept alive, so this one read outlives the screen.
+    ref.read(chatThreadsProvider);
 
     return Scaffold(
       body: AstralBackground(
