@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -10,6 +12,7 @@ import '../../app/theme/app_typography.dart';
 import '../../data/models/subscription_offer.dart';
 import '../../data/models/upi_app.dart';
 import '../../data/analytics/analytics.dart';
+import '../../data/analytics/att_consent.dart';
 import '../../data/analytics/analytics_events.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/app_config_repository.dart';
@@ -79,6 +82,12 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
         P.upiAppCount: state.upiApps.length,
         P.paymentType: state.user?.paymentType.name,
       });
+
+      // iOS only, and deliberately here rather than at launch: this is the last screen before a
+      // purchase, so a granted IDFA still reaches the conversion event, and the user has already
+      // been through onboarding rather than meeting a permission dialog cold. Not awaited — the
+      // paywall must paint whether or not the user has answered.
+      unawaited(ensureTrackingConsent());
     }
 
     return Scaffold(

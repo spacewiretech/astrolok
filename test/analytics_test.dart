@@ -30,6 +30,60 @@ AppUser _user({
   );
 }
 
+/// A sink that remembers what it was told, for asserting on the fan-out.
+class _RecordingAnalytics implements Analytics {
+  final List<String> events = [];
+  final List<AppUser> identified = [];
+  int flushes = 0;
+
+  @override
+  void track(String event, [Map<String, Object?> properties = const {}]) => events.add(event);
+
+  @override
+  void identify(AppUser user) => identified.add(user);
+
+  @override
+  void flush() => flushes++;
+
+  @override
+  void timeEvent(String event) {}
+
+  @override
+  void reset() {}
+
+  @override
+  void registerSuper(Map<String, Object?> properties) {}
+
+  @override
+  void trackCharge(double amount, [Map<String, Object?> properties = const {}]) {}
+}
+
+/// A vendor SDK having a bad day.
+class _ThrowingAnalytics implements Analytics {
+  @override
+  void track(String event, [Map<String, Object?> properties = const {}]) =>
+      throw StateError('the SDK is unhappy');
+
+  @override
+  void timeEvent(String event) => throw StateError('the SDK is unhappy');
+
+  @override
+  void identify(AppUser user) => throw StateError('the SDK is unhappy');
+
+  @override
+  void reset() => throw StateError('the SDK is unhappy');
+
+  @override
+  void registerSuper(Map<String, Object?> properties) => throw StateError('the SDK is unhappy');
+
+  @override
+  void trackCharge(double amount, [Map<String, Object?> properties = const {}]) =>
+      throw StateError('the SDK is unhappy');
+
+  @override
+  void flush() => throw StateError('the SDK is unhappy');
+}
+
 void main() {
   group('NoopAnalytics', () {
     test('every call is safe, which is what makes the integration optional', () {
@@ -48,6 +102,60 @@ void main() {
         analytics.reset();
         analytics.flush();
       }, returnsNormally);
+    });
+  });
+
+  group('MultiAnalytics', () {
+    test('every sink sees every call', () {
+      final first = _RecordingAnalytics();
+      final second = _RecordingAnalytics();
+      final analytics = MultiAnalytics([first, second]);
+
+      analytics.track(Ev.paymentCompleted, {P.outcome: 'success'});
+      analytics.identify(_user());
+      analytics.flush();
+
+      // The whole point of the fan-out: one `track` in a ViewModel reaches both Mixpanel and
+      // Facebook, and neither the ViewModel nor the interface has to know there are two.
+      for (final sink in [first, second]) {
+        expect(sink.events, [Ev.paymentCompleted]);
+        expect(sink.identified, hasLength(1));
+        expect(sink.flushes, 1);
+      }
+    });
+
+    test('a sink that throws does not cost the others their event', () {
+      final broken = _ThrowingAnalytics();
+      final working = _RecordingAnalytics();
+
+      // The Analytics contract already forbids throwing, but a third-party SDK's failure modes
+      // are not ours to predict — and a vendor outage must not take the other vendor down.
+      expect(
+        () => MultiAnalytics([broken, working]).track(Ev.paymentCompleted),
+        returnsNormally,
+      );
+      expect(working.events, [Ev.paymentCompleted]);
+    });
+
+    test('analyticsSink finds a concrete implementation inside the fan-out', () {
+      final mixpanel = MixpanelAnalytics(verbose: false);
+      final analytics = MultiAnalytics([_RecordingAnalytics(), mixpanel]);
+
+      // This is what `analyticsBootstrapProvider` uses to start Mixpanel on a first launch. A
+      // plain `analytics is MixpanelAnalytics` was true before the fan-out existed and is false
+      // after it — which would leave Mixpanel unstarted on exactly the launch that provider is
+      // there to cover, and would do it silently.
+      expect(analyticsSink<MixpanelAnalytics>(analytics), same(mixpanel));
+    });
+
+    test('analyticsSink still copes with a bare sink, and with none', () {
+      final mixpanel = MixpanelAnalytics(verbose: false);
+
+      expect(analyticsSink<MixpanelAnalytics>(mixpanel), same(mixpanel));
+      // Null rather than a cast error, because analytics being off is the normal state in tests
+      // and in any build that never ran bootMobileApp.
+      expect(analyticsSink<MixpanelAnalytics>(const NoopAnalytics()), isNull);
+      expect(analyticsSink<MixpanelAnalytics>(MultiAnalytics([])), isNull);
     });
   });
 
@@ -229,12 +337,26 @@ void _bootstrapTests() {
       expect(config.calls, [false, true], reason: 'cached read, then a forced one');
     });
 
+    test('a cache with no facebook_app_id is bypassed once', () async {
+      // The same failure, one row later: `facebook_app_id` was added to app_config after these
+      // installs had cached, and until the cache ages out they cannot know whether conversion
+      // reporting is meant to be on. The test is absence of the key, not emptiness of it.
+      final config = _RecordingConfig(
+        {'env': 'production', mixpanelTokenKey: 'tok'},
+        {'env': 'production', mixpanelTokenKey: 'tok', facebookAppIdKey: '123'},
+      );
+
+      await _runBootstrap(config);
+
+      expect(config.calls, [false, true], reason: 'cached read, then a forced one');
+    });
+
     test('a token that is present but blank is left alone', () async {
       // Clearing the cell is the documented off switch. Re-fetching to rediscover that on every
       // launch would make turning analytics off cost a request per launch.
       final config = _RecordingConfig(
-        {'env': 'production', mixpanelTokenKey: ''},
-        {'env': 'production', mixpanelTokenKey: ''},
+        {'env': 'production', mixpanelTokenKey: '', facebookAppIdKey: ''},
+        {'env': 'production', mixpanelTokenKey: '', facebookAppIdKey: ''},
       );
 
       await _runBootstrap(config);
@@ -244,8 +366,8 @@ void _bootstrapTests() {
 
     test('a cached token is used without a second call', () async {
       final config = _RecordingConfig(
-        {'env': 'production', mixpanelTokenKey: 'tok'},
-        {'env': 'production', mixpanelTokenKey: 'tok'},
+        {'env': 'production', mixpanelTokenKey: 'tok', facebookAppIdKey: '123'},
+        {'env': 'production', mixpanelTokenKey: 'tok', facebookAppIdKey: '123'},
       );
 
       await _runBootstrap(config);

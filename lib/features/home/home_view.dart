@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/assets.dart';
 import '../../data/analytics/analytics.dart';
+import '../../data/analytics/att_consent.dart';
 import '../../data/analytics/analytics_events.dart';
 import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
@@ -57,6 +60,11 @@ class _HomeViewState extends ConsumerState<HomeView> {
         // many act on it is the difference between a warning and decoration.
         analytics.track(Ev.billingIssueShown, {P.billingState: user!.billingState!.name});
       }
+
+      // The paywall asks first for anyone on the purchase path; this covers the already-entitled
+      // user who lands straight here and never sees one. Idempotent — iOS only prompts while the
+      // status is undetermined, and the helper guards against a second request in-process.
+      unawaited(ensureTrackingConsent());
     }
 
     return Scaffold(

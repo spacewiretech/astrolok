@@ -81,6 +81,11 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView> {
             P.attempt: i + 1,
             P.trigger: trigger,
             P.secondsSinceCheckout: _secondsWaiting,
+            // Read off the account rather than the paywall, which this screen never saw: the
+            // refreshed user knows what it is actually entitled to. This is the only success
+            // path that does not pass through `Payment Completed`, so without this property the
+            // Facebook sink would have to guess what the conversion was worth.
+            P.offerType: user!.inTrial ? 'trial' : 'plan',
           });
           context.go(Routes.home);
           return;

@@ -33,6 +33,7 @@ import { isEntitled, isInTrial, UserRow } from "../_shared/entitlement.ts";
 import {
   isFailedCharge,
   paymentKind,
+  staleSweepCutoff,
   transitionName,
   userUpdatesFor,
 } from "../_shared/subscription_sync.ts";
@@ -507,4 +508,28 @@ Deno.test("the legacy camelCase subscription id is still found", () => {
     subscriptionIdsFrom({ data: { subReferenceId: 99 } }).cfSubscriptionId,
     "99",
   );
+});
+
+// ---------------------------------------------------------------- reconcile sweep
+
+Deno.test("the staleness sweep looks back by the configured window", () => {
+  // Six hours before NOW. This is the ceiling on how long a dropped cancellation webhook can
+  // leave an account entitled, so the arithmetic is worth pinning.
+  assertEquals(staleSweepCutoff("6", NOW, 6), "2026-09-01T06:00:00.000Z");
+  assertEquals(staleSweepCutoff("1", NOW, 6), "2026-09-01T11:00:00.000Z");
+});
+
+Deno.test("an unset window falls back to the default rather than off", () => {
+  // The whole point of the sweep is that it is the thing still running when the webhook is not.
+  // A blank cell, a placeholder or a typo must not be able to take it down silently — only a
+  // deliberate 0 does that.
+  assertEquals(staleSweepCutoff("", NOW, 6), "2026-09-01T06:00:00.000Z");
+  assertEquals(staleSweepCutoff("  ", NOW, 6), "2026-09-01T06:00:00.000Z");
+  assertEquals(staleSweepCutoff("six", NOW, 6), "2026-09-01T06:00:00.000Z");
+  assertEquals(staleSweepCutoff("-4", NOW, 6), "2026-09-01T06:00:00.000Z");
+});
+
+Deno.test("only an explicit zero disables the staleness sweep", () => {
+  assertEquals(staleSweepCutoff("0", NOW, 6), null);
+  assertEquals(staleSweepCutoff(" 0 ", NOW, 6), null);
 });

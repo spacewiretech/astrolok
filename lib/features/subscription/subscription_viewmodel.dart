@@ -404,6 +404,13 @@ class SubscriptionViewModel extends Notifier<SubscriptionState> {
       P.reason: reason,
       P.error: error,
       P.appId: state.selectedAppId,
+      // Which offer was taken, matching the property `Subscribe Tapped` already carries — so the
+      // two ends of the funnel break down the same way, and a trial that converts worse than a
+      // direct plan purchase is visible rather than averaged away.
+      //
+      // Also the property the Facebook sink reads to decide what a conversion was worth. It maps
+      // the offer type to an amount from `app_config`; see `facebook_analytics.dart`.
+      P.offerType: state.trialAvailable ? 'trial' : 'plan',
       P.totalSeconds: _attemptStartedAt == null
           ? null
           : DateTime.now().difference(_attemptStartedAt!).inSeconds,
@@ -417,6 +424,13 @@ class SubscriptionViewModel extends Notifier<SubscriptionState> {
     // under `Mandate Authorised` and `Subscription Renewed`. Parsing the rupee sign off a label
     // here would produce a second, less accurate revenue series that silently disagrees with the
     // first — and would keep counting a charge the poll only *believed* had happened.
+    //
+    // Facebook is the one exception, and it does not weaken any of the above. An ad optimiser has
+    // to be told a conversion's value at the moment it happens or it cannot bid, so it cannot
+    // wait for the webhook the way Mixpanel's revenue series does. It gets its number from
+    // `app_config` rather than from a label, it never reaches `trackCharge`, and it stays a
+    // separate series in a separate system — so there is still exactly one revenue number in
+    // Mixpanel, and it is still the server's.
 
     return outcome;
   }

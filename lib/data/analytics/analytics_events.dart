@@ -27,6 +27,14 @@ abstract final class Ev {
   static const upiAppOpened = 'UPI App Opened';
   static const upiAppReturned = 'UPI App Returned';
 
+  /// The answer to the iOS App Tracking Transparency prompt, whether it was just given or was
+  /// already standing from an earlier launch.
+  ///
+  /// The opt-in rate this measures is the ceiling on how much iOS ad spend Facebook can attribute
+  /// at all. A drop in it and a drop in real conversions look identical from inside the ad
+  /// account, and this is the only thing that tells them apart.
+  static const trackingConsentResolved = 'Tracking Consent Resolved';
+
   // ---------------------------------------------------------------- navigation
 
   static const screenViewed = 'Screen Viewed';
@@ -269,6 +277,16 @@ abstract final class P {
   static const result = 'result';
   static const attempt = 'attempt';
   static const position = 'position';
+
+  // ---------------------------------------------------------------- ad attribution
+
+  /// The raw ATT authorisation status — `authorized`, `denied`, `restricted`, `notDetermined`.
+  static const status = 'status';
+  static const granted = 'granted';
+
+  /// False when the status was already settled on a previous launch, so the opt-in *rate* can be
+  /// measured over the users who were actually asked rather than over every launch.
+  static const prompted = 'prompted';
 
   // ---------------------------------------------------------------- onboarding
 

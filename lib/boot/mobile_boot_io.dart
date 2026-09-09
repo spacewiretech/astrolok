@@ -11,6 +11,7 @@ import '../data/analytics/analytics.dart';
 import '../data/analytics/analytics_context.dart';
 import '../data/analytics/analytics_events.dart';
 import '../data/analytics/analytics_session.dart';
+import '../data/analytics/facebook_analytics.dart';
 import '../data/analytics/mixpanel_analytics.dart';
 import '../data/providers.dart';
 import '../data/repositories/app_config_repository.dart';
@@ -58,12 +59,18 @@ Future<void> bootMobileApp() async {
 /// keeps on disk; a first launch finds nothing there and Mixpanel is started later by
 /// [analyticsBootstrapProvider], with the launch events buffered in the meantime.
 Future<Analytics> _startAnalytics() async {
-  final analytics = MixpanelAnalytics();
+  final mixpanel = MixpanelAnalytics();
+  final facebook = FacebookAnalytics();
+
+  // Two sinks with very different appetites behind one interface: Mixpanel answers product
+  // questions and takes everything, Facebook trains an ad optimiser and takes four conversions.
+  // The fan-out is what keeps that a property of the sinks rather than of every call site.
+  final analytics = MultiAnalytics([mixpanel, facebook]);
 
   // Installed before anything is tracked, and before the token is known, because the buffer is
   // what makes an unstarted sink useful rather than lossy.
   installAnalytics(analytics);
-  analytics.context = () => {
+  mixpanel.context = () => {
         ...analyticsObserver.contextProperties(),
         ...analyticsSession.contextProperties(),
       };
@@ -75,9 +82,10 @@ Future<Analytics> _startAnalytics() async {
 
   try {
     final cached = await SupabaseAppConfigRepository.readCachedConfig();
-    await analytics.start(cached?[mixpanelTokenKey]);
+    await mixpanel.start(cached?[mixpanelTokenKey]);
+    await startFacebook(facebook, cached ?? const {});
   } catch (error) {
-    debugPrint('[analytics] could not read the cached token: $error');
+    debugPrint('[analytics] could not read the cached config: $error');
   }
 
   _reportUncaughtErrors();

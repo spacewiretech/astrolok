@@ -743,6 +743,31 @@ export async function latestSubscription(
   return data === null ? null : asSubscriptionRow(data);
 }
 
+/**
+ * How far back the reconcile's staleness sweep looks, or null when it is switched off.
+ *
+ * Pulled out of the endpoint so the one rule that decides whether the safety net runs at all can
+ * be tested without a database. The failure mode being guarded against is a typo in a dashboard
+ * cell silently taking the net down: a value that cannot be read falls back to [defaultHours]
+ * rather than to nothing, and only a deliberate `0` disables the sweep. A negative number is a
+ * typo too, never an intent, so it takes the same fallback.
+ */
+export function staleSweepCutoff(
+  setting: string,
+  now: Date,
+  defaultHours: number,
+): string | null {
+  const configured = setting.trim();
+  if (configured === "0") return null;
+
+  const parsed = Number(configured);
+  const hours = configured !== "" && Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : defaultHours;
+
+  return new Date(now.getTime() - hours * 3600_000).toISOString();
+}
+
 /** A pending checkout whose session token is still usable, so a retry can resume it. */
 export function isResumable(row: SubscriptionRow): boolean {
   if (!row.session_id || !row.session_expiry) return false;

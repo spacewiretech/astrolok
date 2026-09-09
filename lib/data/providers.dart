@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../app/env.dart';
 import 'analytics/analytics.dart';
 import 'analytics/analytics_events.dart';
+import 'analytics/facebook_analytics.dart';
 import 'analytics/mixpanel_analytics.dart';
 import 'camera/reading_camera.dart';
 import 'cashfree/cashfree_checkout.dart';
@@ -74,7 +75,7 @@ final analyticsBootstrapProvider = FutureProvider<void>((ref) async {
   // The test is *absence*, not emptiness. A missing key means this cache predates the row; a
   // present-but-blank one is someone having deliberately cleared it, and re-fetching on every
   // launch to rediscover that would make the off switch cost a request per launch.
-  if (!config.containsKey(mixpanelTokenKey)) {
+  if (!config.containsKey(mixpanelTokenKey) || !config.containsKey(facebookAppIdKey)) {
     try {
       config = await ref.read(appConfigRepositoryProvider).load(force: true);
     } catch (error) {
@@ -82,9 +83,15 @@ final analyticsBootstrapProvider = FutureProvider<void>((ref) async {
     }
   }
 
-  if (analytics is MixpanelAnalytics) {
-    await analytics.start(config[mixpanelTokenKey]);
-  }
+  // Resolved through [analyticsSink] rather than a direct `is` test, because the installed sink
+  // is a [MultiAnalytics] fan-out and a plain `analytics is MixpanelAnalytics` would now be false
+  // — silently leaving Mixpanel unstarted on exactly the first launch this provider exists to
+  // cover. The helper looks inside the fan-out, and still copes with a bare sink in tests.
+  final mixpanel = analyticsSink<MixpanelAnalytics>(analytics);
+  if (mixpanel != null) await mixpanel.start(config[mixpanelTokenKey]);
+
+  final facebook = analyticsSink<FacebookAnalytics>(analytics);
+  if (facebook != null) await startFacebook(facebook, config);
 });
 
 /// Which rung of the repository ladder below is live.
