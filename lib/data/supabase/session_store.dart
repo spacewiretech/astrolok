@@ -45,6 +45,7 @@ class SessionStore {
           'trialEndsAt': user.trialEndsAt?.toIso8601String(),
           'currentPeriodEnd': user.currentPeriodEnd?.toIso8601String(),
           'entitled': user.entitled,
+          'trialAvailable': user.trialAvailable,
         }),
       );
 
@@ -74,6 +75,11 @@ class SessionStore {
         trialEndsAt: DateTime.tryParse(map['trialEndsAt'] as String? ?? ''),
         currentPeriodEnd: DateTime.tryParse(map['currentPeriodEnd'] as String? ?? ''),
         entitled: map['entitled'] as bool? ?? false,
+        // Absent in a cache written before this field existed. Left null so [isTrialAvailable]
+        // falls back to the dates rather than asserting an answer — deliberately not a reason to
+        // bump `_version`, which would sign an offline user out over a field that has a safe
+        // default.
+        trialAvailable: map['trialAvailable'] as bool?,
       ).recomputeOffline();
     } catch (_) {
       // A cache written by an older build is not worth crashing over.

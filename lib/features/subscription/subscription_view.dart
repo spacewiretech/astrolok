@@ -38,7 +38,7 @@ class SubscriptionView extends ConsumerStatefulWidget {
 class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
   /// Starts muted. A paywall that plays sound the instant it opens is the fastest way to make
   /// someone close the app.
-  bool _muted = true;
+  bool _muted = false;
 
   /// So the view event fires once per visit rather than on every rebuild — and once the offer
   /// has actually loaded, because "saw the paywall" and "saw a spinner" are different things.
@@ -126,7 +126,7 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
                               // in the mockup.
                               Text(
                                 offer.consent,
-                                style: AppText.legal,
+                                style: AppText.legal.copyWith(fontSize: 10),
                                 textAlign: TextAlign.center,
                               ),
                             ],
@@ -176,7 +176,7 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
             ),
           ),
           const Spacer(),
-          _LogOutButton(),
+          // _LogOutButton(),
         ],
       ),
     );
@@ -237,7 +237,7 @@ class _TrialHeadline extends StatelessWidget {
         Flexible(
           child: Text(
             '$days-Day Trial for',
-            style: AppText.display,
+            style: AppText.display.copyWith(fontSize: 16),
             textAlign: TextAlign.center,
           ),
         ),
@@ -250,7 +250,7 @@ class _TrialHeadline extends StatelessWidget {
           ),
           child: Text(
             offer.trialPrice,
-            style: AppText.display.copyWith(color: Colors.white, fontSize: 24),
+            style: AppText.display.copyWith(color: Colors.white, fontSize: 16),
           ),
         ),
       ],

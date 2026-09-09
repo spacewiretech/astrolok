@@ -116,6 +116,48 @@ Deno.test("an unattributable event is still counted, under a synthetic id", asyn
   }
 });
 
+Deno.test("an over-long insert id is hashed into the length Mixpanel dedupes on", async () => {
+  const { calls, restore } = captureFetch();
+  try {
+    configureMixpanel(configWith("tok"), "test");
+
+    // A webhook id carrying a SHA-256 runs to seventy-odd characters. Mixpanel accepts an
+    // `$insert_id` past 36 and then ignores it, so the dedupe reads as present in the code and
+    // is absent in the data — which is how a retried webhook floods the project.
+    const long = `wh:${"a".repeat(64)}:handled`;
+    await trackServer({ event: "Webhook Received", distinctId: "u1", insertId: long });
+
+    const id = soleEvent(calls).properties.$insert_id as string;
+    assert(id.length <= 36, `got ${id.length} characters`);
+    assert(id !== long);
+  } finally {
+    restore();
+  }
+});
+
+Deno.test("hashing an insert id keeps equal ids equal and different ids different", async () => {
+  const long = (suffix: string) => `wh:${"a".repeat(64)}:${suffix}`;
+
+  const idFor = async (insertId: string) => {
+    const { calls, restore } = captureFetch();
+    try {
+      configureMixpanel(configWith("tok"), "test");
+      await trackServer({ event: "Webhook Received", distinctId: "u1", insertId });
+      return soleEvent(calls).properties.$insert_id as string;
+    } finally {
+      restore();
+    }
+  };
+
+  // The only property that matters: a redelivery must still collapse onto the event it
+  // duplicates, and a genuinely different outcome must still be counted.
+  assertEquals(await idFor(long("handled")), await idFor(long("handled")));
+  assert(await idFor(long("handled")) !== await idFor(long("failed")));
+
+  // Short ids are left alone, so `pay:987:FAILED` stays readable in a debug view.
+  assertEquals(await idFor("pay:987:FAILED"), "pay:987:FAILED");
+});
+
 Deno.test("a profile write for an unknown user is refused", async () => {
   const { calls, restore } = captureFetch();
   try {

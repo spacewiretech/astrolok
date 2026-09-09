@@ -2,8 +2,10 @@ import {
   cashfreeSettings,
   dedupeKey,
   disputeFrom,
+  notificationKey,
   paymentFrom,
   refundFrom,
+  skewSeconds,
   subscriptionIdsFrom,
   verifyWebhook,
 } from "../_shared/cashfree.ts";
@@ -42,6 +44,15 @@ import {
 const MAX_RECORDED_BODY = 64 * 1024;
 
 const UNIQUE_VIOLATION = "23505";
+
+/**
+ * Deliveries of one notification before it is called a storm.
+ *
+ * Cashfree's early retries are about a minute apart, so this is roughly ten minutes of a webhook
+ * that will not go through — comfortably past any transient failure, and long before a day of
+ * retries has gone by with nobody told.
+ */
+const RETRY_STORM_THRESHOLD = 10;
 
 function ok(body: Record<string, unknown>): Response {
   return json(body, 200);
@@ -104,12 +115,18 @@ Deno.serve(async (req) => {
   const stamp = timestamp ?? "";
   const key = await dedupeKey(eventType, stamp, raw);
 
+  // The analytics identity, which is emphatically *not* `key`. See `notificationKey`: `key`
+  // changes on every delivery attempt, which is right for the money path and ruinous for the
+  // event stream hanging off it.
+  const notification = await notificationKey(eventType, payload, raw);
+
   // Assigned once the secret is in hand. `reportDelivery` closes over it and reads it at call
   // time, so the one outcome reported before verification is possible still reports honestly.
   let verified = false;
 
-  // Recorded whether or not it verified: a forged call is worth being able to see.
-  const skew = timestamp ? Math.round((Date.now() - Number(timestamp) * 1000) / 1000) : null;
+  // Recorded whether or not it verified: a forged call is worth being able to see. See
+  // `skewSeconds` — computing this wrong is what took the webhook path down.
+  const skew = skewSeconds(timestamp);
   const ids = subscriptionIdsFrom(payload);
 
   // Everything known about *why* this delivery arrived, attached to whichever outcome it reaches.
@@ -118,6 +135,11 @@ Deno.serve(async (req) => {
   // are otherwise indistinguishable once processed.
   let deliveryUserId: string | null = null;
   let reported = false;
+
+  // Declared up here rather than beside the insert below because `reportDelivery` closes over it
+  // and the `not_configured` exit calls it before the insert has run — reading a `let` from its
+  // temporal dead zone would throw inside the one handler that must never throw.
+  let eventId: number | undefined;
 
   const reportDelivery = async (
     outcome: string,
@@ -128,14 +150,51 @@ Deno.serve(async (req) => {
     if (reported) return;
     reported = true;
 
+    // ------------------------------------------------------------------ DISABLED 2026-09-09
+    //
+    // `Webhook Received` is switched off at the source, not merely deduplicated.
+    //
+    // The per-notification suppression below works, but it cannot help here: this endpoint
+    // receives the whole Cashfree merchant account's traffic, and most of it belongs to other
+    // products — subscription ids arriving as `ca_*` and `mt_*` against our own `alk_*`. Each of
+    // those is a genuinely distinct notification, so every one earns its own event and no
+    // dedupe is entitled to collapse them. The volume is real, it is simply not ours.
+    //
+    // Everything else still records: `payment_events` keeps the full audit row for every
+    // delivery, so nothing is lost that this event was carrying — it can be reconstructed from
+    // the table whenever it is wanted.
+    //
+    // TO RESTORE: delete this `return` and uncomment the block beneath it. Worth doing only once
+    // the foreign traffic is dealt with — either separate Cashfree accounts per product, or an
+    // early exit for `unknown_subscription` before it reaches here.
+    return;
+
+    /*
+    // And exactly one per *notification*, which is the stronger guarantee and the one that
+    // matters. Cashfree retries a non-2xx answer roughly once a minute for as long as it keeps
+    // getting one; without this, a single webhook the handler cannot process produces an
+    // unbounded stream of events that buries every other event in the project.
+    //
+    // Keyed on the outcome as well, so only the *repetition* is silenced: a delivery that fails
+    // ten times and then succeeds still reports its `handled`, which is exactly the transition
+    // someone reading this funnel needs to see.
+    const { data: alreadyReported } = await db
+      .from("payment_events")
+      .select("id")
+      .eq("notification_key", notification)
+      .eq("reported_outcome", outcome)
+      .limit(1)
+      .maybeSingle();
+
+    if (alreadyReported) return;
+
     await trackServer({
       event: "Webhook Received",
       distinctId: deliveryUserId,
-      // The dedupe key hashes type + timestamp + body, so a Cashfree redelivery of the same
-      // notification resolves to the same id. The outcome is part of the id because a redelivery
-      // is deliberately reported again under `duplicate`: same delivery, different thing
-      // happening to it, and collapsing the two onto one id would hide the redelivery entirely.
-      insertId: `wh:${key}:${outcome}`,
+      // The notification key, never the delivery key: a redelivery of the same notification has
+      // to resolve to the same id or Mixpanel counts it again. The outcome is part of the id
+      // because the same notification legitimately reports twice when a retry finally succeeds.
+      insertId: `wh:${notification}:${outcome}`,
       properties: {
         outcome,
         // The cause.
@@ -147,6 +206,56 @@ Deno.serve(async (req) => {
         header_timestamp: timestamp,
         body_bytes: raw.length,
         ...extra,
+      },
+    });
+
+    // Claimed after the send, so a failure to record leaves the notification reportable rather
+    // than silently swallowing it. The worst case is one duplicate event, which `$insert_id`
+    // collapses anyway.
+    if (eventId !== undefined) {
+      await db
+        .from("payment_events")
+        .update({ reported_at: new Date().toISOString(), reported_outcome: outcome })
+        .eq("id", eventId);
+    }
+    */
+  };
+
+  /**
+   * The one event that survives the suppression above, and the reason it can be trusted.
+   *
+   * Reporting a notification once means a webhook Cashfree can never deliver successfully goes
+   * quiet after its first event — which is precisely the blindness that let this run at a
+   * delivery a minute unnoticed. So when the deliveries of one notification cross a threshold,
+   * say so, exactly once: the `$insert_id` is fixed per notification, so repeated crossings and
+   * concurrent deliveries both collapse onto the same event.
+   *
+   * Counted as rows sharing `notification_key` rather than as a column on one row, because a
+   * retry carrying a fresh `x-webhook-timestamp` gets a fresh `dedupe_key` and therefore a whole
+   * new row — a per-row counter would sit at 1 through the loudest storm.
+   */
+  const reportRetryStorm = async (): Promise<void> => {
+    const { count } = await db
+      .from("payment_events")
+      .select("id", { count: "exact", head: true })
+      .eq("notification_key", notification);
+
+    // Exactly equal, not "at least": the count climbs by one per delivery, so equality fires on
+    // one delivery and no other. `>=` would send a request a minute for as long as the storm ran
+    // — collapsed into one event by `$insert_id`, but still spending the ingestion this whole
+    // change exists to stop spending.
+    if (count !== RETRY_STORM_THRESHOLD) return;
+
+    await trackServer({
+      event: "Webhook Retrying",
+      distinctId: deliveryUserId,
+      insertId: `wh:${notification}:retry_storm`,
+      properties: {
+        cf_event_type: eventType,
+        deliveries: count,
+        signature_ok: verified,
+        cf_subscription_id: ids.cfSubscriptionId,
+        subscription_id: ids.subscriptionId,
       },
     });
   };
@@ -168,6 +277,7 @@ Deno.serve(async (req) => {
   const eventRow = {
     event_type: eventType,
     dedupe_key: key,
+    notification_key: notification,
     signature_ok: verified,
     header_timestamp: timestamp,
     skew_seconds: Number.isFinite(skew) ? skew : null,
@@ -182,7 +292,7 @@ Deno.serve(async (req) => {
     .select("id, processed_at")
     .single();
 
-  let eventId = inserted?.id as number | undefined;
+  eventId = inserted?.id as number | undefined;
 
   if (insertError) {
     if (insertError.code !== UNIQUE_VIOLATION) {
@@ -216,6 +326,8 @@ Deno.serve(async (req) => {
     }
     eventId = prior.id as number;
   }
+
+  await reportRetryStorm();
 
   if (!verified) {
     console.error(
@@ -272,7 +384,7 @@ Deno.serve(async (req) => {
     // before the subscription branch because they will never satisfy it.
     const refund = refundFrom(payload);
     if (refund) {
-      await recordRefund(db, refund);
+      await recordRefund(db, settings, refund);
       deliveryUserId ??= await userForPayment(db, refund.cfPaymentId);
       await finish();
       await reportDelivery("handled", {
@@ -289,7 +401,7 @@ Deno.serve(async (req) => {
 
     const dispute = disputeFrom(payload);
     if (dispute) {
-      await recordDispute(db, dispute);
+      await recordDispute(db, settings, dispute);
       deliveryUserId ??= await userForPayment(db, dispute.cfPaymentId);
       await finish();
       await reportDelivery("handled", {

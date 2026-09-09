@@ -107,25 +107,25 @@ void _reportUncaughtErrors() {
   final previousFlutterError = FlutterError.onError;
   FlutterError.onError = (details) {
     previousFlutterError?.call(details);
-    analytics.track(Ev.appCrashed, {
-      P.error: details.exceptionAsString(),
-      P.stackHead: _stackHead(details.stack),
-      // A Flutter framework error is usually recoverable — a bad layout, a failed image — and
-      // the app carries on. Counting those as fatal would drown the ones that are.
-      P.fatal: false,
-    });
+    // analytics.track(Ev.appCrashed, {
+    //   P.error: details.exceptionAsString(),
+    //   P.stackHead: _stackHead(details.stack),
+    //   // A Flutter framework error is usually recoverable — a bad layout, a failed image — and
+    //   // the app carries on. Counting those as fatal would drown the ones that are.
+    //   P.fatal: false,
+    // });
   };
 
   final previousPlatformError = PlatformDispatcher.instance.onError;
   PlatformDispatcher.instance.onError = (error, stack) {
-    analytics.track(Ev.appCrashed, {
-      P.error: error.toString(),
-      P.stackHead: _stackHead(stack),
-      P.fatal: true,
-    });
-    // Flush now: an error that reached here may well be about to take the isolate down, and a
-    // queued crash report that never leaves the device is no report at all.
-    analytics.flush();
+    // analytics.track(Ev.appCrashed, {
+    //   P.error: error.toString(),
+    //   P.stackHead: _stackHead(stack),
+    //   P.fatal: true,
+    // });
+    // // Flush now: an error that reached here may well be about to take the isolate down, and a
+    // // queued crash report that never leaves the device is no report at all.
+    // analytics.flush();
     return previousPlatformError?.call(error, stack) ?? false;
   };
 }

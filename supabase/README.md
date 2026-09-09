@@ -64,10 +64,20 @@ before launch; if Cashfree refuses the schedule, raise `cashfree_trial_days` to 
 Money moves through three independent guards, because webhooks are redelivered:
 
 - `payment_events.dedupe_key` — unique on `sha256(event_type | timestamp | raw body)`, so a
-  redelivered webhook is a no-op rather than a second state transition.
+  redelivered webhook is a no-op rather than a second state transition. Per *delivery attempt*
+  on purpose: Cashfree stamps a fresh `x-webhook-timestamp` each time, and a retry that follows
+  a failed attempt is meant to run the money path again.
 - `subscription_payments.cf_payment_id` — unique, so a charge cannot be counted twice.
 - `subscriptions_one_active_per_user` — a partial unique index, so a retry can never leave two
   mandates debiting in parallel.
+
+`payment_events.notification_key` is the analytics-scoped sibling of `dedupe_key`, and the
+distinction matters: it identifies the *notification* (`pay:{id}:{status}`, or a body hash where
+nothing nameable is in the payload) rather than the delivery, so it is stable across retries.
+`Webhook Received` is reported once per `(notification_key, outcome)` — a webhook stuck in a
+retry loop is counted once, not once a minute, while one that fails and then succeeds still
+reports both. `Webhook Retrying` fires once when a notification passes ten deliveries, so that
+silence is never mistaken for health.
 
 The webhook verifies `base64(HMAC-SHA256(timestamp + raw body, cashfree_secret_key))` in
 constant time over the **raw bytes**, then re-fetches the subscription from Cashfree and writes

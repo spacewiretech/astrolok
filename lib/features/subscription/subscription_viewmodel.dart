@@ -63,7 +63,15 @@ class SubscriptionState {
 
   /// A returning subscriber — lapsed, cancelled, or a trial already spent — is not offered the
   /// trial price again. Only an account that has never authorised a mandate sees it.
-  bool get trialAvailable => !(user?.hasEverSubscribed ?? false);
+  ///
+  /// Read from the user the server sent rather than derived here. `subscription-start` makes this
+  /// same call from the same field to decide what to authorise, so the price on the button, the
+  /// UPI Autopay consent line and the amount actually charged cannot disagree — which they did,
+  /// silently, for every returning subscriber.
+  ///
+  /// True with no user at all: a paywall that cannot say defaults to advertising the cheaper
+  /// offer, and the server refuses to honour it if the account is not owed one.
+  bool get trialAvailable => user?.isTrialAvailable ?? true;
 
   SubscriptionState copyWith({
     SubscriptionOffer? offer,
@@ -109,6 +117,13 @@ class SubscriptionViewModel extends Notifier<SubscriptionState> {
   String? _attemptId;
   int _attempts = 0;
   DateTime? _attemptStartedAt;
+
+  /// Which offer this attempt was launched on, captured at the tap.
+  ///
+  /// Not re-read at the end. By then the entitlement poll has replaced `state.user` with the
+  /// post-purchase one, whose trial is no longer on the table — so re-deriving it reported every
+  /// ₹3 trial conversion as a ₹499 plan purchase, and that value is what Facebook bids on.
+  String? _offerType;
 
   Analytics get _analytics => ref.read(analyticsProvider);
 
@@ -241,6 +256,7 @@ class SubscriptionViewModel extends Notifier<SubscriptionState> {
     _attempts += 1;
     _attemptId = 'pa_${DateTime.now().microsecondsSinceEpoch}_$_attempts';
     _attemptStartedAt = DateTime.now();
+    _offerType = state.trialAvailable ? 'trial' : 'plan';
 
     // The SDK's own stopwatch, not a Dart one: the app is backgrounded for the whole UPI
     // hand-off, and a duration measured across that in Dart would be wrong.
@@ -250,7 +266,7 @@ class SubscriptionViewModel extends Notifier<SubscriptionState> {
     _analytics.track(Ev.subscribeTapped, {
       ..._attemptProperties(),
       P.appId: state.selectedAppId,
-      P.offerType: state.trialAvailable ? 'trial' : 'plan',
+      P.offerType: _offerType,
       // The label, not a number — see [_finish] on why the client books no revenue.
       P.amount: state.trialAvailable ? offer?.trialPrice : offer?.planPrice,
       // `intent` opens the UPI app directly; `checkout` falls back to Cashfree's screen. The
@@ -410,7 +426,10 @@ class SubscriptionViewModel extends Notifier<SubscriptionState> {
       //
       // Also the property the Facebook sink reads to decide what a conversion was worth. It maps
       // the offer type to an amount from `app_config`; see `facebook_analytics.dart`.
-      P.offerType: state.trialAvailable ? 'trial' : 'plan',
+      //
+      // The value captured at the tap, deliberately — see [_offerType]. The poll above has
+      // already moved `state.user` past the purchase by the time this runs.
+      P.offerType: _offerType,
       P.totalSeconds: _attemptStartedAt == null
           ? null
           : DateTime.now().difference(_attemptStartedAt!).inSeconds,

@@ -7,6 +7,7 @@ void main() {
     DateTime? trialEndsAt,
     DateTime? currentPeriodEnd,
     bool entitled = false,
+    bool? trialAvailable,
   }) {
     return AppUser(
       id: 'u1',
@@ -15,6 +16,7 @@ void main() {
       trialEndsAt: trialEndsAt,
       currentPeriodEnd: currentPeriodEnd,
       entitled: entitled,
+      trialAvailable: trialAvailable,
     );
   }
 
@@ -42,8 +44,26 @@ void main() {
     test('a new account with no trial date is never entitled', () {
       // This is the state every signup is in before the mandate is authorised, and it is what
       // puts them on the paywall.
+      expect(user(type: PaymentType.none, entitled: true).recomputeOffline(now).entitled,
+          isFalse);
+      // The pre-`none` spelling of the same account. Rows written before the backfill still
+      // arrive this way, and must keep landing on the paywall.
       expect(user(type: PaymentType.trial, entitled: true).recomputeOffline(now).entitled,
           isFalse);
+    });
+
+    test('none ignores the dates entirely', () {
+      // Not merely "null dates grant nothing". An account that never authorised a mandate is not
+      // entitled even if a stale cache carries dates from somewhere, because `none` is the
+      // strongest statement the row can make and the server agrees.
+      final withDates = user(
+        type: PaymentType.none,
+        trialEndsAt: now.add(const Duration(days: 1)),
+        currentPeriodEnd: now.add(const Duration(days: 30)),
+        entitled: true,
+      );
+      expect(withDates.recomputeOffline(now).entitled, isFalse);
+      expect(withDates.entitlementExpiresAt, isNull);
     });
 
     test('an active mandate that has not billed yet is entitled', () {
@@ -114,6 +134,57 @@ void main() {
       });
       expect(parsed!.paymentType, PaymentType.trial);
       expect(parsed.recomputeOffline(now).entitled, isFalse);
+    });
+
+    test('parses none, and the trial_available flag beside it', () {
+      final parsed = AppUser.fromServer({
+        'user_id': 'abc',
+        'payment_type': 'none',
+        'entitled': false,
+        'trial_available': true,
+      });
+      expect(parsed!.paymentType, PaymentType.none);
+      expect(parsed.isTrialAvailable, isTrue);
+      expect(parsed.hasEverSubscribed, isFalse);
+    });
+  });
+
+  group('trial availability', () {
+    test('a fresh account is owed the trial', () {
+      expect(user(type: PaymentType.none).hasEverSubscribed, isFalse);
+      expect(user(type: PaymentType.none).isTrialAvailable, isTrue);
+    });
+
+    test('every other state has already spent it', () {
+      for (final type in [
+        PaymentType.trial,
+        PaymentType.active,
+        PaymentType.expired,
+        PaymentType.cancelled,
+      ]) {
+        expect(user(type: type).hasEverSubscribed, isTrue, reason: type.name);
+        expect(user(type: type).isTrialAvailable, isFalse, reason: type.name);
+      }
+    });
+
+    test('the server has the last word, in both directions', () {
+      // What the client would have concluded on its own is irrelevant once the server has
+      // answered — `subscription-start` authorises from the same field, so a disagreement here
+      // is a paywall advertising one price and a mandate charging another.
+      expect(user(type: PaymentType.none, trialAvailable: false).isTrialAvailable, isFalse);
+      expect(user(type: PaymentType.cancelled, trialAvailable: true).isTrialAvailable, isTrue);
+    });
+
+    test('a payload without the field falls back to the dates', () {
+      // A response from a server that predates `trial_available`, or the fake repository. The
+      // fallback has to land where the old client-side rule did.
+      final spent = AppUser.fromServer({
+        'user_id': 'abc',
+        'payment_type': 'cancelled',
+        'trial_ends_at': '2026-09-01T00:00:00Z',
+      });
+      expect(spent!.trialAvailable, isNull);
+      expect(spent.isTrialAvailable, isFalse);
     });
   });
 

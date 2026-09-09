@@ -30,8 +30,7 @@ class SubscriptionOffer {
   /// user is asked to read before authorising a recurring debit reads as carelessness about
   /// the part that takes their money.
   String get consent =>
-      '$trialPrice today. $planPrice/month will be auto-debited from your UPI '
-      'after $trialDays ${trialDays == 1 ? 'day' : 'days'}. Cancel anytime.';
+      '$trialPrice today. $planPrice/month will be auto-debited';
 }
 
 /// The result of asking the server to open a mandate.

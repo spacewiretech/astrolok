@@ -85,14 +85,14 @@ export async function trackServer(events: ServerEvent[] | ServerEvent): Promise<
   const list = Array.isArray(events) ? events : [events];
   if (list.length === 0) return;
 
-  const payload = list.map((e) => ({
+  const payload = await Promise.all(list.map(async (e) => ({
     event: e.event,
     properties: {
       token,
       // A synthetic id rather than a dropped event: knowing how many webhooks arrive for
       // subscriptions we cannot attribute is itself worth knowing.
       distinct_id: e.distinctId ?? `unattributed:${e.insertId}`,
-      $insert_id: e.insertId,
+      $insert_id: await insertIdFor(e.insertId),
       time: e.time ? Date.parse(e.time) : Date.now(),
       // Without this every server event would be stamped with the edge node's geography.
       $ip: "0",
@@ -102,9 +102,34 @@ export async function trackServer(events: ServerEvent[] | ServerEvent): Promise<
       server_function: source,
       ...stripNullish(e.properties ?? {}),
     },
-  }));
+  })));
 
   await send(TRACK_URL, payload);
+}
+
+/** Mixpanel's documented ceiling for `$insert_id`. Longer ids are not deduplicated. */
+const MAX_INSERT_ID = 36;
+
+/**
+ * Keeps `$insert_id` inside the length Mixpanel will actually deduplicate on.
+ *
+ * The ids built upstream are readable on purpose — `pay:{cfPaymentId}:{status}` says what it is
+ * at a glance in a debug view — but the ones carrying a SHA-256 run to seventy-odd characters,
+ * and an over-long `$insert_id` is accepted and then ignored. The dedupe silently does nothing,
+ * which is the worst of both worlds: the guarantee reads as present in the code and is absent in
+ * the data.
+ *
+ * Hashing preserves exactly the property that matters — equal ids in, equal ids out — so a
+ * redelivery still collapses onto the event it duplicates.
+ */
+async function insertIdFor(id: string): Promise<string> {
+  if (id.length <= MAX_INSERT_ID) return id;
+
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(id));
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 32);
 }
 
 /**

@@ -167,7 +167,9 @@ Deno.serve(async (req) => {
         // partial write, a charge recorded before these columns existed — is repaired here
         // rather than staying wrong forever. Pointless when no payments were fetched: the
         // ledger cannot have changed under us.
-        if (withPayments) await refreshPaymentTotals(db, result.subscription.user_id);
+        if (withPayments) {
+          await refreshPaymentTotals(db, settings, result.subscription.user_id);
+        }
         synced++;
       } catch (err) {
         // One bad subscription must not abort the batch — the rest still need reconciling.

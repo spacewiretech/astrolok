@@ -17,7 +17,7 @@ class PromoVideo extends StatefulWidget {
     super.key,
     required this.url,
     required this.muted,
-    this.aspectRatio = 16 / 10,
+    this.aspectRatio = 20 / 20,
   });
 
   /// Empty means "no video configured" — the poster shows and no player is created.

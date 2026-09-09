@@ -2,13 +2,21 @@ import 'package:flutter/foundation.dart';
 
 /// Mirrors the `public.payment_status` enum. The database is the authority on the spelling.
 enum PaymentType {
+  /// Never authorised a mandate. The state every account is created in, and the only one still
+  /// owed the trial price — which is exactly what [trial] could not say on its own while it
+  /// doubled as the default for brand new rows.
+  none,
+
+  /// The authorisation was captured and the clock in `trial_ends_at` is running.
   trial,
+
   active,
   expired,
   cancelled;
 
   static PaymentType parse(Object? raw) {
     return switch (raw) {
+      'none' => PaymentType.none,
       'active' => PaymentType.active,
       'expired' => PaymentType.expired,
       'cancelled' => PaymentType.cancelled,
@@ -70,11 +78,12 @@ class AppUser {
     this.name = '',
     this.birthDate,
     this.avatarUrl,
-    this.paymentType = PaymentType.trial,
+    this.paymentType = PaymentType.none,
     this.trialEndsAt,
     this.currentPeriodEnd,
     this.entitled = false,
     this.billingState,
+    this.trialAvailable,
   });
 
   final String id;
@@ -106,6 +115,14 @@ class AppUser {
   /// [entitled] — this is a warning, not a gate.
   final BillingState? billingState;
 
+  /// The server's answer to "is this account still owed the trial price", or null when the
+  /// payload predates the field.
+  ///
+  /// Stored raw and read through [isTrialAvailable] so the fallback lives in one place. The
+  /// client used to decide this by itself, which is how the paywall came to advertise ₹499 to
+  /// someone the server then sold a ₹3 trial.
+  final bool? trialAvailable;
+
   bool get hasName => name.trim().isNotEmpty;
 
   bool get hasBirthDate => birthDate != null;
@@ -118,7 +135,21 @@ class AppUser {
   bool get inTrial => paymentType == PaymentType.trial && entitled;
 
   /// False only for an account that has never authorised a mandate — the trial offer applies.
-  bool get hasEverSubscribed => trialEndsAt != null || currentPeriodEnd != null;
+  ///
+  /// `payment_type` is the signal now that `none` exists; the dates are kept as belt and braces
+  /// for a row the server-side backfill could have misjudged, so a mistake there can only refuse
+  /// a trial rather than hand out a second one.
+  bool get hasEverSubscribed =>
+      paymentType != PaymentType.none ||
+      trialEndsAt != null ||
+      currentPeriodEnd != null;
+
+  /// Which offer the paywall must show, and what [subscription-start] will actually charge.
+  ///
+  /// Server-decided. The fallback covers a payload that predates `trial_available` — the fake
+  /// repository, or a client that outran the deploy — and lands on the same answer the client
+  /// used to compute for itself.
+  bool get isTrialAvailable => trialAvailable ?? !hasEverSubscribed;
 
   /// The instant access lapses if nothing else changes, before any grace.
   ///
@@ -127,7 +158,8 @@ class AppUser {
   DateTime? get entitlementExpiresAt => switch (paymentType) {
         PaymentType.trial => trialEndsAt,
         PaymentType.active || PaymentType.cancelled => currentPeriodEnd,
-        PaymentType.expired => null,
+        // Nothing to expire: neither has any access to lose.
+        PaymentType.none || PaymentType.expired => null,
       };
 
   /// Grace window matching `app_config.entitlement_grace_hours`.
@@ -153,7 +185,9 @@ class AppUser {
       PaymentType.trial => future(trialEndsAt, _offlineGrace),
       // No grace: a cancelled mandate has no in-flight debit to wait for.
       PaymentType.cancelled => future(currentPeriodEnd, Duration.zero),
-      PaymentType.expired => false,
+      // `none` ignores the dates entirely, matching the server: an account that never authorised
+      // a mandate is not entitled whatever a stale cache happens to hold.
+      PaymentType.none || PaymentType.expired => false,
     };
 
     return derived == entitled ? this : copyWith(entitled: derived);
@@ -178,6 +212,12 @@ class AppUser {
       currentPeriodEnd: _parseDate(raw['current_period_end']),
       entitled: raw['entitled'] == true,
       billingState: BillingState.parse(raw['billing_state']),
+      // Left null rather than defaulted to false when absent, so [isTrialAvailable] can tell
+      // "the server said no" apart from "the server did not say", and only the first one takes
+      // the trial off the table.
+      trialAvailable: raw['trial_available'] is bool
+          ? raw['trial_available'] as bool
+          : null,
     );
   }
 
@@ -220,6 +260,7 @@ class AppUser {
     DateTime? currentPeriodEnd,
     bool? entitled,
     BillingState? billingState,
+    bool? trialAvailable,
 
     /// Explicit, because null is a meaningful value here — it means the mandate recovered.
     bool clearBillingState = false,
@@ -235,6 +276,7 @@ class AppUser {
       currentPeriodEnd: currentPeriodEnd ?? this.currentPeriodEnd,
       entitled: entitled ?? this.entitled,
       billingState: clearBillingState ? null : (billingState ?? this.billingState),
+      trialAvailable: trialAvailable ?? this.trialAvailable,
     );
   }
 }
