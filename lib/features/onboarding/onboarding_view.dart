@@ -63,6 +63,16 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
       final model = ref.read(onboardingViewModelProvider.notifier);
       model.startAt(widget.initialStep);
 
+      // The paywall's promo clip, started four routes before the paywall. Opening a player is a
+      // network round trip, and doing it when the paywall mounts is exactly what turns its video
+      // card into a spinner on the screen that asks for money. Everything from here to the birth
+      // date is lead time.
+      //
+      // `read`, not `watch`, the same way Home warms the conversation list: this screen has
+      // nothing to redraw when the player lands, and the provider is kept alive, so the one read
+      // outlives onboarding.
+      ref.read(promoVideoProvider);
+
       // Seeded from state, not the other way round, so returning to the phone sheet from the
       // OTP sheet shows the number the user already typed.
       final state = ref.read(onboardingViewModelProvider);

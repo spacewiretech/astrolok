@@ -36,8 +36,11 @@ class SubscriptionView extends ConsumerStatefulWidget {
 }
 
 class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
-  /// Starts muted. A paywall that plays sound the instant it opens is the fastest way to make
-  /// someone close the app.
+  /// Starts with sound. The clip is the pitch, and this is the one screen that has earned the
+  /// interruption — the speaker button in the top bar is there for anyone who disagrees.
+  ///
+  /// The player is warmed during onboarding but deliberately left silent and paused there, so
+  /// nothing is heard until the paywall itself starts it.
   bool _muted = false;
 
   /// So the view event fires once per visit rather than on every rebuild — and once the offer
@@ -72,6 +75,16 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
     final state = ref.watch(subscriptionViewModelProvider);
     final config = ref.watch(appConfigProvider).valueOrNull ?? defaultAppConfig;
     final offer = state.offer;
+
+    // Warmed back at the onboarding phone sheet, so this is usually already resolved and the
+    // video card paints a frame on the first build rather than a spinner.
+    //
+    // `valueOrNull` on its own would not be safe: while the provider is refreshing — a changed
+    // `paywall_video_url` — Riverpod keeps handing back the previous value, and that player has
+    // already been disposed. Mounting a `VideoPlayer` around a disposed controller trips
+    // `ChangeNotifier`'s not-disposed assert as it adds its listener.
+    final promo = ref.watch(promoVideoProvider);
+    final promoController = promo.isLoading || promo.hasError ? null : promo.valueOrNull;
 
     // The denominator of the whole purchase funnel.
     if (!_viewReported && !state.loading) {
@@ -112,7 +125,8 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
                             _RatingRow(config: config),
                             const SizedBox(height: 20),
                             PromoVideo(
-                              url: config.configString('paywall_video_url'),
+                              controller: promoController,
+                              loading: promo.isLoading,
                               muted: _muted,
                             ),
                             const SizedBox(height: 24),

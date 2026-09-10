@@ -129,3 +129,34 @@ deno check functions/*/index.ts functions/_shared/*.ts
 Covers entitlement boundaries, HMAC tamper and replay, payment classification, IST date
 arithmetic and month-end clamping, and `normalisePalmReading` — every way a language model can
 break the reading contract, since the screen renders whatever comes out of it.
+
+---
+
+## Folder index
+
+*A map of this directory, kept alongside the notes above.*
+
+### Files
+
+- `config.toml` — Supabase CLI project config. Two structurally important settings:
+  **`[auth] enabled = false`** (hence no `auth.uid()`, hence RLS with zero policies) and
+  **`verify_jwt = false` on all 14 functions** (they are called with the anon key before a
+  session exists, so each authenticates for itself). Also `[api] max_rows = 1000`,
+  Postgres 17, local ports 54321/54322/54323.
+
+### Subfolders
+
+- `functions/` — the whole backend API: 14 Edge Functions, plus `_shared/` and `tests/`. Its
+  README carries the endpoint-by-endpoint table with the auth mechanism for each.
+- `functions/_shared/` — credentials, the billing state machine (`subscription_sync.ts`,
+  `cashfree.ts`), the model prompts and normalisers, and the non-LLM astronomy in `jyotish.ts`.
+- `functions/tests/` — `deno test`, 182 tests over the pure logic.
+- `migrations/` — 16 `.sql` files in lexical order. See its README for what each adds and for
+  the two manual setup steps that are easy to miss.
+
+### Notes
+
+- Not deployed from here: `.temp/` and `.branches/` are gitignored CLI machine state, local to
+  whoever ran `supabase link` or `supabase start`.
+- The test counts quoted above (58, and 38 in the root README) predate later additions —
+  `deno test functions/tests/` currently runs 182.

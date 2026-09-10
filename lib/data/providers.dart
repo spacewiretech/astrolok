@@ -2,6 +2,7 @@ import 'package:camera/camera.dart' show CameraLensDirection;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:video_player/video_player.dart';
 
 import '../app/env.dart';
 import 'analytics/analytics.dart';
@@ -21,6 +22,7 @@ import 'fast2sms/fast2sms_auth_repository.dart';
 import 'fast2sms/fast2sms_client.dart';
 import 'local/reading_image_store.dart';
 import 'local/reading_store.dart';
+import 'media/promo_video_source.dart';
 import 'repositories/app_config_repository.dart';
 import 'repositories/auth_repository.dart';
 import 'repositories/chat_repository.dart';
@@ -178,6 +180,24 @@ final cashfreeCheckoutProvider = Provider<CashfreeCheckout>((ref) {
 final upiAppPreferenceProvider = Provider<UpiAppPreference>(
   (ref) => const UpiAppPreference(),
 );
+
+/// The paywall's promo clip, opened long before the paywall is reached.
+///
+/// Warmed from the onboarding phone sheet, so the whole of onboarding and the birth date are
+/// lead time and the paywall paints a playing frame on its first build rather than a spinner.
+/// See [PromoVideoSource] for what "opened" costs and why it is worth moving.
+///
+/// Deliberately **not** `autoDispose`, for the same reason as `chatThreadsProvider`: the screen
+/// that starts this is torn down four routes before the screen that uses it.
+///
+/// [PromoVideoSource.close] is registered before the first await, so config re-emitting with a
+/// different URL tears the old player down before the new one is built.
+final promoVideoProvider = FutureProvider<VideoPlayerController?>((ref) async {
+  final source = PromoVideoSource();
+  ref.onDispose(source.close);
+  final config = await ref.watch(appConfigProvider.future);
+  return source.open(config.configString('paywall_video_url'));
+});
 
 // ---------------------------------------------------------------- palm reading
 

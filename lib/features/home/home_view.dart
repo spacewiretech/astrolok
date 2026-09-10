@@ -13,6 +13,7 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
 import '../../data/entitlement.dart';
+import '../../data/providers.dart';
 import '../../widgets/astral_background.dart';
 import '../../widgets/brand_logo.dart';
 import '../../widgets/promo_carousel.dart';
@@ -65,6 +66,17 @@ class _HomeViewState extends ConsumerState<HomeView> {
       // user who lands straight here and never sees one. Idempotent — iOS only prompts while the
       // status is undetermined, and the helper guards against a second request in-process.
       unawaited(ensureTrackingConsent());
+
+      // The paywall is behind this user, so the promo player onboarding warmed is a video
+      // decoder held open for nothing. Dropping it is safe precisely because nothing is
+      // listening any more: Riverpod disposes an invalidated provider without rebuilding it when
+      // it has no listeners, so this frees the player rather than starting a fresh download. A
+      // trial that lapses mid-session bounces back to /subscribe and opens a new one.
+      //
+      // After the frame rather than during it — invalidating a provider mid-build is the hazard.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) ref.invalidate(promoVideoProvider);
+      });
     }
 
     return Scaffold(
