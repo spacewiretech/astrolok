@@ -208,6 +208,12 @@ abstract final class P {
   static const buildNumber = 'build_number';
   static const appLanguage = 'app_language';
   static const appLocale = 'app_locale';
+
+  /// Which language Astro was asked to answer in — a setting the user chose, and nothing to do
+  /// with [appLanguage] or [appLocale], which are the handset's own locale and are set on every
+  /// event whether or not anybody picked anything. Kept separate so "people whose phone is in
+  /// Hindi" and "people who asked Astro for Hindi" stay two different questions.
+  static const chatLanguage = 'chat_language';
   static const utcOffsetMinutes = 'utc_offset_minutes';
 
   /// Survives sign-out, unlike Mixpanel's `$device_id`, which `reset()` remints. This is what

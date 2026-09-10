@@ -114,10 +114,13 @@ class _CountingAppConfig implements AppConfigRepository {
   final VoidCallback onLoad;
 
   @override
-  Future<Map<String, String>> load({bool force = false}) async {
+  Future<Map<String, String>> load({bool force = false, Duration? maxAge}) async {
     onLoad();
     // Empty, so the provider answers null without reaching for the platform channel. What is
     // being counted is the resolve, not what it resolved to.
     return {...defaultAppConfig, 'paywall_video_url': ''};
   }
+
+  @override
+  Set<String> get remoteKeys => const {};
 }

@@ -6,10 +6,12 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../data/entitlement.dart';
+import '../../data/pdf/pdf_text_raster.dart';
 import '../../data/pdf/reading_pdf.dart';
 import '../../data/pdf/reading_pdf_requests.dart';
 import '../../data/analytics/analytics.dart';
 import '../../data/analytics/analytics_events.dart';
+import '../../data/language.dart';
 import '../../data/providers.dart';
 import 'face_copy.dart';
 import 'face_reading_state.dart';
@@ -68,7 +70,8 @@ class FaceReadingViewModel
 
     // Asked after the reading is on screen, so a slow engine check never delays it. The button
     // appears once the answer is yes, and simply never appears when it is no.
-    final canSpeak = await ref.read(readingSpeechProvider).prepare();
+    final canSpeak = await ref.read(readingSpeechProvider)
+        .prepare(language: ref.read(languageProvider));
     if (_disposed) return;
     state = state.copyWith(canSpeak: canSpeak);
   }
@@ -134,7 +137,13 @@ class FaceReadingViewModel
         name: ref.read(entitlementProvider)?.name,
       );
 
-      final bytes = await compute(buildReadingPdf, request);
+      // Drawn here, on the UI isolate, because `dart:ui` has no engine on a background one —
+      // the same reason the fonts are loaded above rather than inside. A no-op, and an empty
+      // map, for every Latin-script reading.
+      final drawn = request.rasterised(await rasteriseReading(request));
+      if (_disposed) return;
+
+      final bytes = await compute(buildReadingPdf, drawn);
       if (_disposed) return;
 
       // Written to a real file rather than shared as raw bytes: the share sheet uses the

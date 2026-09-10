@@ -59,6 +59,26 @@ class SupabaseAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<AppUser> saveChatLanguage(String? language) async {
+    final data = await _guard(
+      () async => _functions.call(
+        'update-profile',
+        // An explicit null, not an omitted key: the function reads `"language" in body`, and
+        // leaving it out would mean "no change" rather than "back to the default".
+        body: {'language': language?.trim()},
+        bearerToken: await _requireToken(),
+      ),
+    );
+
+    final user = _userFrom(data['user']);
+    if (user == null) {
+      throw const OtpSendException('Could not save your language. Please try again.');
+    }
+    await _sessions.cacheUser(user);
+    return user;
+  }
+
+  @override
   Future<AppUser> saveBirthDate(DateTime date) async {
     final data = await _guard(
       () async => _functions.call(

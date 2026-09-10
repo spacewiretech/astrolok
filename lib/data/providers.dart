@@ -77,9 +77,21 @@ final analyticsBootstrapProvider = FutureProvider<void>((ref) async {
   // The test is *absence*, not emptiness. A missing key means this cache predates the row; a
   // present-but-blank one is someone having deliberately cleared it, and re-fetching on every
   // launch to rediscover that would make the off switch cost a request per launch.
-  if (!config.containsKey(mixpanelTokenKey) || !config.containsKey(facebookAppIdKey)) {
+  //
+  // Asked of `remoteKeys` rather than of `config`, because `app.env` now ships both of these
+  // keys and the merged map therefore answers to both whatever the server knows — which would
+  // quietly retire this refresh altogether.
+  //
+  // `chat_languages` is here for the same reason and is the case that will recur: the whole
+  // point of keeping the language list in config is that adding one reaches users without a
+  // release, and it does not if every installed app spends six hours serving the list compiled
+  // into it. Any future key whose *arrival* is the event belongs on this line.
+  final repository = ref.read(appConfigRepositoryProvider);
+  if (!repository.remoteKeys.contains(mixpanelTokenKey) ||
+      !repository.remoteKeys.contains(facebookAppIdKey) ||
+      !repository.remoteKeys.contains(chatLanguagesKey)) {
     try {
-      config = await ref.read(appConfigRepositoryProvider).load(force: true);
+      config = await repository.load(force: true);
     } catch (error) {
       debugPrint('[analytics] forced config refresh failed: $error');
     }
@@ -96,19 +108,35 @@ final analyticsBootstrapProvider = FutureProvider<void>((ref) async {
   if (facebook != null) await startFacebook(facebook, config);
 });
 
+/// Set by boot once `Supabase.initialize` has actually returned.
+///
+/// [Env.hasSupabase] only says the env file named a project; it cannot say whether the client
+/// was built. `bootMobileApp` is deliberately allowed to swallow an init failure and carry on,
+/// and every provider below would then reach through `Supabase.instance` to a client that does
+/// not exist — an assertion in debug, a late-initialisation error in release, on every screen.
+bool supabaseInitialised = false;
+
+/// The condition every Supabase-backed provider actually wants: configured *and* up.
+bool get supabaseReady => Env.hasSupabase && supabaseInitialised;
+
 /// Which rung of the repository ladder below is live.
 ///
 /// On every event, because without it a developer running against the fakes — where any code
 /// signs in and the paywall charges nothing — pollutes the same funnels as production traffic.
+/// Reads [supabaseReady] rather than [Env.hasSupabase] so that a build whose init failed reports
+/// the tier it fell back to instead of the one it was pointed at.
 String get backendMode {
-  if (Env.hasSupabase) return BackendMode.supabase;
+  if (supabaseReady) return BackendMode.supabase;
   if (Env.isConfigured) return BackendMode.fast2sms;
   return BackendMode.fake;
 }
 
 /// Runtime config, served from `app_config` and cached on disk.
+///
+/// The fake rung is not empty here: it serves `shippedAppConfig`, so an app that never reached
+/// Supabase still runs on the env rows rather than on the compiled defaults alone.
 final appConfigRepositoryProvider = Provider<AppConfigRepository>((ref) {
-  if (!Env.hasSupabase) return const FakeAppConfigRepository();
+  if (!supabaseReady) return const FakeAppConfigRepository();
   return SupabaseAppConfigRepository(Supabase.instance.client);
 });
 
@@ -125,7 +153,7 @@ final appConfigProvider = FutureProvider<Map<String, String>>(
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
   final session = ref.watch(fakeSessionProvider);
 
-  if (Env.hasSupabase) {
+  if (supabaseReady) {
     return SupabaseAuthRepository(
       SupabaseEdgeFunctions(Supabase.instance.client),
       ref.watch(sessionStoreProvider),
@@ -155,10 +183,10 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
 /// The real payment path whenever Supabase is configured — mirroring [authRepositoryProvider].
 ///
 /// This binding is the whole difference between a paywall that charges and one that only looks
-/// like it does, so it deliberately follows the same `Env.hasSupabase` rule as auth rather than
+/// like it does, so it deliberately follows the same `supabaseReady` rule as auth rather than
 /// having a flag of its own that could be left pointing at the fake.
 final subscriptionRepositoryProvider = Provider<SubscriptionRepository>((ref) {
-  if (Env.hasSupabase) {
+  if (supabaseReady) {
     return SupabaseSubscriptionRepository(
       SupabaseEdgeFunctions(Supabase.instance.client),
       ref.watch(sessionStoreProvider),
@@ -172,7 +200,7 @@ final subscriptionRepositoryProvider = Provider<SubscriptionRepository>((ref) {
 
 /// The Cashfree SDK, or a stand-in that reports success without opening a UPI app.
 final cashfreeCheckoutProvider = Provider<CashfreeCheckout>((ref) {
-  if (Env.hasSupabase) return SdkCashfreeCheckout();
+  if (supabaseReady) return SdkCashfreeCheckout();
   return const FakeCashfreeCheckout();
 });
 
@@ -203,11 +231,11 @@ final promoVideoProvider = FutureProvider<VideoPlayerController?>((ref) async {
 
 /// Reads a palm photograph, through the Edge Function that holds the Gemini key.
 ///
-/// Same `Env.hasSupabase` rule as the two above: there is no direct-to-Gemini rung, because
+/// Same `supabaseReady` rule as the two above: there is no direct-to-Gemini rung, because
 /// that would mean shipping the key inside the app, and the fake is a canned reading so the
 /// four screens stay walkable on a checkout that has never been pointed at a project.
 final palmRepositoryProvider = Provider<PalmRepository>((ref) {
-  if (Env.hasSupabase) {
+  if (supabaseReady) {
     return SupabasePalmRepository(
       SupabaseEdgeFunctions(Supabase.instance.client),
       ref.watch(sessionStoreProvider),
@@ -240,7 +268,7 @@ final palmReadingStoreProvider =
 ///
 /// Same rule and same reasons as [palmRepositoryProvider].
 final faceRepositoryProvider = Provider<FaceRepository>((ref) {
-  if (Env.hasSupabase) {
+  if (supabaseReady) {
     return SupabaseFaceRepository(
       SupabaseEdgeFunctions(Supabase.instance.client),
       ref.watch(sessionStoreProvider),
@@ -277,7 +305,7 @@ final faceReadingStoreProvider =
 /// Same rule and same reasons as the two reading repositories: no direct-to-Gemini rung, because
 /// that would mean shipping the key inside the app.
 final chatRepositoryProvider = Provider<ChatRepository>((ref) {
-  if (Env.hasSupabase) {
+  if (supabaseReady) {
     return SupabaseChatRepository(
       SupabaseEdgeFunctions(Supabase.instance.client),
       ref.watch(sessionStoreProvider),

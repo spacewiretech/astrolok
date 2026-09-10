@@ -11,6 +11,7 @@ import '../../app/theme/app_typography.dart';
 import '../../data/analytics/analytics.dart';
 import '../../data/analytics/analytics_events.dart';
 import '../../data/entitlement.dart';
+import '../../data/language.dart';
 import '../../data/models/app_user.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/app_config_repository.dart';
@@ -31,8 +32,10 @@ import '../chat/chat_viewmodel.dart';
 ///  * **Amount Paid** — `total_paid_amount` exists in Postgres but is not in `USER_COLUMNS` or
 ///    `entitlementPayload()`, so no client has ever seen it. Showing it needs an Edge Function
 ///    change, not a widget.
-///  * **App Language** — the app has no localisation at all. The row would open a picker with
-///    one entry in it.
+///  * **App Language** — the app still has no localisation, and the row here is deliberately
+///    *not* it. "Chat language" sets which language Astro writes its replies in, which is a
+///    server-side prompt setting; every label, button and error in the app stays in English.
+///    Naming it "App language" would promise a translated app that does not exist.
 ///  * **The profile photograph** — `AppUser.avatarUrl` exists on the model but has no server
 ///    column, no upload path, and is never populated. A plain icon is the honest version.
 class ProfileView extends ConsumerWidget {
@@ -43,7 +46,13 @@ class ProfileView extends ConsumerWidget {
     final user = ref.watch(entitlementProvider);
     // The four external rows below open whatever config says. Defaults stand in until it
     // resolves, so the menu is never briefly full of rows that open nothing.
-    final config = ref.watch(appConfigProvider).valueOrNull ?? defaultAppConfig;
+    final config = ref.watch(appConfigProvider).valueOrNull ?? shippedAppConfig;
+
+    // Resolved the same way the Edge Function resolves it, and for the same reason: a user
+    // holding a language that has since been retired from the dashboard follows the default
+    // rather than a name nothing supports any more. Null — never chosen — lands there too.
+    final languages = config.configList(chatLanguagesKey);
+    final language = ref.watch(languageProvider);
 
     return Scaffold(
       body: AstralBackground(
@@ -128,6 +137,16 @@ class ProfileView extends ConsumerWidget {
                             context.push(Routes.memory);
                           },
                         ),
+                        // Absent, not disabled, when the list is empty: blanking
+                        // `chat_languages` is the documented off switch for the feature, and a
+                        // row that opens an empty sheet is worse than no row.
+                        if (languages.isNotEmpty)
+                          _MenuRow(
+                            icon: Icons.translate_rounded,
+                            label: 'Astro language',
+                            value: language,
+                            onTap: () => _pickLanguage(context, ref, languages, language),
+                          ),
                         _MenuRow(
                           icon: Icons.phone_outlined,
                           label: 'Contact us',
@@ -175,6 +194,76 @@ class ProfileView extends ConsumerWidget {
   /// [link] names the row — `support`, `help`, `privacy`, `terms`. All four leave the app, so
   /// this is the last thing they do here, and which one they left through is the whole question:
   /// a spike in `support` is a product problem somewhere upstream of this screen.
+  /// The picker. Saves through `update-profile`, because the prompt is built server-side.
+  static Future<void> _pickLanguage(
+    BuildContext context,
+    WidgetRef ref,
+    List<String> languages,
+    String selected,
+  ) async {
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheet) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 4),
+              child: Text('Astro language', style: AppText.section),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: Text(
+                'Your chat replies and your palm and face readings come in this language. '
+                'Ask in another language and Astro follows you.',
+                style: AppText.body.copyWith(color: AppColors.muted),
+              ),
+            ),
+            for (final language in languages)
+              ListTile(
+                title: Text(language, style: AppText.title),
+                trailing: language == selected
+                    ? const Icon(Icons.check_rounded, color: AppColors.gold)
+                    : null,
+                onTap: () => Navigator.of(sheet).pop(language),
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (picked == null || picked == selected) return;
+
+    analytics.track(Ev.elementTapped, {
+      P.elementId: 'profile_chat_language',
+      // Not `app_language` — that property is already the device locale, and overloading it
+      // would make both unreadable.
+      P.chatLanguage: picked,
+    });
+
+    try {
+      await ref.read(authRepositoryProvider).saveChatLanguage(picked);
+      // The picker reads `chatLanguage` off the entitlement, so the row only updates once this
+      // refetches — the save alone would leave the old value on screen.
+      ref.invalidate(entitlementProvider);
+    } catch (error) {
+      if (context.mounted) {
+        showAppSnackBar(
+          context,
+          "Couldn't save that language. Please try again.",
+          error: true,
+          source: 'chat_language',
+        );
+      }
+    }
+  }
+
   static Future<void> _open(BuildContext context, Uri uri, String link) async {
     final opened =
         await launchUrl(uri, mode: LaunchMode.externalApplication).catchError((_) => false);
@@ -399,11 +488,15 @@ class _MenuRow extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
+    this.value,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+
+  /// The current setting, shown before the chevron. Null for a row that only navigates.
+  final String? value;
 
   @override
   Widget build(BuildContext context) {
@@ -416,6 +509,10 @@ class _MenuRow extends StatelessWidget {
             Icon(icon, size: 22, color: AppColors.navy),
             const SizedBox(width: 14),
             Expanded(child: Text(label, style: AppText.title)),
+            if (value != null) ...[
+              Text(value!, style: AppText.body.copyWith(color: AppColors.muted)),
+              const SizedBox(width: 6),
+            ],
             const Icon(Icons.chevron_right_rounded, color: AppColors.muted),
           ],
         ),

@@ -13,7 +13,7 @@ import {
   STATUSES,
   text,
 } from "./gemini.ts";
-import { panditSystemPrompt, SHARED_LENGTHS } from "./pandit.ts";
+import { panditSystemPrompt, panditVoice, SHARED_LENGTHS } from "./pandit.ts";
 
 export { FOCUS_KEYS, FOCUS_LABELS, focusMismatch, parseFocus } from "./gemini.ts";
 export type { FocusKey } from "./gemini.ts";
@@ -218,10 +218,23 @@ const PALM_LENGTHS = [
   "- sanskrit: one or two words, transliterated, no gloss (the app writes the gloss).",
 ].join("\n");
 
-export const SYSTEM_PROMPT = panditSystemPrompt({
-  craft: PALM_CRAFT,
-  lengths: PALM_LENGTHS,
-});
+/** The prompt as it was before readings could be written in anything but English. */
+export const SYSTEM_PROMPT = palmSystemPrompt();
+
+/**
+ * The palm prompt, written to answer in [language].
+ *
+ * A function for the same reason the chat's is: the reply's language is a per-user setting now,
+ * so the prompt cannot be a module constant. No language keeps [PANDIT_VOICE] exactly as it was,
+ * which is what `SYSTEM_PROMPT` above still is.
+ */
+export function palmSystemPrompt(language?: string | null): string {
+  return panditSystemPrompt({
+    craft: PALM_CRAFT,
+    lengths: PALM_LENGTHS,
+    voice: panditVoice(language),
+  });
+}
 
 /**
  * When to refuse, stated as narrowly as possible.

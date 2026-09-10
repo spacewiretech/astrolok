@@ -1,3 +1,4 @@
+import { resolveLanguage } from "../_shared/chat_language.ts";
 import { loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
@@ -16,7 +17,7 @@ import {
   focusMismatch,
   normalisePalmReading,
   PALM_SCHEMA,
-  SYSTEM_PROMPT,
+  palmSystemPrompt,
 } from "../_shared/palm_reading.ts";
 
 /**
@@ -152,12 +153,17 @@ Deno.serve(async (req) => {
 
   // ------------------------------------------------------------ the reading
 
+  // The reading is written in whatever the user set in Profile, resolved the same way the
+  // chat resolves it — a language since retired from `chat_languages` falls back to the
+  // default rather than being honoured.
+  const language = resolveLanguage(user.language, config);
+
   try {
     const settings = geminiSettings(config);
     const result = await readImage(settings, {
       imageBase64,
       mimeType,
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt: palmSystemPrompt(language),
       schema: PALM_SCHEMA,
       userPrompt: buildUserPrompt({
         focus,

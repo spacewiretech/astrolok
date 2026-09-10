@@ -182,7 +182,7 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
   /// Both sheets end with the same footer, and its links come from config so a policy URL can
   /// be corrected without an app release. Defaults stand in until config resolves.
   Widget get _termsFooter {
-    final config = ref.watch(appConfigProvider).valueOrNull ?? defaultAppConfig;
+    final config = ref.watch(appConfigProvider).valueOrNull ?? shippedAppConfig;
     return TermsFooter(
       termsUrl: config.configLink('terms_url'),
       privacyUrl: config.configLink('privacy_url'),

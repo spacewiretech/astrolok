@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/models/astro_message.dart';
 import '../../data/analytics/analytics.dart';
 import '../../data/analytics/analytics_events.dart';
+import '../../data/language.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/chat_repository.dart';
 import 'chat_copy.dart';
@@ -118,7 +119,8 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
 
   Future<void> _prepareSpeech() async {
     if (_disposed) return;
-    final canSpeak = await ref.read(readingSpeechProvider).prepare();
+    final canSpeak = await ref.read(readingSpeechProvider)
+        .prepare(language: ref.read(languageProvider));
     if (_disposed) return;
     state = state.copyWith(canSpeak: canSpeak, loading: false);
   }

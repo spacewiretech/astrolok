@@ -73,7 +73,7 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(subscriptionViewModelProvider);
-    final config = ref.watch(appConfigProvider).valueOrNull ?? defaultAppConfig;
+    final config = ref.watch(appConfigProvider).valueOrNull ?? shippedAppConfig;
     final offer = state.offer;
 
     // Warmed back at the onboarding phone sheet, so this is usually already resolved and the

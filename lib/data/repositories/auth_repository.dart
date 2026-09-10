@@ -27,6 +27,13 @@ abstract interface class AuthRepository {
   /// the app never collects a birth time.
   Future<AppUser> saveBirthDate(DateTime date);
 
+  /// Sets the language Astro replies in, or clears it back to the configured default.
+  ///
+  /// Server-side rather than a local preference: the prompt is assembled in the Edge Function,
+  /// so the choice has to be somewhere the function can read. It following the user onto a new
+  /// phone is the part they would notice.
+  Future<AppUser> saveChatLanguage(String? language);
+
   Future<void> signOut();
 }
 

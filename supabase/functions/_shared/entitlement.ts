@@ -45,6 +45,10 @@ export interface UserRow {
   birth_time?: string | null;
   birth_place?: string | null;
 
+  /// Which language the chat answers in. Null means the configured default; `chat_language.ts`
+  /// resolves it, because a language retired from `app_config` must not keep being honoured.
+  language?: string | null;
+
   creation_time?: string;
   payment_type: PaymentType;
   trial_ends_at: string | null;
@@ -67,7 +71,7 @@ export interface UserRow {
  * every trial user as unentitled — or `dob`, which would loop the birth step forever.
  */
 export const USER_COLUMNS =
-  "user_id, mobile_no, name, dob, birth_time, birth_place, creation_time, payment_type, " +
+  "user_id, mobile_no, name, dob, birth_time, birth_place, language, creation_time, payment_type, " +
   "trial_ends_at, current_period_end, active_subscription_id, trial_started_at, " +
   "subscription_started_at, cancelled_at, billing_state";
 
@@ -171,6 +175,11 @@ export function entitlementPayload(
     // see that it was heard.
     birth_time: user.birth_time ?? null,
     birth_place: user.birth_place ?? null,
+    // Null here means "never chosen", which the Profile picker shows as the configured default.
+    // Sent unresolved on purpose: resolving it would make a user who has chosen nothing
+    // indistinguishable from one who chose the default, and the two behave differently the day
+    // the default changes.
+    language: user.language ?? null,
     payment_type: user.payment_type,
     trial_ends_at: user.trial_ends_at,
     current_period_end: user.current_period_end,

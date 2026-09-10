@@ -88,6 +88,17 @@ class Fast2SmsAuthRepository implements AuthRepository {
     return user;
   }
 
+  @override
+  Future<AppUser> saveChatLanguage(String? language) async {
+    final trimmed = language?.trim();
+    final user = _current().copyWith(
+      chatLanguage: trimmed,
+      clearChatLanguage: trimmed == null || trimmed.isEmpty,
+    );
+    _session.user = user;
+    return user;
+  }
+
   AppUser _current() => _session.user ?? const AppUser(id: 'local-user', phone: '');
 
   @override

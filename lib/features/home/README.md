@@ -23,5 +23,12 @@ into the palm, face and chat flows.
   player onboarding warmed is a video decoder held open for nothing. Safe because nothing is
   listening by then — Riverpod disposes an invalidated provider without rebuilding it, so this
   frees the player rather than starting a fresh download.
+- **Re-reads `app_config` on arrival**, when the cache is over a minute old. This is where a
+  dashboard edit reaches an installed app: Home is the one screen every session passes through,
+  and the refresh in `providers.dart` only fires on a key being *absent*, so a changed **value**
+  — a language added to `chat_languages` — would otherwise sit behind the six-hour cache TTL.
+  Throttled rather than unconditional because Home is also every back-navigation's destination,
+  and it only invalidates `appConfigProvider` when something actually moved, so the price labels
+  and menu rows watching it are not rebuilt on every visit for nothing.
 - Tests: `promo_carousel_test.dart` covers the strip's auto-advance, swipe cooldown and
-  reduce-motion behaviour.
+  reduce-motion behaviour; the config refresh's two halves are in `app_config_fallback_test.dart`.

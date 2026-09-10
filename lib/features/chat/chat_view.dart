@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+// For `RenderAbstractViewport`, which is what does the reversed-list arithmetic in
+// `_bringReplyIntoView` rather than this file guessing at scroll offsets.
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -88,6 +91,53 @@ class _ChatViewState extends ConsumerState<ChatView> {
     super.dispose();
   }
 
+  /// How much of the question to leave showing above a reply that has just landed.
+  ///
+  /// Enough for a line of the user's own bubble. An answer that arrives with the thing it is
+  /// answering still on screen reads as a reply; one that fills the screen alone reads as a
+  /// page that was already there.
+  static const _questionPeek = 56.0;
+
+  static const _scrollEase = Duration(milliseconds: 380);
+
+  /// Brings the *top* of a reply into view, which is where its answer is.
+  ///
+  /// The transcript is `reverse: true` and sits at offset 0 — the bottom — so a reply taller
+  /// than the viewport hangs its verdict, title and opening above the top edge. Since
+  /// [RevealedPart] fades rather than grows, the bubble is full height from the first frame, so
+  /// what the reader actually sees is the blank lower half of a card that looks like it never
+  /// arrived. This is the fix for that.
+  void _bringReplyIntoView(BuildContext bubbleContext) {
+    if (!mounted || !_scroll.hasClients) return;
+
+    final box = bubbleContext.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+
+    // Alignment 1.0 puts the target's trailing edge at the viewport's trailing edge. The list is
+    // reversed, so its trailing edge is the *top* of the screen — precisely the part of the
+    // bubble that was scrolled past. A larger offset in a reversed list moves content down, so
+    // adding the peek slides the question back into view above the answer.
+    final reveal = RenderAbstractViewport.of(box).getOffsetToReveal(box, 1.0).offset;
+    final position = _scroll.position;
+    final target = (reveal + _questionPeek)
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+
+    // Already there — a short reply on a tall screen clamps to where the list is sitting, and
+    // animating to the current offset would cancel a scroll the reader started themselves.
+    if ((target - position.pixels).abs() < 1) return;
+
+    _scroll.animateTo(target, duration: _scrollEase, curve: Curves.easeOutCubic);
+  }
+
+  /// Back to the waiting bubble when a turn starts.
+  ///
+  /// Someone who had scrolled up to reread an old answer must see `_Thinking` appear, or sending
+  /// looks like it did nothing at all.
+  void _showTheWait() {
+    if (!mounted || !_scroll.hasClients || _scroll.position.pixels == 0) return;
+    _scroll.animateTo(0, duration: _scrollEase, curve: Curves.easeOutCubic);
+  }
+
   void _handle(ChatOutcome outcome) {
     if (!mounted) return;
 
@@ -131,6 +181,10 @@ class _ChatViewState extends ConsumerState<ChatView> {
 
     ref.listen(chatViewModelProvider(selected).select((s) => s.outcome), (_, outcome) {
       if (outcome != null) _handle(outcome);
+    });
+
+    ref.listen(chatViewModelProvider(selected).select((s) => s.sending), (_, sending) {
+      if (sending) _showTheWait();
     });
 
     return Scaffold(
@@ -180,6 +234,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
                             controller: _scroll,
                             onSpeak: model.toggleSpeech,
                             onRevealed: model.revealed,
+                            onReplyEntered: _bringReplyIntoView,
                           ),
               ),
 
@@ -331,12 +386,16 @@ class _Transcript extends StatelessWidget {
     required this.controller,
     required this.onSpeak,
     required this.onRevealed,
+    required this.onReplyEntered,
   });
 
   final ChatState state;
   final ScrollController controller;
   final ValueChanged<AstroMessage> onSpeak;
   final ValueChanged<String> onRevealed;
+
+  /// See [ChatReveal.onEntered].
+  final void Function(BuildContext context) onReplyEntered;
 
   @override
   Widget build(BuildContext context) {
@@ -370,6 +429,7 @@ class _Transcript extends StatelessWidget {
                   revealing: state.revealingId == message.id,
                   onSpeak: () => onSpeak(message),
                   onRevealed: () => onRevealed(message.id),
+                  onEntered: onReplyEntered,
                 ),
         );
       },
@@ -421,6 +481,7 @@ class _AstroBubble extends StatelessWidget {
     required this.revealing,
     required this.onSpeak,
     required this.onRevealed,
+    required this.onEntered,
   });
 
   final AstroMessage message;
@@ -433,10 +494,14 @@ class _AstroBubble extends StatelessWidget {
   final VoidCallback onSpeak;
   final VoidCallback onRevealed;
 
+  /// See [ChatReveal.onEntered].
+  final void Function(BuildContext context) onEntered;
+
   @override
   Widget build(BuildContext context) {
     return ChatReveal(
       active: revealing,
+      onEntered: onEntered,
       verdict: message.verdict,
       onFinished: onRevealed,
       builder: (context, verdict, progress) => Container(

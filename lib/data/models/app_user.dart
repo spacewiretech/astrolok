@@ -84,6 +84,7 @@ class AppUser {
     this.entitled = false,
     this.billingState,
     this.trialAvailable,
+    this.chatLanguage,
   });
 
   final String id;
@@ -122,6 +123,14 @@ class AppUser {
   /// client used to decide this by itself, which is how the paywall came to advertise ₹499 to
   /// someone the server then sold a ₹3 trial.
   final bool? trialAvailable;
+
+  /// Which language Astro replies in, or null for "never chosen".
+  ///
+  /// Null is not the same as holding the default's current value: it means this account follows
+  /// `chat_language_default`, so changing that row in the dashboard moves everyone who has never
+  /// expressed a preference and nobody who has. The server resolves it per turn; Profile shows
+  /// the resolved name.
+  final String? chatLanguage;
 
   bool get hasName => name.trim().isNotEmpty;
 
@@ -218,6 +227,9 @@ class AppUser {
       trialAvailable: raw['trial_available'] is bool
           ? raw['trial_available'] as bool
           : null,
+      chatLanguage: raw['language'] is String && (raw['language'] as String).isNotEmpty
+          ? raw['language'] as String
+          : null,
     );
   }
 
@@ -261,9 +273,14 @@ class AppUser {
     bool? entitled,
     BillingState? billingState,
     bool? trialAvailable,
+    String? chatLanguage,
 
     /// Explicit, because null is a meaningful value here — it means the mandate recovered.
     bool clearBillingState = false,
+
+    /// Explicit for the same reason: null means "follow the configured default", which is a
+    /// choice someone can make by picking the default back.
+    bool clearChatLanguage = false,
   }) {
     return AppUser(
       id: id,
@@ -277,6 +294,7 @@ class AppUser {
       entitled: entitled ?? this.entitled,
       billingState: clearBillingState ? null : (billingState ?? this.billingState),
       trialAvailable: trialAvailable ?? this.trialAvailable,
+      chatLanguage: clearChatLanguage ? null : (chatLanguage ?? this.chatLanguage),
     );
   }
 }

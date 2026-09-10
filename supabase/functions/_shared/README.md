@@ -44,13 +44,23 @@ from here. This is where the credentials, the billing state machine and the mode
   `STATUSES`, `FOCUS_KEYS`, `FOCUS_LABELS`, `parseFocus`, `focusMismatch`, `ceremony`.
 - `pandit.ts` — the shared persona, grounding rules, safety boundaries and style. Exports:
   `PANDIT_VOICE`, `GROUNDING`, `BOUNDARIES`, `STYLE`, `panditSystemPrompt`, `SHARED_LENGTHS`.
+  `panditSystemPrompt` takes optional `grounding` and `voice` overrides; `BOUNDARIES` is
+  deliberately not overridable, because it is the safety layer.
 - `palm_reading.ts` — prompt, JSON schema and pure normaliser. Exports: `LINE_KEYS`,
   `LINE_TITLES`, `REJECT_REASONS`, `PALM_SCHEMA`, `SYSTEM_PROMPT`, `buildUserPrompt`,
   `normalisePalmReading`.
 - `face_reading.ts` — a deliberate mirror of the above. Exports: `FACE_KEYS`, `FACE_TITLES`,
   `TRAIT_KEYS`, `FACE_SCHEMA`, `SYSTEM_PROMPT`, `buildUserPrompt`, `normaliseFaceReading`.
 - `astro_chat.ts` — chat prompt, schema and reply normaliser. Exports: `CHAT_TOPICS`, `ASK_FOR`,
-  `SYSTEM_PROMPT`, `CHAT_SCHEMA`, `ChatContext`, `buildUserPrompt`, `normaliseChatReply`.
+  `CHAT_VOICE`, `PROMPT_V1`, `PROMPT_V2`, `chatSystemPrompt`, `CHAT_SCHEMA`, `ChatContext`,
+  `buildUserPrompt`, `normaliseChatReply`. The prompt is a **function**, not a constant: it
+  varies by `chat_prompt_version` (the rollback) and by the language of the turn. The craft
+  exists twice on purpose — see the file header before factoring the two together.
+- `chat_language.ts` — which language Astro answers in. Exports: `LANGUAGES_KEY`,
+  `DEFAULT_LANGUAGE_KEY`, `BUILT_IN_LANGUAGES`, `supportedLanguages`, `isSupported`,
+  `resolveLanguage`, `languageInstruction`, `languageBlock`. The list is `app_config`, so adding
+  a language is a dashboard edit; an unrecognised name still gets a usable generic instruction,
+  which is what makes trusting the dashboard safe.
 - `jyotish.ts` — **the non-LLM astronomy.** Julian day, Sun/Moon longitudes, ayanamsa, sidereal
   rashi/nakshatra chart. Exports: `julianDay`, `sunLongitude`, `moonLongitude`, `ayanamsa`,
   `toSidereal`, `RASHIS`, `NAKSHATRAS`, `computeChart`, `describeChart`, `IST_OFFSET_HOURS`.

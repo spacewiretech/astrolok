@@ -1,3 +1,4 @@
+import 'package:astrolok/app/env.dart';
 import 'package:astrolok/data/analytics/analytics.dart';
 import 'package:astrolok/data/analytics/analytics_events.dart';
 import 'package:astrolok/data/analytics/mixpanel_analytics.dart';
@@ -307,10 +308,16 @@ class _RecordingConfig implements AppConfigRepository {
   final List<bool> calls = [];
 
   @override
-  Future<Map<String, String>> load({bool force = false}) async {
+  Future<Map<String, String>> load({bool force = false, Duration? maxAge}) async {
     calls.add(force);
     return force ? _server : _cached;
   }
+
+  /// Whatever the cache holds is, by definition, what the server last served. The env rows and
+  /// the compiled defaults are not remote, so a real repository would not count them either —
+  /// which is exactly what the bootstrap's absence test is asking about.
+  @override
+  Set<String> get remoteKeys => _cached.keys.toSet();
 }
 
 Future<void> _runBootstrap(_RecordingConfig config) async {
@@ -355,8 +362,20 @@ void _bootstrapTests() {
       // Clearing the cell is the documented off switch. Re-fetching to rediscover that on every
       // launch would make turning analytics off cost a request per launch.
       final config = _RecordingConfig(
-        {'env': 'production', mixpanelTokenKey: '', facebookAppIdKey: ''},
-        {'env': 'production', mixpanelTokenKey: '', facebookAppIdKey: ''},
+        {
+          'env': 'production',
+          mixpanelTokenKey: '',
+          facebookAppIdKey: '',
+          // Present, so this cache is not one that predates a row — which is the other reason
+          // the bootstrap re-fetches, and would otherwise mask what this test is asserting.
+          chatLanguagesKey: 'Hinglish',
+        },
+        {
+          'env': 'production',
+          mixpanelTokenKey: '',
+          facebookAppIdKey: '',
+          chatLanguagesKey: 'Hinglish',
+        },
       );
 
       await _runBootstrap(config);
@@ -366,13 +385,60 @@ void _bootstrapTests() {
 
     test('a cached token is used without a second call', () async {
       final config = _RecordingConfig(
-        {'env': 'production', mixpanelTokenKey: 'tok', facebookAppIdKey: '123'},
-        {'env': 'production', mixpanelTokenKey: 'tok', facebookAppIdKey: '123'},
+        {
+          'env': 'production',
+          mixpanelTokenKey: 'tok',
+          facebookAppIdKey: '123',
+          chatLanguagesKey: 'Hinglish,English,Hindi',
+        },
+        {
+          'env': 'production',
+          mixpanelTokenKey: 'tok',
+          facebookAppIdKey: '123',
+          chatLanguagesKey: 'Hinglish,English,Hindi',
+        },
       );
 
       await _runBootstrap(config);
 
       expect(config.calls, [false]);
+    });
+
+    test('a cache that has never heard of the language list is refreshed', () async {
+      // The general case the two keys above are only instances of: adding a row to `app_config`
+      // is supposed to reach users without a release, and it does not if every install serves
+      // the list compiled into it for six hours first.
+      final config = _RecordingConfig(
+        {'env': 'production', mixpanelTokenKey: 'tok', facebookAppIdKey: '123'},
+        {
+          'env': 'production',
+          mixpanelTokenKey: 'tok',
+          facebookAppIdKey: '123',
+          chatLanguagesKey: 'Hinglish,English,Hindi,Marathi',
+        },
+      );
+
+      await _runBootstrap(config);
+
+      expect(config.calls, [false, true], reason: 'cached read, then a forced one');
+    });
+
+    test('a token shipped in app.env does not stand in for the server having one', () async {
+      // The trap in giving `app.env` a copy of the whole table. Both keys are now in the merged
+      // map on every launch, so the old `config.containsKey` test could never fail again and
+      // this refresh would have retired itself silently — leaving the next row added to
+      // app_config invisible for its whole TTL, which is the exact bug the refresh exists for.
+      Env.loadForTest('$mixpanelTokenKey=from-env\n$facebookAppIdKey=from-env');
+      addTearDown(Env.reset);
+
+      final config = _RecordingConfig(
+        {'env': 'production'},
+        {'env': 'production', mixpanelTokenKey: 'tok', facebookAppIdKey: '123'},
+      );
+
+      await _runBootstrap(config);
+
+      expect(config.calls, [false, true], reason: 'env is not the server');
     });
   });
 }

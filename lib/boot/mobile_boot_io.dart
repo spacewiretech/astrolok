@@ -31,6 +31,9 @@ Future<void> bootMobileApp() async {
         // Functions issue their own opaque session tokens, so there is no JWT to refresh.
         authOptions: const FlutterAuthClientOptions(autoRefreshToken: false),
       );
+      // Only now is `Supabase.instance.client` safe to touch. The providers gate on this rather
+      // than on `Env.hasSupabase`, which says only that the env file named a project.
+      supabaseInitialised = true;
     } catch (error) {
       // A misconfigured project must not be a crash on launch: without Supabase the providers
       // fall back to the Fast2SMS or fake tier and the app is still walkable.
@@ -55,9 +58,11 @@ Future<void> bootMobileApp() async {
 /// Brings analytics up as far as it can get before the first frame.
 ///
 /// Never throws and never blocks on the network. The token lives in the `app_config` table, so
-/// the most this can do at boot is read the cache that [SupabaseAppConfigRepository] already
-/// keeps on disk; a first launch finds nothing there and Mixpanel is started later by
-/// [analyticsBootstrapProvider], with the launch events buffered in the meantime.
+/// the most this can do at boot is read the env rows and the cache that
+/// [SupabaseAppConfigRepository] already keeps on disk. A first launch finds no cache, but
+/// `app.env` still carries a token, so Mixpanel now starts here rather than waiting for
+/// [analyticsBootstrapProvider] — which still covers a build whose env file has no token, with
+/// the launch events buffered in the meantime.
 Future<Analytics> _startAnalytics() async {
   final mixpanel = MixpanelAnalytics();
   final facebook = FacebookAnalytics();
@@ -82,8 +87,8 @@ Future<Analytics> _startAnalytics() async {
 
   try {
     final cached = await SupabaseAppConfigRepository.readCachedConfig();
-    await mixpanel.start(cached?[mixpanelTokenKey]);
-    await startFacebook(facebook, cached ?? const {});
+    await mixpanel.start(cached[mixpanelTokenKey]);
+    await startFacebook(facebook, cached);
   } catch (error) {
     debugPrint('[analytics] could not read the cached config: $error');
   }

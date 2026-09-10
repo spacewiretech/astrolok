@@ -27,13 +27,49 @@ import 'package:pdf/widgets.dart' as pw;
 ///    caps in the accent colour instead: no fill to get wrong, and it prints better.
 ///  * **No `FontStyle.italic`.** Only Poppins Regular and SemiBold are bundled, so asking for an
 ///    italic face got a synthetic fallback that did not match the rest of the page.
-///  * **Latin only.** No Devanagari is ever set — the bundled Poppins subset is not verified to
-///    carry the script, and a missing glyph renders as a blank box with no warning. The reading
-///    itself is written transliterated for exactly this reason; the oṃ in the header is the
-///    artwork, drawn as an image.
+///  * **Any script, but not by this engine.** Readings are written in the user's language now,
+///    and `pdf` cannot set an Indic one: it maps codepoints straight to glyphs and ships a
+///    shaper for Arabic alone, so Devanagari loses its conjuncts and hangs its matras in the
+///    wrong place. Anything above U+0589 is therefore laid out by Flutter, which has a real
+///    shaper, and pasted in as a picture — see `pdf_text_raster.dart` and
+///    [ReadingPdfRequest.rasters]. Latin readings are untouched by all of it and stay real,
+///    selectable text.
 ///  * **Colours arrive as ints, not `Color`.** Along with every other field being a primitive,
 ///    that keeps [ReadingPdfRequest] trivially sendable to a background isolate, which is what
 ///    finally lets [buildReadingPdf] run under `compute()` rather than hitching the UI thread.
+
+/// One block of text, already laid out and drawn by Flutter.
+///
+/// [width] and [height] are in PDF points, so the image drops into the layout occupying exactly
+/// the space the text would have. The bytes are a PNG with a transparent ground, rendered at
+/// [rasterScale] times this size so it stays sharp in print.
+class PdfRaster {
+  const PdfRaster({required this.png, required this.width, required this.height});
+
+  final Uint8List png;
+  final double width;
+  final double height;
+}
+
+/// How many device pixels are drawn per PDF point. 3 is about 216 DPI — sharp on paper, and a
+/// third of the bytes of the 6 that would match a retina screen.
+const rasterScale = 3.0;
+
+/// A4 less the 48pt side margins below. The one number both the rasteriser and the composition
+/// have to agree on: text is laid out to this width on one side and drawn at it on the other, so
+/// a disagreement is a line break in a different place.
+const pdfContentWidth = 595.28 - 96;
+
+/// A bullet's text column: the content width less the dot, its margin and the row's indent.
+const pdfBulletWidth = pdfContentWidth - 12;
+
+/// Where a rasterised block is found in [ReadingPdfRequest.rasters].
+///
+/// Keyed on the three things that decide the pixels — the words, the size they are set at and
+/// the column they are wrapped to. Computed by this one function on both sides of the isolate,
+/// so the composition cannot look up a key the rasteriser never wrote.
+String rasterKey(String text, {required double size, required double width}) =>
+    '${size.toStringAsFixed(1)}|${width.round()}|$text';
 
 /// One section of the reading — a palm line, or a feature of a face.
 class ReadingPdfSection {
@@ -89,6 +125,7 @@ class ReadingPdfRequest {
     this.sections = const [],
     this.image,
     this.mark,
+    this.rasters = const {},
   });
 
   /// "Palm Reading" or "Face Reading". Used in the header, the title and the filename.
@@ -138,6 +175,47 @@ class ReadingPdfRequest {
   /// The oṃ mark, drawn beside the wordmark in the header. Optional for the same reason.
   final Uint8List? mark;
 
+  /// Pictures of the text, for readings the PDF engine cannot set correctly.
+  ///
+  /// Empty for every Latin-script reading, which is the common case and still goes through the
+  /// real text path — selectable, searchable and a few kilobytes. It fills only when the reading
+  /// is in a script the engine cannot shape: `pdf` maps characters to glyphs through the font's
+  /// cmap and ships a bespoke shaper for Arabic and nothing else, so Devanagari comes out with
+  /// its matras beside the consonants instead of around them and no conjuncts at all.
+  ///
+  /// Flutter has a real shaper, so the fix is to let it lay the text out and paste the result in.
+  /// See `pdf_text_raster.dart`, which fills this on the UI isolate before the composition moves
+  /// off it — the same reason the fonts arrive here as bytes.
+  final Map<String, PdfRaster> rasters;
+
+  /// The same request with [rasters] filled in.
+  ///
+  /// Written out field by field rather than through a general `copyWith` so that adding a field
+  /// to this class and forgetting it here is a compile error rather than a silently empty export.
+  ReadingPdfRequest rasterised(Map<String, PdfRaster> rasters) => ReadingPdfRequest(
+        documentTitle: documentTitle,
+        createdAt: createdAt,
+        focusLabel: focusLabel,
+        sectionsHeading: sectionsHeading,
+        heroKicker: heroKicker,
+        disclaimer: disclaimer,
+        regular: regular,
+        bold: bold,
+        name: name,
+        invocation: invocation,
+        headline: headline,
+        blessing: blessing,
+        heroTitle: heroTitle,
+        heroSummary: heroSummary,
+        heroDetail: heroDetail,
+        chips: chips,
+        observations: observations,
+        sections: sections,
+        image: image,
+        mark: mark,
+        rasters: rasters,
+      );
+
   /// A stable, readable filename. Distinct per reading so two exports cannot collide in the
   /// temp directory, which the old fixed name did every time.
   String fileName(String id) {
@@ -179,12 +257,42 @@ Future<Uint8List> buildReadingPdf(ReadingPdfRequest request) async {
         height: height,
       );
 
+  /// The drawn version of a block, when the reading is in a script this engine cannot set.
+  ///
+  /// Null for every Latin reading, and for anything the rasteriser skipped — so a miss here is
+  /// always a fallback to real text rather than a gap. See `pdf_text_raster.dart`.
+  pw.Widget? drawn(String text, double size, double width) {
+    final raster = request.rasters[rasterKey(text, size: size, width: width)];
+    if (raster == null) return null;
+    return pw.Image(
+      pw.MemoryImage(raster.png),
+      width: raster.width,
+      height: raster.height,
+    );
+  }
+
+  /// A run of the model's words: the picture of it if one was drawn, otherwise real text.
+  pw.Widget txt(
+    String text, {
+    required double size,
+    PdfColor colour = _body,
+    bool heavy = false,
+    double spacing = 0,
+    double height = 1.45,
+    double width = pdfContentWidth,
+  }) =>
+      drawn(text, size, width) ??
+      pw.Text(
+        text,
+        style: style(size, colour: colour, heavy: heavy, spacing: spacing, height: height),
+      );
+
   /// A paragraph, with the space below it built in. Its own child of `build`, never nested, so
   /// a page break can fall before or after it.
   pw.Widget para(String text, {double size = 10, PdfColor colour = _body, double gap = 8}) =>
       pw.Padding(
         padding: pw.EdgeInsets.only(bottom: gap),
-        child: pw.Text(text, style: style(size, colour: colour)),
+        child: txt(text, size: size, colour: colour),
       );
 
   pw.Widget bullet(String text) => pw.Padding(
@@ -198,7 +306,7 @@ Future<Uint8List> buildReadingPdf(ReadingPdfRequest request) async {
               margin: const pw.EdgeInsets.only(top: 5, right: 7),
               decoration: const pw.BoxDecoration(color: _gold, shape: pw.BoxShape.circle),
             ),
-            pw.Expanded(child: pw.Text(text, style: style(10))),
+            pw.Expanded(child: txt(text, size: 10, width: pdfBulletWidth)),
           ],
         ),
       );
@@ -211,21 +319,25 @@ Future<Uint8List> buildReadingPdf(ReadingPdfRequest request) async {
         crossAxisAlignment: pw.CrossAxisAlignment.end,
         children: [
           pw.Expanded(
-            child: pw.RichText(
-              text: pw.TextSpan(
-                children: [
-                  pw.TextSpan(
-                    text: section.title,
-                    style: style(13, colour: _navy, heavy: true, height: 1.2),
+            // The title and its Sanskrit name are one drawn line when the reading is shaped,
+            // because they wrap together; the status beside them is a closed English vocabulary
+            // and stays real text either way.
+            child: drawn(section.title, 13, pdfContentWidth) ??
+                pw.RichText(
+                  text: pw.TextSpan(
+                    children: [
+                      pw.TextSpan(
+                        text: section.title,
+                        style: style(13, colour: _navy, heavy: true, height: 1.2),
+                      ),
+                      if (section.sanskrit.isNotEmpty)
+                        pw.TextSpan(
+                          text: '   ${section.sanskrit}',
+                          style: style(9, colour: _gold, height: 1.2),
+                        ),
+                    ],
                   ),
-                  if (section.sanskrit.isNotEmpty)
-                    pw.TextSpan(
-                      text: '   ${section.sanskrit}',
-                      style: style(9, colour: _gold, height: 1.2),
-                    ),
-                ],
-              ),
-            ),
+                ),
           ),
           pw.SizedBox(width: 10),
           pw.Text(
@@ -257,11 +369,11 @@ Future<Uint8List> buildReadingPdf(ReadingPdfRequest request) async {
           sectionTitle(section),
           if (section.summary.isNotEmpty) ...[
             pw.SizedBox(height: 5),
-            pw.Text(section.summary, style: style(10, colour: _muted)),
+            txt(section.summary, size: 10, colour: _muted),
           ],
           if (section.detail.isNotEmpty) ...[
             pw.SizedBox(height: 6),
-            pw.Text(section.detail, style: style(10)),
+            txt(section.detail, size: 10),
           ],
           pw.SizedBox(height: 8),
         ],
@@ -317,7 +429,7 @@ Future<Uint8List> buildReadingPdf(ReadingPdfRequest request) async {
         ),
       ),
       build: (context) => [
-        pw.Text(title, style: style(23, colour: _navy, heavy: true, height: 1.2)),
+        txt(title, size: 23, colour: _navy, heavy: true, height: 1.2),
         pw.SizedBox(height: 5),
         pw.Text(
           '${_formatDate(request.createdAt)}   ·   ${request.focusLabel}',
@@ -326,7 +438,7 @@ Future<Uint8List> buildReadingPdf(ReadingPdfRequest request) async {
 
         if (request.invocation.isNotEmpty) ...[
           pw.SizedBox(height: 14),
-          pw.Text(request.invocation, style: style(11, colour: _gold, height: 1.5)),
+          txt(request.invocation, size: 11, colour: _gold, height: 1.5),
         ],
 
         // Centred and alone rather than inside a Row beside the trait. The Row was the other
@@ -350,20 +462,20 @@ Future<Uint8List> buildReadingPdf(ReadingPdfRequest request) async {
 
         if (request.headline.isNotEmpty) ...[
           pw.SizedBox(height: 18),
-          pw.Text(
-            request.headline,
-            style: style(14, colour: _navy, heavy: true, height: 1.35),
-          ),
+          txt(request.headline, size: 14, colour: _navy, heavy: true, height: 1.35),
         ],
 
         if (request.heroTitle.isNotEmpty) ...[
           pw.SizedBox(height: 16),
-          pw.Text(
+          txt(
             request.heroKicker.toUpperCase(),
-            style: style(8, colour: _muted, heavy: true, spacing: 0.8),
+            size: 8,
+            colour: _muted,
+            heavy: true,
+            spacing: 0.8,
           ),
           pw.SizedBox(height: 4),
-          pw.Text(request.heroTitle, style: style(15, colour: _navy, heavy: true)),
+          txt(request.heroTitle, size: 15, colour: _navy, heavy: true),
           pw.SizedBox(height: 6),
           if (request.heroSummary.isNotEmpty) para(request.heroSummary, gap: 4),
           if (request.heroDetail.isNotEmpty) para(request.heroDetail),
@@ -371,7 +483,7 @@ Future<Uint8List> buildReadingPdf(ReadingPdfRequest request) async {
 
         if (request.chips.isNotEmpty) ...[
           pw.SizedBox(height: 2),
-          pw.Text(request.chips.join('   ·   '), style: style(9, colour: _muted)),
+          txt(request.chips.join('   ·   '), size: 9, colour: _muted),
         ],
 
         if (request.observations.isNotEmpty) ...[
@@ -386,7 +498,7 @@ Future<Uint8List> buildReadingPdf(ReadingPdfRequest request) async {
 
         if (request.sections.isNotEmpty) ...[
           pw.SizedBox(height: 26),
-          pw.Text(request.sectionsHeading, style: style(16, colour: _navy, heavy: true)),
+          txt(request.sectionsHeading, size: 16, colour: _navy, heavy: true),
           hairline(top: 8, bottom: 16),
         ],
 
@@ -397,18 +509,24 @@ Future<Uint8List> buildReadingPdf(ReadingPdfRequest request) async {
           for (final line in section.meaning) bullet(line),
           if (section.tip.isNotEmpty) ...[
             pw.SizedBox(height: 6),
-            pw.RichText(
-              text: pw.TextSpan(
-                children: [
-                  pw.TextSpan(text: 'Tip.  ', style: style(9.5, colour: _gold, heavy: true)),
-                  pw.TextSpan(text: section.tip, style: style(9.5, colour: _body)),
-                ],
-              ),
-            ),
+            // Drawn as one picture when shaped: "Tip." and the tip share a line and wrap
+            // together, so they cannot be two separate images.
+            drawn(section.tip, 9.5, pdfContentWidth) ??
+                pw.RichText(
+                  text: pw.TextSpan(
+                    children: [
+                      pw.TextSpan(
+                        text: 'Tip.  ',
+                        style: style(9.5, colour: _gold, heavy: true),
+                      ),
+                      pw.TextSpan(text: section.tip, style: style(9.5, colour: _body)),
+                    ],
+                  ),
+                ),
           ],
           if (section.blessing.isNotEmpty) ...[
             pw.SizedBox(height: 5),
-            pw.Text(section.blessing, style: style(9.5, colour: _gold)),
+            txt(section.blessing, size: 9.5, colour: _gold),
           ],
           hairline(top: 14, bottom: 14),
         ],
@@ -420,7 +538,7 @@ Future<Uint8List> buildReadingPdf(ReadingPdfRequest request) async {
             style: style(8, colour: _muted, heavy: true, spacing: 0.8),
           ),
           pw.SizedBox(height: 6),
-          pw.Text(request.blessing, style: style(11.5, colour: _gold, height: 1.5)),
+          txt(request.blessing, size: 11.5, colour: _gold, height: 1.5),
         ],
       ],
     ),

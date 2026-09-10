@@ -19,6 +19,7 @@ class ChatReveal extends StatefulWidget {
     required this.verdict,
     required this.builder,
     this.onFinished,
+    this.onEntered,
   });
 
   /// False for everything already on screen — history, the cache, anything the list recycled.
@@ -36,6 +37,15 @@ class ChatReveal extends StatefulWidget {
   /// Called once, when the sequence finishes, so the caller can stop marking this reply as the
   /// one being revealed.
   final VoidCallback? onFinished;
+
+  /// Called once, on the first frame this reply exists, with the bubble's own context.
+  ///
+  /// The transcript is a reversed list pinned to the bottom, and [RevealedPart] fades rather
+  /// than grows — so a reply is laid out at its full height immediately and a long one puts its
+  /// verdict above the top of the screen, leaving the reader looking at the blank part of a card
+  /// that is still filling in. The caller uses this context to scroll the top of the bubble into
+  /// view. Only fires when [active]; history is already where the reader left it.
+  final void Function(BuildContext context)? onEntered;
 
   @override
   State<ChatReveal> createState() => _ChatRevealState();
@@ -76,6 +86,12 @@ class _ChatRevealState extends State<ChatReveal> with SingleTickerProviderStateM
     );
 
     if (widget.active) {
+      // After the first layout, or there is no render box to measure yet. Once per reply: the
+      // bubble is keyed by message id, so this State is built exactly once for each one.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.onEntered?.call(context);
+      });
+
       _controller.forward().then((_) {
         if (mounted) widget.onFinished?.call();
       });

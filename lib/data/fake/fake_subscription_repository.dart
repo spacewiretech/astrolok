@@ -19,14 +19,14 @@ class FakeSubscriptionRepository implements SubscriptionRepository {
 
   /// Read from the same defaults the real paywall quotes, so the fake cannot drift from the
   /// shipped copy when the trial length or price changes.
-  static final _trialDays = defaultAppConfig.configInt('cashfree_trial_days');
+  static final _trialDays = shippedAppConfig.configInt('cashfree_trial_days');
 
   @override
   Future<SubscriptionOffer> offer() async {
     await FakeSession.latency(300);
-    final plan = defaultAppConfig.configString('plan_price_label');
+    final plan = shippedAppConfig.configString('plan_price_label');
     return SubscriptionOffer(
-      trialPrice: defaultAppConfig.configString('trial_price_label'),
+      trialPrice: shippedAppConfig.configString('trial_price_label'),
       planPrice: plan,
       strikePrice: plan,
       trialDays: _trialDays,

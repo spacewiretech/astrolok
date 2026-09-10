@@ -20,6 +20,22 @@ The Astro conversation: one route, many threads, with a sidebar for switching be
 - `chat_reveal.dart` — a staged typing animation over a non-streaming transport. Declares:
   `ChatReveal`, `RevealedPart`.
 
+## The transcript scrolls itself, in exactly two places
+
+The list is `reverse: true` and sits at offset 0, so new turns are pinned to the bottom with no
+arithmetic. That is right for everything except the moment a reply lands. `RevealedPart` fades
+rather than grows, so a bubble is laid out at its **full height on the first frame** — and a
+reply taller than the screen therefore hangs its verdict, title and opening above the top edge,
+leaving the reader watching the blank lower half of a card that looks like it never arrived.
+
+So `ChatReveal.onEntered` fires once per new reply and `_ChatViewState._bringReplyIntoView`
+scrolls the *top* of the bubble to the top of the screen, plus enough offset to leave a line of
+the question showing above it. The other is `_showTheWait`, which returns to the bottom when a
+turn starts so someone who had scrolled up sees `_Thinking` appear.
+
+Do not "fix" the full-height reservation by making the reveal grow the layout: a stable height is
+what keeps the computed offset correct and stops the text reflowing under the reader mid-answer.
+
 ## Notes
 
 - **The current thread is not in the URL.** `Routes.chat` is a single route; which thread is on
@@ -32,4 +48,7 @@ The Astro conversation: one route, many threads, with a sidebar for switching be
   viewmodel — the drawer and composer are large enough to own their own files.
 - Backed by `astro-chat` (one metered turn) and `chat-history` (list, transcript, facts,
   rename/delete/forget). Gemini is never called from the device.
+- **The reply's language is not decided here.** It is `users.language`, set from Profile, and
+  resolved server-side against `app_config.chat_languages`. A message written in another
+  language wins over the setting — see `_shared/chat_language.ts`.
 - Tests: `chat_layout_test.dart`, `chat_parse_test.dart`.

@@ -1,3 +1,4 @@
+import { isSupported, supportedLanguages } from "../_shared/chat_language.ts";
 import { loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
@@ -62,6 +63,11 @@ Deno.serve(async (req) => {
     return fail("invalid_request", "Malformed request.", 400);
   }
 
+  // Loaded before the validation rather than after the write, because `language` is checked
+  // against the list in `app_config` — the dashboard is what decides which languages exist, and
+  // a hardcoded enum here would mean adding one needed a deploy after all.
+  const config = await loadConfig(db);
+
   const update: Record<string, string | null> = {};
 
   if ("name" in body) {
@@ -108,6 +114,22 @@ Deno.serve(async (req) => {
     }
   }
 
+  // Which language Astro answers in. Null resets to the configured default rather than storing
+  // the default's current value, so someone who never expressed a preference keeps following it.
+  if ("language" in body) {
+    const value = body.language;
+    if (value === null) {
+      update.language = null;
+    } else if (typeof value === "string" && isSupported(value, config)) {
+      // Stored as the list spells it, not as the client sent it — otherwise "hindi" and "Hindi"
+      // both persist and the picker cannot tell which row is selected.
+      update.language = supportedLanguages(config)
+        .find((entry) => entry.toLowerCase() === value.trim().toLowerCase())!;
+    } else {
+      return fail("invalid_request", "That language is not available.", 400);
+    }
+  }
+
   if (Object.keys(update).length === 0) {
     return fail("invalid_request", "Nothing to update.", 400);
   }
@@ -124,6 +146,5 @@ Deno.serve(async (req) => {
     return fail("server_error", "Could not save your details. Please try again.", 500);
   }
 
-  const config = await loadConfig(db);
   return json({ user: entitlementPayload(asUserRow(user), graceHoursFrom(config)) });
 });

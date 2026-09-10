@@ -112,6 +112,44 @@ request shape** (inline image + `responseSchema` + `thinkingBudget: 0`); `gemini
 every `*-flash-lite` answer 400. Verify end to end before changing `gemini_model` or
 `gemini_model_fallback`. Current pair: `gemini-3.8-flash` / `gemini-3.5-flash`, ~9-11s.
 
+## The chat's two dashboard levers
+
+`chat_prompt_version` picks which Astro prompt is live — `v2` is current, `v1` is the text that
+shipped before answers were reworked to commit to a timing question and name the effort involved.
+Both live in `_shared/astro_chat.ts` and the duplication between them is deliberate: a rollback is
+only worth having if it is a snapshot nobody has been improving on the side. Flipping the row
+reverts the model within the 60-second config TTL, no redeploy. Anything unrecognised reads as
+`v2`, so a blank or misspelt cell cannot strand everyone on the old prompt.
+
+`chat_languages` is a comma-separated list — `Hinglish,English,Hindi` — and `chat_language_default`
+names which of them a user who has never chosen gets. Both public: the Profile picker draws from
+them. Adding a language is one edit to one cell, because `_shared/chat_language.ts` has a written
+instruction for the three known ones and a generic template for anything else. Blanking
+`chat_languages` hides the picker and is the off switch for the whole feature.
+
+An edit reaches the **prompt** within 60 seconds (`loadConfig`'s TTL) and the **app** the next
+time the user lands on Home, which re-reads config when its cache is over a minute old. Anything
+faster on the client would mean a request per back-navigation; the two windows match so the
+picker and the prompt cannot disagree for long about which languages exist.
+
+The stored choice is `users.language`, nullable, and null is meaningful — it means "follow the
+default", so changing the default moves everyone who never expressed a preference and nobody who
+did. A value retired from the list falls back to the default at read time rather than being
+honoured. `update-profile` validates against the list, not against a hardcoded enum, or adding a
+language would need a deploy after all.
+
+**A user's pick never touches `app_config`.** It is written to their own `users.language` row by
+`update-profile`, and `chat_language_default` is only ever *read*. Nothing in this repo writes to
+`app_config` at all — both accesses, here and in the app, are `select` — and the table's RLS
+carries a single `SELECT` policy, so the anon key that ships inside the app could not write to it
+even if some future code tried. Only the dashboard changes a default, and it governs exactly the
+accounts that have never chosen.
+
+One rule is scoped rather than shared: `PANDIT_VOICE`'s "Roman letters only, never Devanagari"
+protects the PDF's Latin-only font subset and a TTS that reads Devanagari as silence. The chat has
+neither, so it passes its own `CHAT_VOICE` and Hindi is written in Devanagari. Palm and face keep
+the rule, and a test asserts they still do.
+
 The prompt's boundaries are written as rules about how to write, not as a disclaimer to append:
 no health, diagnosis or lifespan claims, no guarantees, no dates, and no deterministic verbs.
 The Mercury line ships as communication and vitality, never as a "health line" — that label

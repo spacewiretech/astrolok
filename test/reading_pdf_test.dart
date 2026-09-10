@@ -2,6 +2,7 @@ import 'package:astrolok/data/fake/fake_face_reading.dart';
 import 'package:astrolok/data/fake/fake_palm_reading.dart';
 import 'package:astrolok/data/models/face_reading.dart';
 import 'package:astrolok/data/models/palm_reading.dart';
+import 'package:astrolok/data/pdf/pdf_text_raster.dart';
 import 'package:astrolok/data/pdf/reading_pdf.dart';
 import 'package:astrolok/data/pdf/reading_pdf_requests.dart';
 import 'package:flutter/services.dart';
@@ -319,6 +320,69 @@ void main() {
           .toPdfRequest(regular: regular, bold: bold);
 
       expect(palm.fileName('abc'), 'astrolok-palm-reading-abc.pdf');
+    });
+  });
+
+  // ---------------------------------------------------------------- shaped scripts
+
+  group('a reading in a script the engine cannot set', () {
+    // The failure being guarded: `pdf` maps codepoints straight to glyphs and ships a shaper for
+    // Arabic alone. Devanagari drawn that way loses its conjuncts and hangs its matras beside the
+    // consonant instead of around it. So anything above U+0589 is laid out by Flutter and pasted
+    // in as a picture; everything Latin stays real text.
+
+    test('Latin text is left as text, with nothing drawn', () {
+      final request = fakePalmReading(PalmFocus.love)
+          .toPdfRequest(regular: regular, bold: bold, name: 'Asha');
+
+      expect(readingNeedsShaping(request), isFalse);
+      expect(needsShaping('Aapka Chandra Mesha rashi mein hai'), isFalse);
+      // Hinglish is the default and is Roman: the common case must not pay for this at all.
+      expect(request.rasters, isEmpty);
+    });
+
+    test('the punctuation the bundled font exists for stays as text', () {
+      // The first version of this rule said "anything above U+0589", which is wrong in the most
+      // expensive way: every reading in the app is written with em dashes and curly quotes, and
+      // the whole reason Poppins is bundled instead of the built-in Helvetica is that it sets
+      // them. That rule would have turned all 174 users' English exports into pictures.
+      expect(needsShaping('A reading — with quotes, an ellipsis… and \u20b9249'), isFalse);
+      expect(needsShaping('Naive, resume, cafe: accents like naïve and café'), isFalse);
+    });
+
+    test('Devanagari and Tamil are recognised as needing it', () {
+      expect(needsShaping('आपका चंद्र मेष राशि में है'), isTrue);
+      expect(needsShaping('உங்கள் சந்திரன்'), isTrue);
+      // Mixed is still shaped — one Devanagari word in an English sentence is enough to break.
+      expect(needsShaping('Your Chandra sits in मेष'), isTrue);
+    });
+
+    test('a rasterised block is found by the key the composition looks up', () async {
+      // The one thing that can silently break this: the rasteriser and the composition compute
+      // the key from the same three values, so a drift in either would show up as an export that
+      // quietly fell back to broken text rather than as a failure.
+      final key = rasterKey('आपका चंद्र', size: 10, width: pdfBulletWidth);
+      expect(key, rasterKey('आपका चंद्र', size: 10.0, width: pdfBulletWidth));
+      expect(key, isNot(rasterKey('आपका चंद्र', size: 10, width: pdfContentWidth)));
+      expect(key, isNot(rasterKey('आपका चंद्र', size: 13, width: pdfBulletWidth)));
+    });
+
+    test('the export still builds when a block was drawn', () async {
+      // A hand-made raster stands in for the real one, since `dart:ui` painting needs a live
+      // engine. What is under test is the composition: it has to place the picture and still
+      // produce a valid, paginated document.
+      final base = fakePalmReading(PalmFocus.love)
+          .toPdfRequest(regular: regular, bold: bold, name: 'Asha');
+
+      final png = Uint8List.fromList(img.encodePng(img.Image(width: 60, height: 12)));
+      final request = base.rasterised({
+        rasterKey(base.headline, size: 14, width: pdfContentWidth):
+            PdfRaster(png: png, width: 200, height: 14),
+      });
+
+      final bytes = await buildReadingPdf(request);
+      expect(magic(bytes), '%PDF-');
+      expect(pageCount(bytes), greaterThan(0));
     });
   });
 }

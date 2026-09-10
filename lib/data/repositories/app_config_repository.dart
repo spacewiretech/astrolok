@@ -1,3 +1,5 @@
+import '../../app/env.dart';
+
 /// Runtime configuration served from the backend rather than baked into the build.
 ///
 /// Everything that is not a credential lives here — environment name, limits, paywall copy —
@@ -8,8 +10,35 @@ abstract interface class AppConfigRepository {
   /// For the one case the cache cannot serve: a key that did not exist when this install last
   /// cached, which is indistinguishable from a key the server does not have. Everything else
   /// should take the cache — the splash waits on this call.
-  Future<Map<String, String>> load({bool force = false});
+  ///
+  /// [maxAge] asks for a *fresher* cache than the six-hour default without going as far as
+  /// [force]: the cache is used if it is younger than this, and the server asked otherwise.
+  ///
+  /// It exists because `force` and the default TTL between them cannot express the common case.
+  /// A row whose **value** changes in the dashboard — a language added to `chat_languages`, a
+  /// price corrected — is not a new key, so nothing triggers the one-shot refresh above, and the
+  /// edit stays invisible to an installed app for up to six hours. Screens that promise a
+  /// dashboard edit reaches users quickly pass a short window here.
+  Future<Map<String, String>> load({bool force = false, Duration? maxAge});
+
+  /// Keys the backend, or its disk cache, actually served on the most recent [load] — with the
+  /// env rows and the compiled defaults excluded.
+  ///
+  /// `analyticsBootstrapProvider` has to ask this rather than test the merged map for a missing
+  /// key. Its rule is that *absence* means "this install's cache predates the row", and the
+  /// merged map now answers every key that ships in `app.env` whether the server knows it or
+  /// not — which would silently retire the one-shot refresh that rule exists to trigger.
+  Set<String> get remoteKeys;
 }
+
+/// Everything this build ships: the env rows over the compiled defaults.
+///
+/// The layer under the network, and the single base every read path merges onto, so the cache
+/// path and the fetch path cannot disagree about what a missing key falls back to.
+Map<String, String> get shippedAppConfig => {
+      ...defaultAppConfig,
+      ...Env.appConfigFallback,
+    };
 
 /// The Mixpanel project token, served as a config row rather than compiled in.
 ///
@@ -32,6 +61,14 @@ const mixpanelTokenKey = 'mixpanel_token';
 /// `app_config_secrets_stay_private` would refuse to publish it in any case.
 const facebookAppIdKey = 'facebook_app_id';
 const facebookEnabledKey = 'facebook_events_enabled';
+
+/// The languages Astro can reply in, comma-separated, and which one is the default.
+///
+/// Named constants because both are read in two places that must not drift — the Profile picker
+/// and the forced refresh in `providers.dart` that exists so a language added in the dashboard
+/// does not wait out a six-hour cache before anyone can pick it.
+const chatLanguagesKey = 'chat_languages';
+const chatLanguageDefaultKey = 'chat_language_default';
 
 /// Values the app falls back to when config has never been fetched and there is no network.
 ///
@@ -84,22 +121,35 @@ const defaultAppConfig = <String, String>{
   'help_url': 'https://astrolok.app/help',
   'privacy_url': 'https://astrolok.app/privacy',
   'terms_url': 'https://astrolok.app/terms',
+  // Which languages Astro can answer in, and which one a user who has never chosen gets. Read
+  // with [AppConfigValues.configList]; the server keeps its own copy of this fallback, because
+  // the prompt is assembled there and cannot ask the device what it thinks the list is.
+  //
+  // Defaulted rather than left blank so the picker works on a cold start. Blanking the row in
+  // the dashboard is the off switch: an empty list hides the row entirely.
+  chatLanguagesKey: 'Hinglish,English,Hindi',
+  chatLanguageDefaultKey: 'Hinglish',
 };
 
 /// Typed reads over the raw key/value map, so a bad or missing value can never crash a screen.
+///
+/// Every fallback goes through [shippedAppConfig] rather than [defaultAppConfig] directly. The
+/// map handed to these accessors is not always a fully merged one — the widget sites read
+/// `appConfigProvider.valueOrNull ?? shippedAppConfig` and get the raw thing while the fetch is
+/// still pending — so the env rows have to be reachable from here as well.
 extension AppConfigValues on Map<String, String> {
-  String configString(String key) => this[key] ?? defaultAppConfig[key] ?? '';
+  String configString(String key) => this[key] ?? shippedAppConfig[key] ?? '';
 
   int configInt(String key) =>
       int.tryParse(configString(key)) ??
-      int.tryParse(defaultAppConfig[key] ?? '') ??
+      int.tryParse(shippedAppConfig[key] ?? '') ??
       0;
 
   bool configFlag(String key) => configString(key).toLowerCase() == 'true';
 
   double configDouble(String key) =>
       double.tryParse(configString(key)) ??
-      double.tryParse(defaultAppConfig[key] ?? '') ??
+      double.tryParse(shippedAppConfig[key] ?? '') ??
       0;
 
   /// Like [configString], but a row that exists and is *blank* falls back to the shipped
@@ -110,6 +160,28 @@ extension AppConfigValues on Map<String, String> {
   /// that opens nothing is how a store review fails.
   String configLink(String key) {
     final value = configString(key).trim();
-    return value.isEmpty ? (defaultAppConfig[key] ?? '') : value;
+    return value.isEmpty ? (shippedAppConfig[key] ?? '') : value;
+  }
+
+  /// A comma-separated row, as a list. Trimmed, with blanks and duplicates dropped.
+  ///
+  /// The opposite of [configLink] on purpose: an empty result is a meaningful answer here, not a
+  /// misconfiguration to paper over. Blanking `chat_languages` is the documented way to hide the
+  /// language picker, so falling back to the shipped default would defeat the off switch.
+  ///
+  /// Comma-separated rather than JSON because every value in `app_config` is plain text with no
+  /// type column, and a comma list is what someone can edit in a dashboard cell without quoting
+  /// anything. `_shared/chat_language.ts` parses the same row the same way.
+  List<String> configList(String key) {
+    final seen = <String>{};
+    final values = <String>[];
+
+    for (final entry in configString(key).split(',')) {
+      final value = entry.trim();
+      if (value.isEmpty || !seen.add(value.toLowerCase())) continue;
+      values.add(value);
+    }
+
+    return values;
   }
 }

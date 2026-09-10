@@ -1,5 +1,8 @@
 import 'dart:async';
 
+// For `mapEquals`, which keeps the config refresh below from rebuilding Home's watchers on
+// every visit when nothing in the table actually moved.
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -35,6 +38,40 @@ class HomeView extends ConsumerStatefulWidget {
 class _HomeViewState extends ConsumerState<HomeView> {
   /// So the view event fires once per visit rather than on every rebuild.
   bool _reported = false;
+
+  /// How stale the config may be before landing on Home goes and asks again.
+  ///
+  /// Home is the one screen every session passes through, so it is where a dashboard edit gets
+  /// its chance to reach an installed app. Without this, only a *new key* triggered a refetch
+  /// and a changed **value** — a language added to `chat_languages`, a price corrected — stayed
+  /// invisible for the whole six-hour cache TTL, which made "edit the dashboard, no release"
+  /// true exactly once per key and false every time after.
+  ///
+  /// A minute, matching `loadConfig`'s TTL in the Edge Functions, so the client and the server
+  /// pick up an edit at the same rate — the language picker and the prompt that has to honour it
+  /// cannot then disagree for long. It is a window rather than an unconditional fetch because
+  /// Home is also every back-navigation's destination, and those arrive in bursts.
+  static const _configMaxAge = Duration(minutes: 1);
+
+  /// Re-reads `app_config`, and rebuilds the screens that show it only if something moved.
+  Future<void> _refreshConfig() async {
+    final before = ref.read(appConfigProvider).valueOrNull;
+
+    final Map<String, String> after;
+    try {
+      after = await ref.read(appConfigRepositoryProvider).load(maxAge: _configMaxAge);
+    } catch (error) {
+      // The cache is still serving. A config refresh is not worth a message to the user.
+      debugPrint('[home] config refresh failed: $error');
+      return;
+    }
+
+    // Invalidating unconditionally would rebuild every price label and menu row on each visit to
+    // Home for nothing. Riverpod keeps the previous value while the provider re-resolves, so a
+    // genuine change swaps in without the screens flashing back to their shipped defaults.
+    if (!mounted || before == null || mapEquals(before, after)) return;
+    ref.invalidate(appConfigProvider);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -77,6 +114,8 @@ class _HomeViewState extends ConsumerState<HomeView> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) ref.invalidate(promoVideoProvider);
       });
+
+      unawaited(_refreshConfig());
     }
 
     return Scaffold(

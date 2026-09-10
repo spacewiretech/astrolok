@@ -3,10 +3,24 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   buildUserPrompt,
   CHAT_SCHEMA,
+  chatSystemPrompt,
   normaliseChatReply,
-  SYSTEM_PROMPT,
 } from "../_shared/astro_chat.ts";
+import {
+  BUILT_IN_LANGUAGES,
+  isSupported,
+  languageInstruction,
+  resolveLanguage,
+  supportedLanguages,
+} from "../_shared/chat_language.ts";
+import { AppConfig } from "../_shared/config.ts";
 import { computeChart } from "../_shared/jyotish.ts";
+import { panditSystemPrompt } from "../_shared/pandit.ts";
+
+/** The prompt as the handler builds it for a default account. */
+const SYSTEM_PROMPT = chatSystemPrompt({ language: "Hinglish" });
+
+const config = (rows: Record<string, string>): AppConfig => new Map(Object.entries(rows));
 
 /**
  * `normaliseChatReply` is the whole correctness surface of the chat: everything a language model
@@ -340,9 +354,159 @@ Deno.test("the grounding rule is the chat one, not the photograph one", () => {
   assert(SYSTEM_PROMPT.includes("could have been sent to any stranger"));
 });
 
-Deno.test("the prompt asks for transliteration and not Devanagari", () => {
-  assert(SYSTEM_PROMPT.includes("Devanagari"));
-  assert(!/[ऀ-ॿ]/.test(SYSTEM_PROMPT), "the system prompt contains Devanagari");
+Deno.test("the reply is written in the language the turn asked for", () => {
+  for (const language of BUILT_IN_LANGUAGES) {
+    const prompt = chatSystemPrompt({ language });
+    assert(prompt.includes("THE LANGUAGE YOU WRITE IN"));
+    assert(prompt.includes(language), `the prompt never names ${language}`);
+  }
+});
+
+Deno.test("a language the dashboard invented still produces a usable instruction", () => {
+  // The whole point of keeping the list in `app_config` is that adding Marathi is a dashboard
+  // edit. That is only true if an unrecognised name reaches the model as an instruction rather
+  // than as a gap.
+  const prompt = chatSystemPrompt({ language: "Marathi" });
+  assert(prompt.includes("Write your whole reply in Marathi"));
+  assert(prompt.includes("the script Marathi is normally written in"));
+});
+
+Deno.test("the person outranks the setting", () => {
+  // Someone who types in English gets English back whatever they picked. Without this the
+  // picker becomes a trap for anyone who switches language mid-conversation.
+  assert(SYSTEM_PROMPT.includes("answer in the language\nthey wrote in"));
+});
+
+Deno.test("only Hindi is allowed Devanagari, and only in the chat", () => {
+  // The Roman-letters rule exists for the PDF's Latin-only font subset and for a TTS that reads
+  // Devanagari as silence. The chat has neither, so it is the one surface that can carry the
+  // script — and palm and face must keep the rule they still depend on.
+  const hindi = chatSystemPrompt({ language: "Hindi" });
+  assert(/[ऀ-ॿ]/.test(hindi), "the Hindi prompt shows no Devanagari to write in");
+
+  for (const language of ["Hinglish", "English"]) {
+    const prompt = chatSystemPrompt({ language });
+    assert(
+      prompt.includes("Never Devanagari") || !/[ऀ-ॿ]/.test(prompt),
+      `${language} was not told to stay in Roman letters`,
+    );
+  }
+
+  const reading = panditSystemPrompt({ craft: "-", lengths: "-" });
+  assert(
+    reading.includes("Never write in Devanagari"),
+    "palm and face lost the rule their PDF and TTS depend on",
+  );
+});
+
+// ---------------------------------------------------------------- the rollback
+
+Deno.test("v1 is still reachable, and is the text that shipped", () => {
+  // The rollback is only worth having if it has been checked. These are phrases unique to each
+  // version, so a merge that quietly collapsed the two would fail here rather than in production.
+  const v1 = chatSystemPrompt({ version: "v1", language: "Hinglish" });
+  assert(v1.includes("only one thing, only when the conversation makes room for it"));
+  assert(!v1.includes("EFFORT IS PART OF THE READING"));
+  assert(!v1.includes("THE LANGUAGE YOU WRITE IN"));
+  // v1 rolls back the voice too, Roman-letters rule included.
+  assert(v1.includes("Never write in Devanagari"));
+
+  const v2 = chatSystemPrompt({ version: "v2", language: "Hinglish" });
+  assert(v2.includes("EFFORT IS PART OF THE READING"));
+  assert(v2.includes('WHEN THEY ASK "WHEN"'));
+});
+
+Deno.test("an unset or misspelled version is treated as current", () => {
+  // `configSetting` hands over "" for a blank cell, and a dashboard is a text box. Neither may
+  // silently strand every user on the old prompt.
+  for (const version of ["", "  ", "V2", "v3", "latest"]) {
+    assert(
+      chatSystemPrompt({ version, language: "English" }).includes("EFFORT IS PART OF THE READING"),
+      `version "${version}" did not fall through to v2`,
+    );
+  }
+});
+
+Deno.test("v2 answers the question v1 dodged", () => {
+  // The reply that prompted this: "ky me army ma kab bharti hungi", answered with a remark about
+  // looking at your energy rather than estimating a time. Each assertion is one half of that
+  // failure — no answer, and no mention of the work.
+  const prompt = chatSystemPrompt({ language: "Hinglish" });
+
+  assert(prompt.includes("Never write that the chart cannot tell them when"));
+  assert(prompt.includes("answer in conditions, not dates"));
+  assert(prompt.includes("something they can begin this week"));
+  assert(prompt.includes('set "ask_for" to "birth_time"'));
+
+  // And the boundary it must not have crossed to get there.
+  assert(prompt.includes("Never give a date, a year"));
+});
+
+// ---------------------------------------------------------------- the languages
+
+Deno.test("the language list comes from config, cleaned up", () => {
+  const languages = supportedLanguages(config({
+    chat_languages: " Hinglish , English ,, Hindi , hindi ,Marathi ",
+  }));
+
+  // Blanks dropped, whitespace trimmed, duplicates removed case-insensitively, order kept.
+  assertEquals(languages, ["Hinglish", "English", "Hindi", "Marathi"]);
+});
+
+Deno.test("a missing or blank language list falls back to the built-ins", () => {
+  // Blank is the documented off switch for the picker, but the sage still has to be told
+  // something — an unconfigured project must not start answering in whatever it feels like.
+  const cases: Record<string, string>[] = [
+    {},
+    { chat_languages: "" },
+    { chat_languages: "  " },
+    { chat_languages: "-" },
+  ];
+
+  for (const rows of cases) {
+    assertEquals(supportedLanguages(config(rows)), [...BUILT_IN_LANGUAGES]);
+  }
+});
+
+Deno.test("a stored language that has been retired falls back to the default", () => {
+  const rows = config({
+    chat_languages: "English,Hindi",
+    chat_language_default: "Hindi",
+  });
+
+  assertEquals(resolveLanguage("English", rows), "English");
+  // Hinglish is gone from the list; honouring it would name a language nothing supports.
+  assertEquals(resolveLanguage("Hinglish", rows), "Hindi");
+  assertEquals(resolveLanguage(null, rows), "Hindi");
+  assertEquals(resolveLanguage("  ", rows), "Hindi");
+});
+
+Deno.test("a default that is not in the list loses to the first entry", () => {
+  // A dashboard can be edited into this state in one keystroke, and the sage still has to be
+  // told a language.
+  const rows = config({
+    chat_languages: "English,Hindi",
+    chat_language_default: "Tamil",
+  });
+
+  assertEquals(resolveLanguage(null, rows), "English");
+});
+
+Deno.test("a stored language is matched however it was typed", () => {
+  const rows = config({ chat_languages: "Hinglish,English,Hindi" });
+
+  assertEquals(resolveLanguage("hindi", rows), "Hindi");
+  assertEquals(resolveLanguage(" HINDI ", rows), "Hindi");
+  assert(isSupported("english", rows));
+  assert(!isSupported("Klingon", rows));
+});
+
+Deno.test("Hinglish is described as people actually write it", () => {
+  // The failing example was Hinglish typed in Roman letters. If this drifts into "Hindi", the
+  // reply comes back in a script the person did not write in.
+  const hinglish = languageInstruction("Hinglish");
+  assert(hinglish.includes("Roman letters"));
+  assert(hinglish.includes("Never Devanagari"));
 });
 
 Deno.test("the sage is told not to invent planets it was not given", () => {
