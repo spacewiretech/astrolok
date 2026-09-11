@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+// For `RenderAbstractViewport`, which is what does the reversed-list arithmetic in
+// `_bringReplyIntoView` rather than this file guessing at scroll offsets.
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -7,6 +10,8 @@ import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/models/astro_message.dart';
 import '../../widgets/app_snackbar.dart';
 import '../../widgets/astral_background.dart';
@@ -19,6 +24,7 @@ import 'chat_copy.dart';
 import 'chat_drawer.dart';
 import 'chat_reveal.dart';
 import 'chat_state.dart';
+import 'chat_threads_viewmodel.dart';
 import 'chat_viewmodel.dart';
 
 /// The conversation with Astro.
@@ -57,9 +63,24 @@ class _ChatViewState extends ConsumerState<ChatView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
 
+      // Home usually has the conversations loaded by now, but this screen is also reached straight
+      // from a reading's "Ask Astro". Warmed here so the drawer never has to fetch for itself; it
+      // is a no-op once the list is up.
+      final threads = ref.read(chatThreadsProvider);
+
+      analytics.track(Ev.chatOpened, {
+        // An opener means the user arrived from a reading's "Ask Astro" with a question already
+        // written, which is a different conversation from one started cold on Home.
+        P.hasOpener: opener != null && opener.isNotEmpty,
+        P.source: opener != null && opener.isNotEmpty ? 'reading' : 'direct',
+        P.threadCount: threads.valueOrNull?.length,
+      });
+
       if (opener != null && opener.isNotEmpty) {
         ref.read(selectedThreadProvider.notifier).state = ChatThread.draftId;
-        ref.read(chatViewModelProvider(ChatThread.draftId).notifier).send(opener);
+        ref
+            .read(chatViewModelProvider(ChatThread.draftId).notifier)
+            .send(opener, entry: 'opener');
       }
     });
   }
@@ -68,6 +89,53 @@ class _ChatViewState extends ConsumerState<ChatView> {
   void dispose() {
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// How much of the question to leave showing above a reply that has just landed.
+  ///
+  /// Enough for a line of the user's own bubble. An answer that arrives with the thing it is
+  /// answering still on screen reads as a reply; one that fills the screen alone reads as a
+  /// page that was already there.
+  static const _questionPeek = 56.0;
+
+  static const _scrollEase = Duration(milliseconds: 380);
+
+  /// Brings the *top* of a reply into view, which is where its answer is.
+  ///
+  /// The transcript is `reverse: true` and sits at offset 0 — the bottom — so a reply taller
+  /// than the viewport hangs its verdict, title and opening above the top edge. Since
+  /// [RevealedPart] fades rather than grows, the bubble is full height from the first frame, so
+  /// what the reader actually sees is the blank lower half of a card that looks like it never
+  /// arrived. This is the fix for that.
+  void _bringReplyIntoView(BuildContext bubbleContext) {
+    if (!mounted || !_scroll.hasClients) return;
+
+    final box = bubbleContext.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return;
+
+    // Alignment 1.0 puts the target's trailing edge at the viewport's trailing edge. The list is
+    // reversed, so its trailing edge is the *top* of the screen — precisely the part of the
+    // bubble that was scrolled past. A larger offset in a reversed list moves content down, so
+    // adding the peek slides the question back into view above the answer.
+    final reveal = RenderAbstractViewport.of(box).getOffsetToReveal(box, 1.0).offset;
+    final position = _scroll.position;
+    final target = (reveal + _questionPeek)
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+
+    // Already there — a short reply on a tall screen clamps to where the list is sitting, and
+    // animating to the current offset would cancel a scroll the reader started themselves.
+    if ((target - position.pixels).abs() < 1) return;
+
+    _scroll.animateTo(target, duration: _scrollEase, curve: Curves.easeOutCubic);
+  }
+
+  /// Back to the waiting bubble when a turn starts.
+  ///
+  /// Someone who had scrolled up to reread an old answer must see `_Thinking` appear, or sending
+  /// looks like it did nothing at all.
+  void _showTheWait() {
+    if (!mounted || !_scroll.hasClients || _scroll.position.pixels == 0) return;
+    _scroll.animateTo(0, duration: _scrollEase, curve: Curves.easeOutCubic);
   }
 
   void _handle(ChatOutcome outcome) {
@@ -90,6 +158,10 @@ class _ChatViewState extends ConsumerState<ChatView> {
   /// The draft instance is invalidated first: tapping "New chat" while already on an unsent one
   /// must clear it, and without this the key would not change so nothing would happen.
   void _newChat() {
+    // The intent to start one, not a thread on the server — a draft only becomes real on its
+    // first turn. `Chat Message Sent` with turn_index 0 is what says they went through with it,
+    // and the gap between the two is people opening a blank chat and thinking better of it.
+    analytics.track(Ev.chatThreadCreated, {P.source: 'drawer'});
     ref.invalidate(chatViewModelProvider(ChatThread.draftId));
     ref.read(selectedThreadProvider.notifier).state = ChatThread.draftId;
   }
@@ -111,6 +183,10 @@ class _ChatViewState extends ConsumerState<ChatView> {
       if (outcome != null) _handle(outcome);
     });
 
+    ref.listen(chatViewModelProvider(selected).select((s) => s.sending), (_, sending) {
+      if (sending) _showTheWait();
+    });
+
     return Scaffold(
       key: _scaffold,
       // On the right, so the back button keeps the left corner it has on every other screen.
@@ -121,6 +197,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
         selectedId: state.threadId ?? selected,
         onNewChat: _newChat,
         onOpen: (id) {
+          analytics.track(Ev.chatThreadSwitched, {P.threadId: id});
           model.stopSpeech();
           ref.read(selectedThreadProvider.notifier).state = id;
         },
@@ -136,7 +213,10 @@ class _ChatViewState extends ConsumerState<ChatView> {
                   model.stopSpeech();
                   context.canPop() ? context.pop() : context.go(Routes.home);
                 },
-                onHistory: () => _scaffold.currentState?.openEndDrawer(),
+                onHistory: () {
+                  analytics.track(Ev.chatDrawerOpened);
+                  _scaffold.currentState?.openEndDrawer();
+                },
               ),
 
               Expanded(
@@ -145,18 +225,22 @@ class _ChatViewState extends ConsumerState<ChatView> {
                         child: CircularProgressIndicator(color: AppColors.gold),
                       )
                     : state.isEmpty
-                        ? _Opening(onPick: (topic) => model.send(topic.opener))
+                        ? _Opening(onPick: (topic) {
+                            analytics.track(Ev.chatTopicTapped, {P.topic: topic.name});
+                            model.send(topic.opener, entry: 'topic');
+                          })
                         : _Transcript(
                             state: state,
                             controller: _scroll,
                             onSpeak: model.toggleSpeech,
                             onRevealed: model.revealed,
+                            onReplyEntered: _bringReplyIntoView,
                           ),
               ),
 
               ChatComposer(
                 state: state,
-                onSend: model.send,
+                onSend: (message, entry) => model.send(message, entry: entry),
                 onDraftRestored: model.pendingRestored,
               ),
             ],
@@ -302,12 +386,16 @@ class _Transcript extends StatelessWidget {
     required this.controller,
     required this.onSpeak,
     required this.onRevealed,
+    required this.onReplyEntered,
   });
 
   final ChatState state;
   final ScrollController controller;
   final ValueChanged<AstroMessage> onSpeak;
   final ValueChanged<String> onRevealed;
+
+  /// See [ChatReveal.onEntered].
+  final void Function(BuildContext context) onReplyEntered;
 
   @override
   Widget build(BuildContext context) {
@@ -341,6 +429,7 @@ class _Transcript extends StatelessWidget {
                   revealing: state.revealingId == message.id,
                   onSpeak: () => onSpeak(message),
                   onRevealed: () => onRevealed(message.id),
+                  onEntered: onReplyEntered,
                 ),
         );
       },
@@ -392,6 +481,7 @@ class _AstroBubble extends StatelessWidget {
     required this.revealing,
     required this.onSpeak,
     required this.onRevealed,
+    required this.onEntered,
   });
 
   final AstroMessage message;
@@ -404,10 +494,14 @@ class _AstroBubble extends StatelessWidget {
   final VoidCallback onSpeak;
   final VoidCallback onRevealed;
 
+  /// See [ChatReveal.onEntered].
+  final void Function(BuildContext context) onEntered;
+
   @override
   Widget build(BuildContext context) {
     return ChatReveal(
       active: revealing,
+      onEntered: onEntered,
       verdict: message.verdict,
       onFinished: onRevealed,
       builder: (context, verdict, progress) => Container(

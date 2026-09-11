@@ -6,6 +6,8 @@ import 'package:astrolok/data/models/face_reading.dart';
 import 'package:astrolok/data/fake/fake_palm_reading.dart';
 import 'package:astrolok/data/models/palm_reading.dart' show PalmFocus, PalmReading;
 import 'package:astrolok/data/providers.dart';
+import 'package:astrolok/data/repositories/app_config_repository.dart';
+import 'package:astrolok/data/supabase/supabase_app_config_repository.dart';
 import 'package:astrolok/features/face/face_capture_view.dart';
 import 'package:astrolok/features/face/face_part_view.dart';
 import 'package:astrolok/features/face/face_reading_view.dart';
@@ -43,7 +45,12 @@ void main() {
     return reading;
   }
 
-  Future<void> pumpAt(WidgetTester tester, Size size, Widget child) async {
+  Future<void> pumpAt(
+    WidgetTester tester,
+    Size size,
+    Widget child, {
+    List<Override> overrides = const [],
+  }) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -54,6 +61,7 @@ void main() {
           // No camera in a widget test. The unavailable path is also what every simulator
           // shows, so this is the state most worth proving lays out.
           faceCameraProvider.overrideWithValue(FakeReadingCamera()),
+          ...overrides,
         ],
         child: MaterialApp(theme: buildAppTheme(), home: child),
       ),
@@ -239,7 +247,39 @@ void main() {
 
       expect(find.textContaining('Member ID'), findsNothing);
       expect(find.textContaining('Amount Paid'), findsNothing);
+      // "Chat language" is a different row and a different promise — it sets the language Astro
+      // replies in, not the language of the app, which still has no localisation at all.
       expect(find.textContaining('App Language'), findsNothing);
+    });
+
+    testWidgets('offers the Astro language, defaulting to the configured one', (tester) async {
+      await pumpAt(tester, tall, const ProfileView());
+
+      expect(find.text('Astro language'), findsOneWidget);
+      // Nobody has chosen, so the row shows `chat_language_default` rather than blank — the
+      // same answer the Edge Function resolves for the turn itself.
+      expect(find.text('Hinglish'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('hides the language row when config offers no languages', (tester) async {
+      // Blanking `chat_languages` in the dashboard is the documented off switch for the whole
+      // feature. A row that opens an empty sheet would be worse than no row.
+      await pumpAt(
+        tester,
+        tall,
+        const ProfileView(),
+        overrides: [
+          appConfigRepositoryProvider
+              .overrideWithValue(const FakeAppConfigRepository({chatLanguagesKey: ''})),
+        ],
+      );
+
+      expect(find.text('Astro language'), findsNothing);
+      // The rows either side of it are untouched.
+      expect(find.text('Downloads'), findsOneWidget);
+      expect(find.text('Contact us'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('downloads says so when there is nothing saved', (tester) async {

@@ -13,7 +13,7 @@
  */
 
 import { ceremony, FOCUS_LABELS, FocusKey, STATUSES, text } from "./gemini.ts";
-import { panditSystemPrompt, SHARED_LENGTHS } from "./pandit.ts";
+import { panditSystemPrompt, panditVoice, SHARED_LENGTHS } from "./pandit.ts";
 
 export { FOCUS_KEYS, FOCUS_LABELS, focusMismatch, parseFocus } from "./gemini.ts";
 export type { FocusKey } from "./gemini.ts";
@@ -274,10 +274,17 @@ const FACE_LENGTHS = [
   "- sanskrit: the traditional name given above, nothing else.",
 ].join("\n");
 
-export const SYSTEM_PROMPT = panditSystemPrompt({
-  craft: FACE_CRAFT,
-  lengths: FACE_LENGTHS,
-});
+/** The prompt as it was before readings could be written in anything but English. */
+export const SYSTEM_PROMPT = faceSystemPrompt();
+
+/** The face prompt, written to answer in [language]. Mirrors `palmSystemPrompt`. */
+export function faceSystemPrompt(language?: string | null): string {
+  return panditSystemPrompt({
+    craft: FACE_CRAFT,
+    lengths: FACE_LENGTHS,
+    voice: panditVoice(language),
+  });
+}
 
 /**
  * When to refuse, stated as narrowly as possible.

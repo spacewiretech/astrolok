@@ -7,6 +7,8 @@ import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/models/face_reading.dart' show FacePartKind;
 import '../../data/models/palm_reading.dart' show PalmLineKind;
 import '../../widgets/astral_background.dart';
@@ -94,6 +96,13 @@ class DownloadsView extends ConsumerWidget {
 
   /// Opens the reading itself, where Listen and Download already are.
   void _open(BuildContext context, SavedReading reading) {
+    analytics.track(Ev.downloadOpened, {
+      P.feature: reading.kind.name,
+      P.readingId: reading.id,
+      // How old the reading they came back for is. Anything beyond a day or two is a user
+      // treating a reading as a keepsake rather than a one-off, which is the retention story.
+      P.ageDays: DateTime.now().difference(reading.createdAt).inDays,
+    });
     context.push(
       switch (reading.kind) {
         SavedReadingKind.palm => Routes.palmReadingFor(reading.id),

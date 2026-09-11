@@ -12,7 +12,11 @@
 
 import { AppConfig, configSetting } from "./config.ts";
 
-export type PaymentType = "trial" | "active" | "expired" | "cancelled";
+/**
+ * `none` and `trial` are both unpaid-looking, and the difference between them is the whole point:
+ * `none` has never authorised a mandate and is owed the ₹3 trial, `trial` has already spent it.
+ */
+export type PaymentType = "none" | "trial" | "active" | "expired" | "cancelled";
 
 /**
  * How long access survives past an expiry while a debit settles.
@@ -41,6 +45,10 @@ export interface UserRow {
   birth_time?: string | null;
   birth_place?: string | null;
 
+  /// Which language the chat answers in. Null means the configured default; `chat_language.ts`
+  /// resolves it, because a language retired from `app_config` must not keep being honoured.
+  language?: string | null;
+
   creation_time?: string;
   payment_type: PaymentType;
   trial_ends_at: string | null;
@@ -63,7 +71,7 @@ export interface UserRow {
  * every trial user as unentitled — or `dob`, which would loop the birth step forever.
  */
 export const USER_COLUMNS =
-  "user_id, mobile_no, name, dob, birth_time, birth_place, creation_time, payment_type, " +
+  "user_id, mobile_no, name, dob, birth_time, birth_place, language, creation_time, payment_type, " +
   "trial_ends_at, current_period_end, active_subscription_id, trial_started_at, " +
   "subscription_started_at, cancelled_at, billing_state";
 
@@ -98,8 +106,9 @@ export function isEntitled(
         isFuture(user.current_period_end, graceMs, ts);
 
     case "trial":
-      // Null means the trial never started: the row exists but the ₹3 was never captured.
-      // That is the state every new signup is in, and it must not grant access.
+      // The ₹3 was captured and the clock is running. A null here would mean the row was moved
+      // to `trial` without the date being set, which no code path does — but it grants nothing
+      // either way, and failing towards the paywall is the safe direction.
       return isFuture(user.trial_ends_at, graceMs, ts);
 
     case "cancelled":
@@ -107,10 +116,35 @@ export function isEntitled(
       // debit to wait for.
       return isFuture(user.current_period_end, 0, ts);
 
+    case "none":
+      // Never authorised a mandate. Spelled out rather than left to `default` so that the next
+      // person to read this cannot mistake the omission for an oversight — this is the state
+      // every new signup is in, and it must grant nothing whatever the dates say.
+      return false;
+
     case "expired":
     default:
       return false;
   }
+}
+
+/**
+ * Whether this account is still owed the ₹3 trial.
+ *
+ * The single rule for it, so `subscription-start` and the paywall cannot disagree about what is
+ * being sold — which they did, silently, for as long as the client derived this from dates on its
+ * own: the screen showed the full plan price while the server opened a ₹3 mandate.
+ *
+ * `payment_type` is the signal. The two date checks are belt and braces for a row the backfill in
+ * `20260909000002` could have misjudged, so a mistake there can only ever refuse a trial, never
+ * hand out a second one.
+ */
+export function trialAvailable(
+  user: Pick<UserRow, "payment_type" | "trial_ends_at" | "current_period_end">,
+): boolean {
+  return user.payment_type === "none" &&
+    !user.trial_ends_at &&
+    !user.current_period_end;
 }
 
 /** True while the user is inside the paid-for trial, so the app can say so. */
@@ -141,11 +175,20 @@ export function entitlementPayload(
     // see that it was heard.
     birth_time: user.birth_time ?? null,
     birth_place: user.birth_place ?? null,
+    // Null here means "never chosen", which the Profile picker shows as the configured default.
+    // Sent unresolved on purpose: resolving it would make a user who has chosen nothing
+    // indistinguishable from one who chose the default, and the two behave differently the day
+    // the default changes.
+    language: user.language ?? null,
     payment_type: user.payment_type,
     trial_ends_at: user.trial_ends_at,
     current_period_end: user.current_period_end,
     entitled: isEntitled(user, graceHours, now),
     in_trial: isInTrial(user, graceHours, now),
+    // Which offer the paywall must show, decided here rather than by the client. The screen and
+    // `subscription-start` now read the same answer, so the price on the button, the UPI Autopay
+    // consent line and the amount actually authorised cannot drift apart.
+    trial_available: trialAvailable(user),
     // Not an entitlement signal — the user is still fully in — but the app needs it to warn
     // them while there is still time to fix the mandate. Without it, an on-hold subscription is
     // invisible until the day access disappears.

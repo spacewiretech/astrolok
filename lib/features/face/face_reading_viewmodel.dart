@@ -6,8 +6,12 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../data/entitlement.dart';
+import '../../data/pdf/pdf_text_raster.dart';
 import '../../data/pdf/reading_pdf.dart';
 import '../../data/pdf/reading_pdf_requests.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
+import '../../data/language.dart';
 import '../../data/providers.dart';
 import 'face_copy.dart';
 import 'face_reading_state.dart';
@@ -56,9 +60,18 @@ class FaceReadingViewModel
 
     state = state.copyWith(reading: reading, image: bytes, loading: false);
 
+    analytics.track(Ev.readingViewed, {
+      P.feature: ReadingFeature.face,
+      P.readingId: reading.id,
+      // Whether the photo survived alongside the text. A reading shown without its image is a
+      // worse screen, and the image store is the part most likely to have lost it.
+      P.state: bytes == null ? 'no_image' : 'with_image',
+    });
+
     // Asked after the reading is on screen, so a slow engine check never delays it. The button
     // appears once the answer is yes, and simply never appears when it is no.
-    final canSpeak = await ref.read(readingSpeechProvider).prepare();
+    final canSpeak = await ref.read(readingSpeechProvider)
+        .prepare(language: ref.read(languageProvider));
     if (_disposed) return;
     state = state.copyWith(canSpeak: canSpeak);
   }
@@ -66,6 +79,16 @@ class FaceReadingViewModel
   /// Starts or stops narration of [text].
   Future<void> toggleSpeech(String text) async {
     final speech = ref.read(readingSpeechProvider);
+
+    analytics.track(
+      state.speaking ? Ev.readingNarrationStopped : Ev.readingNarrated,
+      {
+        P.feature: ReadingFeature.face,
+        P.readingId: state.reading?.id,
+        P.surface: 'reading',
+        P.chars: text.length,
+      },
+    );
 
     if (state.speaking) {
       await speech.stop();
@@ -114,7 +137,13 @@ class FaceReadingViewModel
         name: ref.read(entitlementProvider)?.name,
       );
 
-      final bytes = await compute(buildReadingPdf, request);
+      // Drawn here, on the UI isolate, because `dart:ui` has no engine on a background one —
+      // the same reason the fonts are loaded above rather than inside. A no-op, and an empty
+      // map, for every Latin-script reading.
+      final drawn = request.rasterised(await rasteriseReading(request));
+      if (_disposed) return;
+
+      final bytes = await compute(buildReadingPdf, drawn);
       if (_disposed) return;
 
       // Written to a real file rather than shared as raw bytes: the share sheet uses the
@@ -133,6 +162,14 @@ class FaceReadingViewModel
       if (_disposed) return;
 
       state = state.copyWith(exporting: false);
+
+      // After the share sheet returns, not before it opens: this counts an export the user
+      // actually saw through, which is the only kind worth counting.
+      analytics.track(Ev.readingPdfExported, {
+        P.feature: ReadingFeature.face,
+        P.readingId: reading.id,
+        P.bytes: bytes.length,
+      });
     } catch (error) {
       debugPrint('[face] pdf export failed: $error');
       if (_disposed) return;

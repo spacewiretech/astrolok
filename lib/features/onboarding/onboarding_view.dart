@@ -63,6 +63,16 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
       final model = ref.read(onboardingViewModelProvider.notifier);
       model.startAt(widget.initialStep);
 
+      // The paywall's promo clip, started four routes before the paywall. Opening a player is a
+      // network round trip, and doing it when the paywall mounts is exactly what turns its video
+      // card into a spinner on the screen that asks for money. Everything from here to the birth
+      // date is lead time.
+      //
+      // `read`, not `watch`, the same way Home warms the conversation list: this screen has
+      // nothing to redraw when the player lands, and the provider is kept alive, so the one read
+      // outlives onboarding.
+      ref.read(promoVideoProvider);
+
       // Seeded from state, not the other way round, so returning to the phone sheet from the
       // OTP sheet shows the number the user already typed.
       final state = ref.read(onboardingViewModelProvider);
@@ -172,7 +182,7 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
   /// Both sheets end with the same footer, and its links come from config so a policy URL can
   /// be corrected without an app release. Defaults stand in until config resolves.
   Widget get _termsFooter {
-    final config = ref.watch(appConfigProvider).valueOrNull ?? defaultAppConfig;
+    final config = ref.watch(appConfigProvider).valueOrNull ?? shippedAppConfig;
     return TermsFooter(
       termsUrl: config.configLink('terms_url'),
       privacyUrl: config.configLink('privacy_url'),
@@ -214,7 +224,7 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
           onChanged: model.setCode,
           // Auto-submitting on the last digit is what makes an autofilled code feel instant;
           // a wrong one still lands on the error path below.
-          onCompleted: (_) => _verify(),
+          onCompleted: (_) => _verify(entryMethod: 'auto_complete'),
         ),
         const SizedBox(height: 20),
         PrimaryButton(
@@ -252,8 +262,12 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
     );
   }
 
-  Future<void> _verify() async {
-    final next = await ref.read(onboardingViewModelProvider.notifier).verifyOtp();
+  /// [entryMethod] separates a code the OS auto-filled from the SMS from one the user typed.
+  /// Only the view knows which happened, and the difference is how the SMS sender id is doing.
+  Future<void> _verify({String entryMethod = 'button'}) async {
+    final next = await ref
+        .read(onboardingViewModelProvider.notifier)
+        .verifyOtp(entryMethod: entryMethod);
     if (!mounted) return;
     // Null means the flow stayed here — a rejected code, or the name sheet taking over.
     if (next == null) {

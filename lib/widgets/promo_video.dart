@@ -8,20 +8,30 @@ import 'safe_asset.dart';
 
 /// The paywall's promo clip.
 ///
-/// The URL comes from `app_config`, so it can be changed without a release — and is routinely
-/// empty, which is the normal state before any footage exists. Every failure path lands on the
-/// same poster card: an empty URL, a malformed one, a network that is down, a codec the device
-/// will not play. A paywall that cannot show its video must still take money.
+/// The player is **borrowed**, not built here: `promoVideoProvider` owns it and warms it from
+/// the onboarding phone sheet, so by the time the paywall builds the network round trip is
+/// usually finished and there is a frame to paint instead of a spinner. Which means this widget
+/// must never dispose what it is handed — the player outlives the paywall, and a second visit
+/// would otherwise attach to a dead one.
+///
+/// A null [controller] with [loading] set is the open still running. A null one without it is
+/// every other case at once — no video configured, a malformed URL, a network that is down, a
+/// codec the device will not play — and they share the one poster card, because a paywall that
+/// cannot show its video must still take money.
 class PromoVideo extends StatefulWidget {
   const PromoVideo({
     super.key,
-    required this.url,
+    required this.controller,
+    required this.loading,
     required this.muted,
-    this.aspectRatio = 16 / 10,
+    this.aspectRatio = 20 / 20,
   });
 
-  /// Empty means "no video configured" — the poster shows and no player is created.
-  final String url;
+  /// Owned by the caller. Started and stopped here, never disposed here.
+  final VideoPlayerController? controller;
+
+  /// Whether a player is still on its way. Decides between the spinner and the play button.
+  final bool loading;
 
   /// Driven by the speaker button in the paywall's top bar.
   final bool muted;
@@ -33,68 +43,49 @@ class PromoVideo extends StatefulWidget {
 }
 
 class _PromoVideoState extends State<PromoVideo> {
-  VideoPlayerController? _controller;
-  bool _failed = false;
-
   @override
   void initState() {
     super.initState();
-    _open();
+    _attach();
   }
 
   @override
   void didUpdateWidget(covariant PromoVideo oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.url != widget.url) {
-      _dispose();
-      _open();
+    // A player that has just arrived has to be started *and* have its volume set. Reacting only
+    // to a change in `muted` would leave a warmed clip playing silently for ever: the warm-up
+    // leaves it at volume zero, and its arrival is a change of controller, not of muted.
+    if (oldWidget.controller != widget.controller) {
+      _attach();
     } else if (oldWidget.muted != widget.muted) {
-      _controller?.setVolume(widget.muted ? 0 : 1);
+      widget.controller?.setVolume(widget.muted ? 0 : 1);
     }
   }
 
-  Future<void> _open() async {
-    final url = widget.url.trim();
-    final uri = Uri.tryParse(url);
-    if (url.isEmpty || uri == null || !uri.hasScheme) {
-      // Not a failure worth reporting — no video configured is the expected state today.
-      setState(() => _failed = url.isNotEmpty);
-      return;
-    }
-
-    final controller = VideoPlayerController.networkUrl(uri);
-    try {
-      await controller.initialize();
-      if (!mounted) {
-        await controller.dispose();
-        return;
-      }
-      await controller.setLooping(true);
-      await controller.setVolume(widget.muted ? 0 : 1);
-      await controller.play();
-      setState(() => _controller = controller);
-    } catch (error) {
-      debugPrint('[paywall] could not play $url: $error');
-      await controller.dispose();
-      if (mounted) setState(() => _failed = true);
-    }
-  }
-
-  void _dispose() {
-    _controller?.dispose();
-    _controller = null;
-    _failed = false;
+  /// Starts the borrowed player at the volume the paywall is asking for.
+  void _attach() {
+    final controller = widget.controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    controller.setVolume(widget.muted ? 0 : 1);
+    controller.play();
   }
 
   @override
   void dispose() {
-    _dispose();
+    // Stopped, not disposed — and this is load-bearing rather than tidy. The player belongs to
+    // the provider and survives this screen, so without it the clip would go on playing, with
+    // sound, behind whatever the user navigated to, and the next visit to the paywall would
+    // join it part-way through.
+    final controller = widget.controller;
+    controller?.setVolume(0);
+    controller?.pause();
+    controller?.seekTo(Duration.zero);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final controller = _controller;
+    final controller = widget.controller;
 
     return AspectRatio(
       aspectRatio: widget.aspectRatio,
@@ -105,7 +96,7 @@ class _PromoVideoState extends State<PromoVideo> {
         ),
         clipBehavior: Clip.antiAlias,
         child: controller == null
-            ? _Poster(loading: !_failed && widget.url.trim().isNotEmpty)
+            ? _Poster(loading: widget.loading)
             : FittedBox(
                 fit: BoxFit.cover,
                 child: SizedBox(

@@ -6,6 +6,8 @@ import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/entitlement.dart';
 import '../../data/providers.dart';
 import '../../widgets/astral_background.dart';
@@ -37,15 +39,23 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView> {
 
   bool _polling = false;
 
+  /// For `seconds_since_checkout` — how long after the UPI hand-off the money finally landed.
+  /// A confirmation that takes two minutes is a webhook problem, not a user problem.
+  final _arrivedAt = DateTime.now();
+
   @override
   void initState() {
     super.initState();
+    // The verdict the user was actually shown, which is not always the verdict that was true:
+    // the whole reason this screen polls is that `pending` frequently becomes `success`.
+    analytics.track(Ev.paymentStatusViewed, {P.outcome: widget.outcome.name});
+
     if (widget.outcome == PaymentOutcome.pending) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _pollUntilEntitled());
     }
   }
 
-  Future<void> _pollUntilEntitled() async {
+  Future<void> _pollUntilEntitled({String trigger = 'auto'}) async {
     if (_polling) return;
     _polling = true;
 
@@ -53,22 +63,54 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView> {
       await Future<void>.delayed(_pendingDelay);
       if (!mounted) return;
 
+      analytics.track(Ev.paymentStatusChecked, {
+        // `auto` is this screen's own timer; `manual` is the user tapping "Check again", which
+        // is a much stronger signal that the wait has gone on too long.
+        P.trigger: trigger,
+        P.attempt: i + 1,
+      });
+
       try {
         final user = await ref.read(subscriptionRepositoryProvider).refreshStatus();
         if (!mounted) return;
         if (user != null) ref.read(entitlementProvider.notifier).set(user);
         if (user?.entitled ?? false) {
+          // The payment did land, just not in time for the paywall's own poll. Counting these
+          // separately is what turns "our checkout is unreliable" into "our webhook is slow".
+          analytics.track(Ev.paymentConfirmedLate, {
+            P.attempt: i + 1,
+            P.trigger: trigger,
+            P.secondsSinceCheckout: _secondsWaiting,
+            // Read off the account rather than the paywall, which this screen never saw: the
+            // refreshed user knows what it is actually entitled to. This is the only success
+            // path that does not pass through `Payment Completed`, so without this property the
+            // Facebook sink would have to guess what the conversion was worth.
+            P.offerType: user!.inTrial ? 'trial' : 'plan',
+          });
           context.go(Routes.home);
           return;
         }
-      } catch (_) {
+      } catch (error) {
         // A dropped poll is not a failed payment. Keep asking — giving up here would tell a
         // paying user they had not paid.
+        analytics.track(Ev.entitlementPollFailed, {
+          P.attempt: i + 1,
+          P.error: error.toString(),
+        });
       }
     }
 
+    // Ran out of patience on a payment that may still be real. These are the users most likely
+    // to pay twice or ask for a refund, so they are worth being able to find.
+    analytics.track(Ev.paymentStatusExhausted, {
+      P.attempt: _pendingAttempts,
+      P.secondsSinceCheckout: _secondsWaiting,
+    });
+
     _polling = false;
   }
+
+  int get _secondsWaiting => DateTime.now().difference(_arrivedAt).inSeconds;
 
   @override
   Widget build(BuildContext context) {
@@ -135,7 +177,13 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView> {
                 PrimaryButton(label: action, onPressed: _onAction),
                 if (widget.outcome != PaymentOutcome.success)
                   TextButton(
-                    onPressed: () => context.go(Routes.subscribe),
+                    onPressed: () {
+                      analytics.track(Ev.retryPaymentTapped, {
+                        P.outcome: widget.outcome.name,
+                        P.source: 'back_to_plans',
+                      });
+                      context.go(Routes.subscribe);
+                    },
                     child: Text(
                       'Back to plans',
                       style: AppText.meta.copyWith(color: AppColors.gold),
@@ -156,8 +204,10 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView> {
       case PaymentOutcome.success:
         context.go(Routes.home);
       case PaymentOutcome.pending:
-        _pollUntilEntitled();
+        analytics.track(Ev.paymentStatusChecked, {P.trigger: 'manual'});
+        _pollUntilEntitled(trigger: 'manual');
       case PaymentOutcome.failed:
+        analytics.track(Ev.retryPaymentTapped, {P.outcome: widget.outcome.name});
         context.go(Routes.subscribe);
     }
   }

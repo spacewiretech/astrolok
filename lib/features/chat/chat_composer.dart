@@ -4,6 +4,8 @@ import '../../app/assets.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/models/astro_message.dart';
 import '../../widgets/safe_asset.dart';
 import 'chat_copy.dart';
@@ -24,7 +26,10 @@ class ChatComposer extends StatefulWidget {
   });
 
   final ChatState state;
-  final ValueChanged<String> onSend;
+  /// The second argument names the affordance the message came from — `composer`, `quick_reply`
+  /// or `birth_time`. Only this widget knows which, and the three are very different levels of
+  /// intent: a tapped suggestion is nearly free, a typed sentence is not.
+  final void Function(String message, String entry) onSend;
 
   /// Told once the returned draft has been put back in the field, so it is not restored again on
   /// the next rebuild.
@@ -58,12 +63,12 @@ class _ChatComposerState extends State<ChatComposer> {
     super.dispose();
   }
 
-  void _send([String? override]) {
+  void _send([String? override, String entry = 'composer']) {
     final message = (override ?? _controller.text).trim();
     if (message.isEmpty || !widget.state.canSend) return;
 
     _controller.clear();
-    widget.onSend(message);
+    widget.onSend(message, entry);
   }
 
   Future<void> _pickTime() async {
@@ -79,7 +84,7 @@ class _ChatComposerState extends State<ChatComposer> {
     // the time back out of the sentence.
     final hour = picked.hour.toString().padLeft(2, '0');
     final minute = picked.minute.toString().padLeft(2, '0');
-    _send('I was born at $hour:$minute.');
+    _send('I was born at $hour:$minute.', 'birth_time');
   }
 
   @override
@@ -99,12 +104,25 @@ class _ChatComposerState extends State<ChatComposer> {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (state.askFor == AskFor.birthTime) ...[
-            _TimeRequest(onPick: _pickTime, onUnknown: () => _send(ChatCopy.birthTimeUnknown)),
+            _TimeRequest(
+              onPick: _pickTime,
+              onUnknown: () => _send(ChatCopy.birthTimeUnknown, 'birth_time'),
+            ),
             const SizedBox(height: 10),
           ],
 
           if (state.options.isNotEmpty) ...[
-            _QuickReplies(options: state.options, onPick: _send),
+            _QuickReplies(
+              options: state.options,
+              onPick: (option, index) {
+                analytics.track(Ev.chatQuickReplyTapped, {
+                  P.optionIndex: index,
+                  P.label: option,
+                  P.optionCount: state.options.length,
+                });
+                _send(option, 'quick_reply');
+              },
+            ),
             const SizedBox(height: 10),
           ],
 
@@ -131,7 +149,7 @@ class _QuickReplies extends StatelessWidget {
   const _QuickReplies({required this.options, required this.onPick});
 
   final List<String> options;
-  final ValueChanged<String> onPick;
+  final void Function(String option, int index) onPick;
 
   @override
   Widget build(BuildContext context) {
@@ -141,13 +159,13 @@ class _QuickReplies extends StatelessWidget {
         spacing: 8,
         runSpacing: 8,
         children: [
-          for (final option in options)
+          for (final (index, option) in options.indexed)
             Material(
               color: AppColors.goldWash,
               borderRadius: AppShape.pill,
               clipBehavior: Clip.antiAlias,
               child: InkWell(
-                onTap: () => onPick(option),
+                onTap: () => onPick(option, index),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   child: Text(

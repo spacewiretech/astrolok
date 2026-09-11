@@ -1,29 +1,122 @@
+import 'dart:async';
+
+// For `mapEquals`, which keeps the config refresh below from rebuilding Home's watchers on
+// every visit when nothing in the table actually moved.
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/assets.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/att_consent.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
 import '../../data/entitlement.dart';
+import '../../data/providers.dart';
 import '../../widgets/astral_background.dart';
 import '../../widgets/brand_logo.dart';
 import '../../widgets/promo_carousel.dart';
 import '../../widgets/reading_card.dart';
 import '../../widgets/safe_asset.dart';
+import '../chat/chat_threads_viewmodel.dart';
 
 /// The signed-in, paid-for home.
 ///
 /// Every row here now goes somewhere. The "coming soon" snackbar this screen used to answer
 /// with is gone, and with it the last unbuilt thing on Home.
-class HomeView extends ConsumerWidget {
+class HomeView extends ConsumerStatefulWidget {
   const HomeView({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeView> createState() => _HomeViewState();
+}
+
+class _HomeViewState extends ConsumerState<HomeView> {
+  /// So the view event fires once per visit rather than on every rebuild.
+  bool _reported = false;
+
+  /// How stale the config may be before landing on Home goes and asks again.
+  ///
+  /// Home is the one screen every session passes through, so it is where a dashboard edit gets
+  /// its chance to reach an installed app. Without this, only a *new key* triggered a refetch
+  /// and a changed **value** — a language added to `chat_languages`, a price corrected — stayed
+  /// invisible for the whole six-hour cache TTL, which made "edit the dashboard, no release"
+  /// true exactly once per key and false every time after.
+  ///
+  /// A minute, matching `loadConfig`'s TTL in the Edge Functions, so the client and the server
+  /// pick up an edit at the same rate — the language picker and the prompt that has to honour it
+  /// cannot then disagree for long. It is a window rather than an unconditional fetch because
+  /// Home is also every back-navigation's destination, and those arrive in bursts.
+  static const _configMaxAge = Duration(minutes: 1);
+
+  /// Re-reads `app_config`, and rebuilds the screens that show it only if something moved.
+  Future<void> _refreshConfig() async {
+    final before = ref.read(appConfigProvider).valueOrNull;
+
+    final Map<String, String> after;
+    try {
+      after = await ref.read(appConfigRepositoryProvider).load(maxAge: _configMaxAge);
+    } catch (error) {
+      // The cache is still serving. A config refresh is not worth a message to the user.
+      debugPrint('[home] config refresh failed: $error');
+      return;
+    }
+
+    // Invalidating unconditionally would rebuild every price label and menu row on each visit to
+    // Home for nothing. Riverpod keeps the previous value while the provider re-resolves, so a
+    // genuine change swaps in without the screens flashing back to their shipped defaults.
+    if (!mounted || before == null || mapEquals(before, after)) return;
+    ref.invalidate(appConfigProvider);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final user = ref.watch(entitlementProvider);
+
+    // The conversations, fetched here rather than by the drawer that shows them. The list is the
+    // same on every open, and loading it while the user is reading Home is the difference between
+    // a drawer that opens and a drawer that loads. `read`, not `watch` — Home has nothing to
+    // redraw when it lands, and the provider is kept alive, so this one read outlives the screen.
+    final threads = ref.read(chatThreadsProvider);
+
+    // Once per visit, not per rebuild. What the user already has decides what Home is for: an
+    // account with three readings and a chat history is a returning user, and one with none is
+    // still deciding whether the app does anything.
+    if (!_reported) {
+      _reported = true;
+      analytics.track(Ev.homeViewed, {
+        P.threadCount: threads.valueOrNull?.length,
+        P.billingState: user?.billingState?.name,
+        P.paymentType: user?.paymentType.name,
+      });
+      if (user?.billingState != null) {
+        // Shown while there is still time to fix the mandate. How many people see this and how
+        // many act on it is the difference between a warning and decoration.
+        analytics.track(Ev.billingIssueShown, {P.billingState: user!.billingState!.name});
+      }
+
+      // The paywall asks first for anyone on the purchase path; this covers the already-entitled
+      // user who lands straight here and never sees one. Idempotent — iOS only prompts while the
+      // status is undetermined, and the helper guards against a second request in-process.
+      unawaited(ensureTrackingConsent());
+
+      // The paywall is behind this user, so the promo player onboarding warmed is a video
+      // decoder held open for nothing. Dropping it is safe precisely because nothing is
+      // listening any more: Riverpod disposes an invalidated provider without rebuilding it when
+      // it has no listeners, so this frees the player rather than starting a fresh download. A
+      // trial that lapses mid-session bounces back to /subscribe and opens a new one.
+      //
+      // After the frame rather than during it — invalidating a provider mid-build is the hazard.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) ref.invalidate(promoVideoProvider);
+      });
+
+      unawaited(_refreshConfig());
+    }
 
     return Scaffold(
       body: AstralBackground(
@@ -36,7 +129,10 @@ class HomeView extends ConsumerWidget {
                 children: [
                   const BrandLogo(size: 42),
                   const Spacer(),
-                  _ProfileButton(onTap: () => context.push(Routes.profile)),
+                  _ProfileButton(onTap: () {
+                    analytics.track(Ev.elementTapped, {P.elementId: 'profile_button'});
+                    context.push(Routes.profile);
+                  }),
                 ],
               ),
               const SizedBox(height: 28),
@@ -63,19 +159,19 @@ class HomeView extends ConsumerWidget {
                     // screen reader gets. It has to say what the image says.
                     label: 'Chat with Astro. Ask anything about your life, love, career or '
                         'future. Start chat.',
-                    onTap: () => context.push(Routes.chat),
+                    onTap: () => _openReading(context, Routes.chat, 'chat', 'carousel'),
                   ),
                   PromoSlide(
                     image: Img.promoPalmReading,
                     label: "Palm Reading. Your palm holds a story. Let's discover yours. "
                         'Discover now.',
-                    onTap: () => context.push(Routes.palmCapture),
+                    onTap: () => _openReading(context, Routes.palmCapture, 'palm', 'carousel'),
                   ),
                   PromoSlide(
                     image: Img.promoFaceReading,
                     label: "Face Reading. Your face holds a story. Let's discover yours. "
                         'Discover now.',
-                    onTap: () => context.push(Routes.faceCapture),
+                    onTap: () => _openReading(context, Routes.faceCapture, 'face', 'carousel'),
                   ),
                 ],
               ),
@@ -89,7 +185,7 @@ class HomeView extends ConsumerWidget {
                 title: 'Chat with Astro',
                 subtitle: 'Ask anything about your life, love,career or future',
                 fallbackIcon: Icons.chat_bubble_outline_rounded,
-                onTap: () => context.push(Routes.chat),
+                onTap: () => _openReading(context, Routes.chat, 'chat', 'card'),
               ),
               const SizedBox(height: 14),
               ReadingCard(
@@ -97,7 +193,7 @@ class HomeView extends ConsumerWidget {
                 title: 'Palm Reading',
                 subtitle: 'Discover what your palm reveals about your life.',
                 fallbackIcon: Icons.back_hand_outlined,
-                onTap: () => context.push(Routes.palmCapture),
+                onTap: () => _openReading(context, Routes.palmCapture, 'palm', 'card'),
               ),
               const SizedBox(height: 14),
               ReadingCard(
@@ -105,13 +201,31 @@ class HomeView extends ConsumerWidget {
                 title: 'Face Reading',
                 subtitle: 'Discover what your face reveals.',
                 fallbackIcon: Icons.face_retouching_natural_outlined,
-                onTap: () => context.push(Routes.faceCapture),
+                onTap: () => _openReading(context, Routes.faceCapture, 'face', 'card'),
               ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  /// Opens one of the three destinations, recording which surface sent them.
+  ///
+  /// The carousel and the cards below it advertise exactly the same three things, so without
+  /// [surface] the two are one number and there is no way to tell whether the strip at the top
+  /// of the screen earns the space it takes.
+  void _openReading(
+    BuildContext context,
+    String route,
+    String destination,
+    String surface,
+  ) {
+    analytics.track(Ev.readingCardTapped, {
+      P.destination: destination,
+      P.source: surface,
+    });
+    context.push(route);
   }
 }
 

@@ -223,6 +223,17 @@ export interface CreateSubscriptionInput {
   customerName: string;
   customerPhone: string;
   customerEmail: string;
+
+  /**
+   * Charged and kept at mandate time. The ₹3 trial fee for a new account, the full plan price for
+   * a returning subscriber who has already spent their trial.
+   *
+   * Chosen by `subscription-start` from the user's own row rather than defaulted from settings
+   * here — a caller that could omit it would silently sell the trial to everyone, which is the
+   * bug this parameter exists to close.
+   */
+  authorizationAmount: number;
+
   firstChargeTime: Date;
   sessionExpiry: Date;
   returnUrl: string;
@@ -247,9 +258,10 @@ export function createSubscription(
       // path by which a request body can change what a subscriber is billed.
       plan_details: { plan_id: settings.planId },
       authorization_details: {
-        authorization_amount: settings.trialAmount,
-        // False is what turns the authorisation into a kept trial fee. Left true, Cashfree
-        // refunds it automatically and the ₹3 the user was promised would silently come back.
+        authorization_amount: input.authorizationAmount,
+        // False is what turns the authorisation into a kept charge. Left true, Cashfree refunds
+        // it automatically — which would give back the ₹3 the user was promised, and give back a
+        // returning subscriber's whole first month.
         authorization_amount_refund: false,
         payment_methods: ["upi"],
         upi: {
@@ -399,6 +411,76 @@ export function isLiveStatus(status: string): boolean {
   ].includes(status);
 }
 
+/**
+ * Cashfree names customer-initiated states separately from merchant-initiated ones.
+ *
+ * A user who revokes the UPI mandate in their own PSP app — Mandates > Active Mandates > Cancel —
+ * lands the subscription in `CUSTOMER_CANCELLED`, not `CANCELLED`; pausing it there gives
+ * `CUSTOMER_PAUSED`, not `PAUSED`. Only the merchant-initiated words come out of our own
+ * `subscription-cancel` call, so those were the only ones this backend ever learned, and every
+ * `status === "CANCELLED"` comparison silently fell through for the far more common case: the
+ * user cancelled the mandate rather than asking us to.
+ *
+ * The consequence was not only a missing analytics event. `userUpdatesFor` hit its `default:`
+ * branch, so the account kept `payment_type` and stayed entitled through a subscription the bank
+ * would never debit again.
+ *
+ * These are predicates rather than a normalisation step on purpose: `subscriptions.status` stores
+ * whatever word Cashfree used, which is the record of what the gateway actually said, and
+ * collapsing the pair on the way in would throw away the one bit that says who did it.
+ */
+export function isCancelledStatus(status: string): boolean {
+  return status === "CANCELLED" || status === "CUSTOMER_CANCELLED";
+}
+
+export function isPausedStatus(status: string): boolean {
+  return status === "PAUSED" || status === "CUSTOMER_PAUSED";
+}
+
+/**
+ * Ran its course, or was never authorised in time. `LINK_EXPIRED` is the non-seamless twin of
+ * `EXPIRED` — the authorisation link went unused — and means the same thing to entitlement.
+ */
+export function isExpiredStatus(status: string): boolean {
+  return status === "COMPLETED" || status === "EXPIRED" || status === "LINK_EXPIRED";
+}
+
+/**
+ * How far behind Cashfree's clock this delivery arrived, in seconds.
+ *
+ * Cashfree stamps `x-webhook-timestamp` in **milliseconds**. Reading it as seconds and scaling by
+ * a thousand puts the result about 1.79e12 out — past `int4`, so writing it to
+ * `payment_events.skew_seconds` failed the whole audit insert, the handler answered 500, and
+ * Cashfree redelivered every minute forever. That is what silently killed the webhook path: the
+ * signature verified, the payload was fine, and the delivery was thrown away over a diagnostic
+ * column nothing reads.
+ *
+ * So: detect the unit rather than assume it, and clamp. A seconds epoch is ~1.7e9 and a
+ * milliseconds epoch ~1.7e12, so anything past 1e11 is milliseconds and will stay so for
+ * millennia. The clamp is the real lesson — a number recorded only for diagnostics must never be
+ * able to reject the delivery it describes.
+ */
+export function skewSeconds(timestamp: string | null, now: number = Date.now()): number | null {
+  if (!timestamp) return null;
+
+  const stamped = Number(timestamp);
+  if (!Number.isFinite(stamped) || stamped <= 0) return null;
+
+  const ms = stamped > 1e11 ? stamped : stamped * 1000;
+  const seconds = Math.round((now - ms) / 1000);
+
+  if (!Number.isFinite(seconds)) return null;
+  return Math.max(-MAX_SKEW_SECONDS, Math.min(MAX_SKEW_SECONDS, seconds));
+}
+
+/** `int4`'s ceiling, which is what `payment_events.skew_seconds` is declared as. */
+const MAX_SKEW_SECONDS = 2_147_483_647;
+
+/** Who ended it, for the one property every cancellation report breaks down by. */
+export function cancelledBy(status: string): "customer" | "merchant" {
+  return status === "CUSTOMER_CANCELLED" ? "customer" : "merchant";
+}
+
 // ---------------------------------------------------------------- webhooks
 
 const encoder = new TextEncoder();
@@ -453,10 +535,50 @@ export async function dedupeKey(
   timestamp: string,
   rawBody: string,
 ): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    encoder.encode(`${eventType}|${timestamp}|${rawBody}`),
-  );
+  return await sha256Hex(`${eventType}|${timestamp}|${rawBody}`);
+}
+
+/**
+ * Stable identity for the *notification*, as opposed to [dedupeKey]'s identity for one delivery.
+ *
+ * The difference is the whole point. `x-webhook-timestamp` is stamped per delivery attempt, so
+ * every retry of the same notification produces a different `dedupeKey` — correct for the money
+ * path, where a retry after a failure is meant to run again, and catastrophic for analytics,
+ * where it means a webhook Cashfree cannot stop retrying emits a fresh, un-dedupable Mixpanel
+ * event every minute until someone notices. This keys on what the notification is *about*, so
+ * the tenth delivery of a failed debit is recognisably the same failed debit as the first.
+ *
+ * Payment, refund and dispute all carry an id of their own and are keyed on it plus the status —
+ * the same shape the events in `subscription_sync` already use for their `$insert_id`. Anything
+ * else falls back to hashing the body, which is never *less* precise than the delivery key it
+ * replaces and still collapses the retries whenever Cashfree resends identical bytes.
+ *
+ * Refund and dispute are checked before payment, matching the order the handler itself branches
+ * in: both name a payment as well as themselves, so keying on the payment first would give two
+ * partial refunds of one charge the same identity and silence the second.
+ *
+ * Deliberately not keyed on the subscription id for the bare status events: that would collapse
+ * every notification a mandate ever produces into a single identity.
+ */
+export async function notificationKey(
+  eventType: string,
+  payload: Record<string, unknown>,
+  rawBody: string,
+): Promise<string> {
+  const refund = refundFrom(payload);
+  if (refund) return `${eventType}|refund:${refund.cfRefundId}:${refund.status}`;
+
+  const dispute = disputeFrom(payload);
+  if (dispute) return `${eventType}|dispute:${dispute.cfDisputeId}:${dispute.status}`;
+
+  const payment = paymentFrom(payload);
+  if (payment) return `${eventType}|pay:${payment.cfPaymentId}:${payment.status}`;
+
+  return `${eventType}|body:${await sha256Hex(rawBody)}`;
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(input));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
@@ -477,15 +599,27 @@ export function subscriptionIdsFrom(
     payload,
   ];
 
+  // The camelCase spellings are the legacy Subscriptions API's, kept for the same reason the
+  // event type is read from `type ?? event`: an endpoint configured against the older API version
+  // sends `subscriptionId` where this one sends `subscription_id`, and a delivery whose id is not
+  // found is not an error — it falls through to the `ignored` branch and is acknowledged, so a
+  // mandate would go on being cancelled with nothing here ever noticing.
+  const OURS = ["subscription_id", "subscriptionId"];
+  const THEIRS = ["cf_subscription_id", "cfSubscriptionId", "subReferenceId"];
+
   let subscriptionId: string | null = null;
   let cfSubscriptionId: string | null = null;
 
   for (const source of candidates) {
-    if (!subscriptionId && typeof source.subscription_id === "string") {
-      subscriptionId = source.subscription_id;
+    for (const key of OURS) {
+      if (!subscriptionId && typeof source[key] === "string") {
+        subscriptionId = source[key] as string;
+      }
     }
-    if (!cfSubscriptionId && source.cf_subscription_id != null) {
-      cfSubscriptionId = String(source.cf_subscription_id);
+    for (const key of THEIRS) {
+      if (!cfSubscriptionId && source[key] != null) {
+        cfSubscriptionId = String(source[key]);
+      }
     }
   }
 

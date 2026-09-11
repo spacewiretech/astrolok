@@ -340,6 +340,38 @@ void main() {
       });
     }
 
+    testWidgets('opens on the list it already has, without fetching again', (tester) async {
+      // The whole point of keeping the list alive. It used to be fetched on every open, because a
+      // drawer is only mounted while it is open and an auto-disposed list died with it.
+      final repository = _StubChatRepository(threadList: threads);
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(repository));
+
+      Future<void> openDrawer() async {
+        await tester.tap(find.bySemanticsLabel('Your conversations'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+      }
+
+      // The scrim, on the side an end drawer did not come from.
+      Future<void> closeDrawer() async {
+        await tester.tapAt(const Offset(8, 300));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+      }
+
+      await openDrawer();
+      expect(find.text('Your Previous Birth'), findsOneWidget);
+
+      await closeDrawer();
+      expect(find.text('New chat'), findsNothing);
+
+      await openDrawer();
+      expect(find.text('Your Previous Birth'), findsOneWidget);
+
+      // Once, on arrival at the chat — not once per open.
+      expect(repository.threadCalls, 1);
+    });
+
     testWidgets('a conversation deleted elsewhere opens a new one', (tester) async {
       // Real whenever someone deletes a thread on another device, or it ages out. The user still
       // wants to talk to Astro; they just cannot have that conversation back.
@@ -449,13 +481,19 @@ class _StubChatRepository implements ChatRepository {
   final List<AstroFact> facts;
   final List<ChatThreadSummary> threadList;
 
+  /// How many times the sidebar has been asked for. The drawer is opened and closed a lot, and
+  /// this is what proves it is not fetching every time.
+  int threadCalls = 0;
+
   @override
   Future<ChatSnapshot> history(String threadId) async =>
       ChatSnapshot(messages: messages, facts: facts, remaining: remaining);
 
   @override
-  Future<ChatThreadList> threads() async =>
-      ChatThreadList(threads: threadList, facts: facts, remaining: remaining);
+  Future<ChatThreadList> threads() async {
+    threadCalls++;
+    return ChatThreadList(threads: threadList, facts: facts, remaining: remaining);
+  }
 
   @override
   Future<ChatReply> send(String message, {String? threadId}) async =>

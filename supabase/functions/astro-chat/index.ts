@@ -1,10 +1,11 @@
 import {
   buildUserPrompt,
   CHAT_SCHEMA,
+  chatSystemPrompt,
   normaliseChatReply,
-  SYSTEM_PROMPT,
 } from "../_shared/astro_chat.ts";
-import { loadConfig } from "../_shared/config.ts";
+import { resolveLanguage } from "../_shared/chat_language.ts";
+import { configSetting, loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
 import {
@@ -253,16 +254,25 @@ Deno.serve(async (req) => {
     return fail("server_error", "Something went wrong. Please try again.", 500);
   }
 
+  // Both from `app_config`, so the answer's shape and its language are dashboard edits rather
+  // than deploys — `chat_prompt_version` is the rollback for the craft, and a language dropped
+  // from `chat_languages` degrades this user to the default instead of to nothing.
+  const language = resolveLanguage(user.language, config);
+
   try {
     const settings = geminiSettings(config);
     const result = await converse(settings, {
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt: chatSystemPrompt({
+        version: configSetting(config, "chat_prompt_version"),
+        language,
+      }),
       schema: CHAT_SCHEMA,
       history,
       userPrompt: buildUserPrompt(message, {
         name: firstName(user.name),
         age: ageFrom(user.dob),
         chart,
+        birthPlace: user.birth_place,
         facts,
         palmSummary: summarise("palm", palmRow, "strongest_trait_title"),
         faceSummary: summarise("face", faceRow, "core_trait_title"),
@@ -277,7 +287,7 @@ Deno.serve(async (req) => {
     console.log(
       `astro-chat ${pending.id}: model=${result.model} latency=${result.latencyMs}ms ` +
         `thread=${thread.id} history=${history.length} facts=${facts.length} ` +
-        `chart=${chart ? "yes" : "no"} ` +
+        `chart=${chart ? "yes" : "no"} language=${language} ` +
         `sections=${reply?.sections.length ?? "-"} remembered=${reply?.remember.length ?? "-"}`,
     );
 

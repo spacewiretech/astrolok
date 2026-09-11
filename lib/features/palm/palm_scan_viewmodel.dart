@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/palm_repository.dart';
 import 'palm_capture_viewmodel.dart';
@@ -43,9 +45,14 @@ class PalmScanViewModel extends AutoDisposeNotifier<PalmScanState> {
     final request = _request;
     if (request == null) return;
 
+    _attempt += 1;
     state = PalmScanState(startedAt: DateTime.now());
     await _run();
   }
+
+  /// Which try this is. A reading that only succeeds on the second attempt is a very different
+  /// product experience from one that succeeds first time, and both end as `Reading Succeeded`.
+  int _attempt = 1;
 
   Future<void> _run() async {
     final request = _request;
@@ -55,6 +62,13 @@ class PalmScanViewModel extends AutoDisposeNotifier<PalmScanState> {
     state = state.copyWith(stage: PalmPrepStage.sent, clearError: true, slow: false);
 
     final startedAt = DateTime.now();
+
+    analytics.track(Ev.readingScanStarted, {
+      P.feature: ReadingFeature.palm,
+      P.focus: request.focus.name,
+      P.bytes: request.image.length,
+      P.attempt: _attempt,
+    });
 
     try {
       final reading = await ref
@@ -82,6 +96,18 @@ class PalmScanViewModel extends AutoDisposeNotifier<PalmScanState> {
         reading: saved,
         outcome: PalmScanOutcome.ready,
       );
+
+      analytics.track(Ev.readingSucceeded, {
+        P.feature: ReadingFeature.palm,
+        P.readingId: saved.id,
+        P.focus: request.focus.name,
+        P.lineCount: saved.lines.length,
+        P.attempt: _attempt,
+        // Measured to the model's answer, not to the screen: `_holdMinimum` pads short waits so
+        // the progress animation reads as work, and including that padding would flatter the
+        // number that actually matters.
+        P.ms: DateTime.now().difference(startedAt).inMilliseconds,
+      });
     } on NoPalmDetectedException catch (e) {
       // Nothing went wrong — the photo simply was not a palm — so the capture is dropped and
       // the user goes back to the viewfinder rather than being shown an error state.
@@ -120,12 +146,31 @@ class PalmScanViewModel extends AutoDisposeNotifier<PalmScanState> {
     }
   }
 
+  /// The one exit every failure takes, so no branch can end without saying why.
+  ///
+  /// [outcome] is the honest reason: `rejected` is a photo that was not a palm and is not a
+  /// system failure at all, `limitReached` is the daily quota, `notEntitled` and `signedOut` are
+  /// the gate, and only `failed` is something broken.
   Future<void> _settle(
     DateTime startedAt,
     String message,
     PalmScanOutcome outcome, {
     bool stay = false,
   }) async {
+    // Before the dwell padding, so a failure's `ms` is the real time to the answer rather than
+    // the time the animation was held on screen.
+    analytics.track(Ev.readingFailed, {
+      P.feature: ReadingFeature.palm,
+      P.outcome: outcome.name,
+      P.message: message,
+      P.focus: _request?.focus.name,
+      P.attempt: _attempt,
+      // Whether the user is offered a retry. `false` here is a dead end, and a dead end after a
+      // long wait is the worst moment this flow has.
+      P.blocked: !stay,
+      P.ms: DateTime.now().difference(startedAt).inMilliseconds,
+    });
+
     await _holdMinimum(startedAt);
     if (_disposed) return;
 

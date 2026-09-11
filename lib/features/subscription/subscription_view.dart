@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,6 +11,9 @@ import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
 import '../../data/models/subscription_offer.dart';
 import '../../data/models/upi_app.dart';
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/att_consent.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/app_config_repository.dart';
 import '../../widgets/astral_background.dart';
@@ -16,6 +21,7 @@ import '../../widgets/feature_pills.dart';
 import '../../widgets/primary_button.dart';
 import '../../widgets/promo_video.dart';
 import '../../widgets/safe_asset.dart';
+import '../chat/chat_viewmodel.dart';
 import 'subscription_viewmodel.dart';
 
 /// The paywall.
@@ -30,9 +36,16 @@ class SubscriptionView extends ConsumerStatefulWidget {
 }
 
 class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
-  /// Starts muted. A paywall that plays sound the instant it opens is the fastest way to make
-  /// someone close the app.
-  bool _muted = true;
+  /// Starts with sound. The clip is the pitch, and this is the one screen that has earned the
+  /// interruption — the speaker button in the top bar is there for anyone who disagrees.
+  ///
+  /// The player is warmed during onboarding but deliberately left silent and paused there, so
+  /// nothing is heard until the paywall itself starts it.
+  bool _muted = false;
+
+  /// So the view event fires once per visit rather than on every rebuild — and once the offer
+  /// has actually loaded, because "saw the paywall" and "saw a spinner" are different things.
+  bool _viewReported = false;
 
   static const _features = [
     Feature(
@@ -60,8 +73,35 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(subscriptionViewModelProvider);
-    final config = ref.watch(appConfigProvider).valueOrNull ?? defaultAppConfig;
+    final config = ref.watch(appConfigProvider).valueOrNull ?? shippedAppConfig;
     final offer = state.offer;
+
+    // Warmed back at the onboarding phone sheet, so this is usually already resolved and the
+    // video card paints a frame on the first build rather than a spinner.
+    //
+    // `valueOrNull` on its own would not be safe: while the provider is refreshing — a changed
+    // `paywall_video_url` — Riverpod keeps handing back the previous value, and that player has
+    // already been disposed. Mounting a `VideoPlayer` around a disposed controller trips
+    // `ChangeNotifier`'s not-disposed assert as it adds its listener.
+    final promo = ref.watch(promoVideoProvider);
+    final promoController = promo.isLoading || promo.hasError ? null : promo.valueOrNull;
+
+    // The denominator of the whole purchase funnel.
+    if (!_viewReported && !state.loading) {
+      _viewReported = true;
+      analytics.track(Ev.paywallViewed, {
+        P.trialAvailable: state.trialAvailable,
+        P.state: offer == null ? 'error' : 'loaded',
+        P.upiAppCount: state.upiApps.length,
+        P.paymentType: state.user?.paymentType.name,
+      });
+
+      // iOS only, and deliberately here rather than at launch: this is the last screen before a
+      // purchase, so a granted IDFA still reaches the conversion event, and the user has already
+      // been through onboarding rather than meeting a permission dialog cold. Not awaited — the
+      // paywall must paint whether or not the user has answered.
+      unawaited(ensureTrackingConsent());
+    }
 
     return Scaffold(
       body: AstralBackground(
@@ -85,7 +125,8 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
                             _RatingRow(config: config),
                             const SizedBox(height: 20),
                             PromoVideo(
-                              url: config.configString('paywall_video_url'),
+                              controller: promoController,
+                              loading: promo.isLoading,
                               muted: _muted,
                             ),
                             const SizedBox(height: 24),
@@ -99,7 +140,7 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
                               // in the mockup.
                               Text(
                                 offer.consent,
-                                style: AppText.legal,
+                                style: AppText.legal.copyWith(fontSize: 10),
                                 textAlign: TextAlign.center,
                               ),
                             ],
@@ -131,7 +172,10 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
       child: Row(
         children: [
           _CircleButton(
-            onTap: () => setState(() => _muted = !_muted),
+            onTap: () {
+              analytics.track(Ev.promoVideoToggled, {P.muted: !_muted});
+              setState(() => _muted = !_muted);
+            },
             semanticLabel: _muted ? 'Unmute video' : 'Mute video',
             child: SafeSvg(
               _muted ? Svg.soundOff : Svg.soundOn,
@@ -146,7 +190,7 @@ class _SubscriptionViewState extends ConsumerState<SubscriptionView> {
             ),
           ),
           const Spacer(),
-          _LogOutButton(),
+          // _LogOutButton(),
         ],
       ),
     );
@@ -207,7 +251,7 @@ class _TrialHeadline extends StatelessWidget {
         Flexible(
           child: Text(
             '$days-Day Trial for',
-            style: AppText.display,
+            style: AppText.display.copyWith(fontSize: 16),
             textAlign: TextAlign.center,
           ),
         ),
@@ -220,7 +264,7 @@ class _TrialHeadline extends StatelessWidget {
           ),
           child: Text(
             offer.trialPrice,
-            style: AppText.display.copyWith(color: Colors.white, fontSize: 24),
+            style: AppText.display.copyWith(color: Colors.white, fontSize: 16),
           ),
         ),
       ],
@@ -380,10 +424,18 @@ class _UpiChip extends ConsumerWidget {
   }
 
   Future<void> _pick(BuildContext context, WidgetRef ref) async {
+    analytics.track(Ev.upiPickerOpened, {
+      P.appId: state.selectedAppId,
+      P.availableCount: state.upiApps.length,
+    });
+
     final chosen = await showModalBottomSheet<UpiApp>(
       context: context,
       backgroundColor: AppColors.surface,
       barrierColor: AppColors.scrim,
+      // Named so the navigator observer reports it as a real surface rather than an anonymous
+      // route. Picking a UPI app is one of the more interesting things a user does here.
+      routeSettings: const RouteSettings(name: 'upi-picker'),
       shape: const RoundedRectangleBorder(borderRadius: AppShape.sheetTop),
       builder: (context) => SafeArea(
         child: Column(
@@ -455,7 +507,14 @@ class _LogOutButton extends ConsumerWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () async {
+          // Before the reset, or it would be attributed to the fresh anonymous identity rather
+          // than to the account that actually left.
+          analytics.track(Ev.signedOut, {P.source: 'paywall'});
           await ref.read(authRepositoryProvider).signOut();
+          forgetConversations(ref);
+          // Mints a new anonymous id and drops the identity super properties, so the next user
+          // of this handset does not inherit the last one's account.
+          analytics.reset();
           if (context.mounted) context.go(Routes.onboarding);
         },
         child: Padding(

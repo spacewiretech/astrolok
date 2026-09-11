@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../app/theme/app_colors.dart';
+import '../data/analytics/analytics.dart';
+import '../data/analytics/analytics_events.dart';
 
 /// Shows a snackbar, replacing whatever is already up.
 ///
@@ -14,7 +16,21 @@ void showAppSnackBar(
   /// Tints the bar red. For "we couldn't read that photo", which the user has to act on.
   bool error = false,
   Duration duration = const Duration(seconds: 4),
+
+  /// Where this message came from, when the caller knows something the text does not — which
+  /// screen the observer reports is often enough, but "the save failed" and "the upload failed"
+  /// on one screen are different problems.
+  String? source,
 }) {
+  // Only the failures. A confirmation snackbar is a success the feature already tracked under a
+  // better name; an error one is frequently the only record that anything went wrong at all.
+  if (error) {
+    analytics.track(Ev.errorShown, {
+      P.message: message,
+      P.source: source,
+    });
+  }
+
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(

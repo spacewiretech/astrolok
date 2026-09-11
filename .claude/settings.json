@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(export DENO_INSTALL=/private/tmp/claude-501/-Users-ayushchauhan-StudioProjects-astrolok/29619d29-374b-440e-9f2d-6c782af6cd2c/scratchpad/deno)",
+      "Bash(curl -fsSL https://deno.land/install.sh)",
+      "Bash(/private/tmp/claude-501/-Users-ayushchauhan-StudioProjects-astrolok/29619d29-374b-440e-9f2d-6c782af6cd2c/scratchpad/deno/bin/deno test *)",
+      "Bash(/private/tmp/claude-501/-Users-ayushchauhan-StudioProjects-astrolok/29619d29-374b-440e-9f2d-6c782af6cd2c/scratchpad/deno/bin/deno check *)",
+      "Bash(supabase --version)",
+      "Bash(supabase migration *)",
+      "Bash(supabase db *)",
+      "Bash(supabase functions *)",
+      "Bash(command -v supabase npx bun deno)",
+      "Bash(command -v brew)",
+      "Bash(/opt/homebrew/bin/supabase --version)",
+      "Bash(timeout 90 /opt/homebrew/bin/supabase migration list)",
+      "Bash(/opt/homebrew/bin/supabase migration *)",
+      "Bash(/opt/homebrew/bin/supabase db *)"
+    ]
+  }
+}

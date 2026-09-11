@@ -147,3 +147,42 @@ cd supabase && deno test functions/tests/payments_test.ts   # 38 tests
 Onboarding, birth date, paywall and payment flow are wired end to end against the backend. The
 screens carry **placeholder styling** — structure and behaviour are final, visuals land once the
 Figma exports are in `design/`. Palm reading and astro talk screens come after that.
+
+---
+
+## Folder index
+
+*Every code folder carries a `README.md` mapping its files. This is the top level; each entry
+links to the fuller index inside.*
+
+### Files
+
+- `pubspec.yaml` — dependencies, each with a comment explaining why it is there rather than an
+  alternative. Also the `flutter_launcher_icons` config and the **directory-based** asset
+  declarations.
+- `analysis_options.yaml` — lints (`flutter_lints`).
+- `.metadata`, `pubspec.lock` — tooling state.
+
+### Subfolders
+
+- [`lib/`](lib/) — all Dart source, for both the phone app and the site. Start at `main.dart`.
+- [`supabase/`](supabase/) — the backend: 14 Edge Functions, `_shared/`, migrations, tests.
+  Has its own README above this index.
+- [`test/`](test/) — the Flutter suite, 23 files, flat.
+- [`assets/`](assets/) — bundled artwork, glyphs, fonts and the env template.
+- [`web/`](web/) — the web build's host page, the 404 deep-link fallback, PWA icons.
+- [`android/`](android/), [`ios/`](ios/) — the two real platform targets. Both carry a committed
+  `*.example` template for the per-environment Facebook values.
+- [`macos/`](macos/), [`linux/`](linux/), [`windows/`](windows/) — unmodified `flutter create`
+  scaffolding. Not shipped, and would not build.
+
+### Notes
+
+- Not indexed, deliberately: generated platform scaffolding (Xcode project dirs, xcasset
+  catalogs, `res/mipmap-*`, gradle wrapper), and the four `assets/*` subfolders — `pubspec.yaml`
+  declares those as directories, so any file placed in them is bundled into the released app.
+  `assets/README.md` covers all four from outside that boundary.
+- The test counts quoted earlier in this file have drifted. As of this index: `flutter test`
+  runs 351 (not 246) and `deno test functions/tests/` runs 182 (not 38). One Flutter test is
+  currently failing — `offer_test.dart`, "the trial length is pluralised", which asserts trial
+  copy `SubscriptionOffer` no longer emits.

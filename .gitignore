@@ -26,6 +26,11 @@ migrate_working_dir/
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id
+
+# Facebook App ID and Client Token for iOS. Public values, but per-environment — see
+# ios/Flutter/Facebook.xcconfig.example, which is committed and documents both. The Android half
+# of the same pair is ignored in android/.gitignore.
+/ios/Flutter/Facebook.xcconfig
 .dart_tool/
 .flutter-plugins-dependencies
 .pub-cache/

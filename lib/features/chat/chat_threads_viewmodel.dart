@@ -1,20 +1,26 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/models/astro_message.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/chat_repository.dart';
 
 /// Every conversation, for the sidebar.
 ///
-/// Separate from [ChatViewModel] because it outlives any one of them: the drawer is opened from
-/// whichever conversation happens to be on screen, and folding this into the per-thread ViewModel
-/// would mean the list was re-fetched every time the user switched threads.
+/// Deliberately *not* auto-disposed. A `Scaffold.endDrawer` is only mounted while it is open, so
+/// an auto-disposing list would lose its last listener every time the drawer closed and go back to
+/// the network on the next open — the user watching the same unchanged list reassemble itself over
+/// and over. Loaded once instead, warmed on Home before the drawer is ever opened, and kept.
+///
+/// Nothing re-fetches this afterwards: a new turn, a rename and a delete all rewrite the list in
+/// place. The one deliberate re-sync is [refresh], which the drawer's pull-to-refresh calls.
 ///
 /// Paints from the cache first, then reconciles — the same shape as loading a transcript, for the
 /// same reason. A drawer that opens onto a spinner is a drawer that feels slower than the app it
 /// belongs to, even when it is not.
-class ChatThreadsViewModel extends AutoDisposeAsyncNotifier<List<ChatThreadSummary>> {
+class ChatThreadsViewModel extends AsyncNotifier<List<ChatThreadSummary>> {
   @override
   Future<List<ChatThreadSummary>> build() async {
     // Cached first. `state` is still loading here, so this paints the drawer while the request is
@@ -33,6 +39,51 @@ class ChatThreadsViewModel extends AutoDisposeAsyncNotifier<List<ChatThreadSumma
       if (cached.isNotEmpty) return cached;
       rethrow;
     }
+  }
+
+  /// Re-reads the list from the server, without taking the current one off screen.
+  ///
+  /// Deliberately not `ref.invalidateSelf()`: that would drop back to [AsyncLoading] and put the
+  /// drawer's spinner over a list the user is looking at. What is on screen stays there until the
+  /// server has something better to say, and stays there too when it has nothing to say at all.
+  /// Pull-to-refresh in the drawer. Deliberately not tracked: it is a gesture people make
+  /// reflexively on any list, and the count would say nothing about the conversations.
+  Future<void> refresh() async {
+    try {
+      final list = await ref.read(chatRepositoryProvider).threads();
+      state = AsyncData(list.threads);
+    } catch (error) {
+      debugPrint('[chat] could not refresh the conversations: $error');
+    }
+  }
+
+  /// Moves a conversation to the top of the list, adding it if it is new.
+  ///
+  /// What a sent message does to the sidebar, without asking the server to tell us something we
+  /// already know. The summary comes from the same [ChatThread.summary] the cache is written from,
+  /// so the row reads identically whether it arrived this way or from a cold start.
+  void noteTurn(ChatThreadSummary row) {
+    // Nothing loaded yet — `build` is either running or about to, and it will bring the server's
+    // list with this turn already in it.
+    final before = state.valueOrNull;
+    if (before == null) return;
+
+    state = AsyncData([
+      row,
+      for (final thread in before)
+        if (thread.id != row.id) thread,
+    ]);
+  }
+
+  /// Drops a conversation the server no longer has.
+  void forget(String id) {
+    final before = state.valueOrNull;
+    if (before == null) return;
+
+    state = AsyncData([
+      for (final thread in before)
+        if (thread.id != id) thread,
+    ]);
   }
 
   /// Renames a conversation, showing the new name before the server has confirmed it.
@@ -60,6 +111,12 @@ class ChatThreadsViewModel extends AutoDisposeAsyncNotifier<List<ChatThreadSumma
     try {
       final list = await ref.read(chatRepositoryProvider).renameThread(id, trimmed);
       state = AsyncData(list.threads);
+      // Only on the server's confirmation. The optimistic rename above is undone on failure, and
+      // counting that would report renames that never happened.
+      analytics.track(Ev.chatThreadRenamed, {
+        P.threadId: id,
+        P.chars: trimmed.length,
+      });
     } catch (error) {
       debugPrint('[chat] could not rename the conversation: $error');
       // Put the old name back rather than leaving a name the server does not have.
@@ -84,6 +141,12 @@ class ChatThreadsViewModel extends AutoDisposeAsyncNotifier<List<ChatThreadSumma
       // deletion would look as though it had silently failed.
       await ref.read(chatThreadStoreProvider).remove(id);
       state = AsyncData(list.threads);
+      analytics.track(Ev.chatThreadDeleted, {
+        P.threadId: id,
+        // What is left afterwards. Someone deleting their last conversation is a different
+        // signal from someone tidying one out of twelve.
+        P.threadCount: list.threads.length,
+      });
       return true;
     } catch (error) {
       debugPrint('[chat] could not delete the conversation: $error');
@@ -94,6 +157,6 @@ class ChatThreadsViewModel extends AutoDisposeAsyncNotifier<List<ChatThreadSumma
 }
 
 final chatThreadsProvider =
-    AutoDisposeAsyncNotifierProvider<ChatThreadsViewModel, List<ChatThreadSummary>>(
+    AsyncNotifierProvider<ChatThreadsViewModel, List<ChatThreadSummary>>(
   ChatThreadsViewModel.new,
 );

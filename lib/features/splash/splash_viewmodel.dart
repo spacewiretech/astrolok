@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/analytics/analytics_events.dart';
 import '../../data/entitlement.dart';
 import '../../data/models/app_user.dart';
 import '../../data/providers.dart';
@@ -40,9 +41,25 @@ SplashDestination destinationForUser(AppUser? user) => destinationForSession(
     );
 
 final splashDestinationProvider = FutureProvider.autoDispose<SplashDestination>((ref) async {
+  final startedAt = DateTime.now();
   final user = await ref.watch(authRepositoryProvider).currentUser();
   // Cached-user fallbacks are re-derived from their stored dates by SessionStore, so an offline
   // launch cannot walk in on an entitlement that expired while the device had no signal.
   ref.read(entitlementProvider.notifier).set(user);
-  return destinationForUser(user);
+  final destination = destinationForUser(user);
+
+  // The first fork in every session, and the only place the whole account state is known at
+  // once. `ms` is here because this is the one screen the user waits on before seeing anything:
+  // a slow session restore reads to them as a slow app.
+  ref.read(analyticsProvider).track(Ev.splashResolved, {
+    P.destination: destination.name,
+    P.isSignedIn: user != null,
+    P.entitled: user?.entitled ?? false,
+    P.hasName: user?.hasName ?? false,
+    P.hasBirthDate: user?.hasBirthDate ?? false,
+    P.paymentType: user?.paymentType.name,
+    P.ms: DateTime.now().difference(startedAt).inMilliseconds,
+  });
+
+  return destination;
 });

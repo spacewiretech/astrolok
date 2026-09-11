@@ -2,7 +2,7 @@ name: astrolok
 description: "Astrology, palm reading and astro talk."
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.0.2+5
 
 environment:
   sdk: ^3.12.2
@@ -67,12 +67,38 @@ dependencies:
   flutter_tts: ^4.2.5
   pdf: ^3.13.0
 
+  # Product analytics. The project token is deliberately not compiled in — it comes from the
+  # `app_config` table at runtime, so tracking can be turned off server-side without a release,
+  # and a checkout with no token simply runs on the no-op implementation.
+  mixpanel_flutter: ^2.13.0
+
+  # Version and build number, for the one question the Mixpanel SDK cannot answer on its own:
+  # whether this launch is a first install or an upgrade. Everything else about the handset —
+  # model, OS, screen, carrier — the SDK already sends without being asked.
+  package_info_plus: ^10.2.1
+
+  # Ad attribution. The app is bought through Facebook Ads, so Facebook needs to be told which
+  # installs converted — without that its optimiser is training on installs, not on payers.
+  #
+  # A second sink beside Mixpanel rather than a replacement, and a deliberately quiet one: it
+  # receives four conversion events out of the ~60 this app fires. See `facebook_analytics.dart`
+  # for why the rest are dropped rather than forwarded.
+  facebook_app_events: ^0.30.5
+
+  # iOS hands out no IDFA without an ATT consent prompt, and Facebook cannot attribute an install
+  # to an ad without one. The prompt is deliberately not shown at launch — see `att_consent.dart`.
+  app_tracking_transparency: ^2.0.6
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
+
+  # For InMemorySharedPreferencesAsync, which lets the Facebook purchase guard be tested for what
+  # it actually promises — that it survives the process being killed mid-payment.
+  shared_preferences_platform_interface: ^2.4.1
 
 # The exported mark is 80x80. Both stores want 1024 square, so this stops the app shipping the
 # Flutter default but a full-size export is still needed before release.

@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/camera/reading_camera.dart';
 import '../../data/camera/reading_image.dart';
 import '../../data/models/palm_reading.dart' show PalmFocus;
@@ -62,6 +64,7 @@ class FaceCaptureViewModel extends AutoDisposeNotifier<FaceCaptureState> {
 
   /// Opens the camera. Safe to call again — the retry button after a denial does.
   Future<void> startCamera() async {
+    final first = !_cameraReported;
     await _camera.initialize();
     if (_disposed) return;
 
@@ -70,9 +73,32 @@ class FaceCaptureViewModel extends AutoDisposeNotifier<FaceCaptureState> {
       cameraFailure: _camera.failure,
       clearFailure: _camera.failure == null,
     );
+
+    if (first) {
+      _cameraReported = true;
+      analytics.track(Ev.readingCaptureOpened, {
+        P.feature: ReadingFeature.face,
+        P.cameraReady: _camera.isReady,
+      });
+    }
+    analytics.track(Ev.cameraPermissionResult, {
+      P.feature: ReadingFeature.face,
+      P.result: _camera.isReady ? 'granted' : 'denied',
+      P.error: _camera.failure,
+      P.trigger: first ? 'open' : 'retry',
+    });
   }
 
+  bool _cameraReported = false;
+
   void setFocus(PalmFocus focus) {
+    if (focus != state.focus) {
+      analytics.track(Ev.readingFocusSelected, {
+        P.feature: ReadingFeature.face,
+        P.focus: focus.name,
+        P.previousFocus: state.focus.name,
+      });
+    }
     state = state.copyWith(focus: focus, clearError: true);
   }
 
@@ -84,22 +110,40 @@ class FaceCaptureViewModel extends AutoDisposeNotifier<FaceCaptureState> {
 
   /// Takes a photo, prepares it, and returns what the scan screen needs. Null on failure, with
   /// the reason already in `state.error`.
-  Future<FaceScanRequest?> capture() => _prepare(() => _camera.capture());
+  Future<FaceScanRequest?> capture() =>
+      _prepare(() => _camera.capture(), source: 'camera');
 
   /// The gallery path. Also the only way to get a photo on a simulator, which has no camera.
-  Future<FaceScanRequest?> pickFromGallery() => _prepare(pickPhotoFromGallery);
+  Future<FaceScanRequest?> pickFromGallery() =>
+      _prepare(pickPhotoFromGallery, source: 'gallery');
 
-  Future<FaceScanRequest?> _prepare(Future<Uint8List?> Function() source) async {
+  /// [source] is `camera` or `gallery`. Threaded through rather than inferred, because the two
+  /// share every line below and yet mean different things at the empty-result branch — and a
+  /// gallery photo is a materially different input to the model than one framed in our own
+  /// viewfinder.
+  Future<FaceScanRequest?> _prepare(
+    Future<Uint8List?> Function() photo, {
+    required String source,
+  }) async {
     if (state.busy) return null;
     state = state.copyWith(busy: true, clearError: true);
+    final startedAt = DateTime.now();
 
     try {
-      final raw = await source();
+      final raw = await photo();
       if (raw == null) {
         // Covers a cancelled gallery pick as well as a failed shutter, so it must not read as
         // an error in the cancelled case — hence no message on an empty result from the
         // picker.
         state = state.copyWith(busy: false);
+        analytics.track(Ev.readingCaptureFailed, {
+          P.feature: ReadingFeature.face,
+          // Backing out of the picker is a decision, not a fault, and counting it as one would
+          // make the face flow look broken next to palm's.
+          P.reason: source == 'gallery' ? 'cancelled' : 'shutter_failed',
+          P.source: source,
+          P.focus: state.focus.name,
+        });
         return null;
       }
 
@@ -108,6 +152,12 @@ class FaceCaptureViewModel extends AutoDisposeNotifier<FaceCaptureState> {
 
       if (prepared == null) {
         state = state.copyWith(busy: false, error: FaceCopy.imageUnreadable);
+        analytics.track(Ev.readingCaptureFailed, {
+          P.feature: ReadingFeature.face,
+          P.reason: 'unreadable',
+          P.source: source,
+          P.focus: state.focus.name,
+        });
         return null;
       }
 
@@ -120,11 +170,30 @@ class FaceCaptureViewModel extends AutoDisposeNotifier<FaceCaptureState> {
       if (_disposed) return null;
 
       state = state.copyWith(busy: false);
+
+      analytics.track(
+        source == 'gallery' ? Ev.readingPhotoPicked : Ev.readingPhotoCaptured,
+        {
+          P.feature: ReadingFeature.face,
+          P.focus: state.focus.name,
+          P.source: source,
+          P.bytes: prepared.bytes.length,
+          P.msToCapture: DateTime.now().difference(startedAt).inMilliseconds,
+        },
+      );
+
       return FaceScanRequest(image: prepared.bytes, focus: state.focus);
     } catch (error) {
       debugPrint('[face] capture failed: $error');
       if (_disposed) return null;
       state = state.copyWith(busy: false, error: FaceCopy.captureFailed);
+      analytics.track(Ev.readingCaptureFailed, {
+        P.feature: ReadingFeature.face,
+        P.reason: 'exception',
+        P.error: error.toString(),
+        P.source: source,
+        P.focus: state.focus.name,
+      });
       return null;
     }
   }

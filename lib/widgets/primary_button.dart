@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app/theme/app_colors.dart';
+import '../data/analytics/analytics.dart';
 import '../app/theme/app_theme.dart';
 import '../app/theme/app_typography.dart';
 
@@ -29,6 +30,7 @@ class PrimaryButton extends StatelessWidget {
     this.tone = ButtonTone.gold,
     this.icon,
     this.pill = false,
+    this.analyticsId,
   });
 
   final String label;
@@ -41,6 +43,11 @@ class PrimaryButton extends StatelessWidget {
 
   /// Fully rounded instead of the standard corner radius.
   final bool pill;
+
+  /// A stable id for this control in analytics. Defaults to a slug of [label], which is right
+  /// for a fixed label and wrong for one that interpolates a price or a countdown — those change
+  /// per render and would each become their own column. Pass an id for those.
+  final String? analyticsId;
 
   @override
   Widget build(BuildContext context) {
@@ -73,7 +80,11 @@ class PrimaryButton extends StatelessWidget {
             borderRadius: radius,
             clipBehavior: Clip.antiAlias,
             child: InkWell(
-              onTap: enabled ? onPressed : null,
+              onTap: trackedTap(
+              enabled ? onPressed : null,
+              id: analyticsId,
+              label: label,
+            ),
               child: Center(
                 child: busy
                     ? SizedBox(
@@ -130,6 +141,7 @@ class GoldPillButton extends StatelessWidget {
     this.busy = false,
     this.icon,
     this.compact = false,
+    this.analyticsId,
   });
 
   final String label;
@@ -139,6 +151,11 @@ class GoldPillButton extends StatelessWidget {
 
   /// Smaller padding, for the promo card where space is tighter.
   final bool compact;
+
+  /// A stable id for this control in analytics. Defaults to a slug of [label], which is right
+  /// for a fixed label and wrong for one that interpolates a price or a countdown — those change
+  /// per render and would each become their own column. Pass an id for those.
+  final String? analyticsId;
 
   @override
   Widget build(BuildContext context) {
@@ -156,7 +173,11 @@ class GoldPillButton extends StatelessWidget {
           borderRadius: AppShape.pill,
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            onTap: enabled ? onPressed : null,
+            onTap: trackedTap(
+              enabled ? onPressed : null,
+              id: analyticsId,
+              label: label,
+            ),
             child: Padding(
               padding: EdgeInsets.symmetric(
                 horizontal: compact ? 20 : 28,

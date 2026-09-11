@@ -11,6 +11,8 @@
  * shared constant rather than as two copies.
  */
 
+import { languageBlock } from "./chat_language.ts";
+
 /**
  * Persona and cadence.
  *
@@ -23,7 +25,19 @@
  * would show blank boxes; the device TTS reads Devanagari as silence or as garbage; and a
  * mixed-script paragraph wraps badly at small sizes on a phone.
  */
-export const PANDIT_VOICE = `
+export const ROMAN_ONLY = `- Use Roman letters only. Never write in Devanagari or any other ` +
+  `non-Latin script: the export\n  and the read-aloud voice cannot render it.`;
+
+/**
+ * The voice, with its script rule left open.
+ *
+ * Everything here is fixed except one bullet. [ROMAN_ONLY] was written as an absolute, but it is
+ * a *rendering* constraint rather than a stylistic one, and it belongs to the caller: a surface
+ * that can genuinely carry another script replaces it with instructions for the language it is
+ * writing in. See [panditVoice].
+ */
+function voiceWith(scriptRule: string): string {
+  return `
 You are an experienced Indian reader in the Samudrika Shastra tradition — the old science of
 reading the body — writing directly to one person who has come to you. Your voice is that of a
 warm elder: unhurried, certain, kind, never salesy and never mystical-for-effect. Write in the
@@ -32,16 +46,34 @@ about the photograph.
 
 THE TRADITIONAL REGISTER — keep it light.
 
-- Name the tradition's term for a feature ONCE per section, with its English gloss immediately
-  after, then use plain English for the rest of that section. "Your Netra — the eyes — are set
+- Name the tradition's term for a feature ONCE per section, with its gloss immediately
+  after, then use plain words for the rest of that section. "Your Netra — the eyes — are set
   wide and steady." Never stack two Sanskrit terms in one sentence.
-- Use Roman letters only. Never write in Devanagari or any other non-Latin script: the export
-  and the read-aloud voice cannot render it.
+${scriptRule}
 - Open with a short invocation that settles the reader — a line about sitting down together with
   what is in front of you. Close with an ashirvad, a blessing: generous, specific to what you
   actually read, and phrased as a wish rather than a prediction.
 - Ceremony belongs in the opening and the closing. The body of the reading stays concrete.
 `.trim();
+}
+
+/** The voice as it has always been: English, Roman letters, no exceptions. */
+export const PANDIT_VOICE = voiceWith(ROMAN_ONLY);
+
+/**
+ * The voice for a reading written in [language].
+ *
+ * Drops [ROMAN_ONLY] and lets the language block govern the script instead. The rule it replaces
+ * existed for the PDF export and the read-aloud voice, and both are answered on the client now:
+ * the export rasterises text the PDF engine cannot shape, and the speech control hides itself
+ * when the device has no voice for the language. Passing no language keeps the original prompt.
+ */
+export function panditVoice(language?: string | null): string {
+  const name = language?.trim();
+  if (!name) return PANDIT_VOICE;
+
+  return `${voiceWith(`- Write in ${name}, as instructed below.`)}\n\n${languageBlock(name)}`;
+}
 
 /**
  * The grounding rule.
@@ -122,15 +154,22 @@ STYLE
  * a reading about this person from a horoscope column, and it is the first thing that would be
  * quietly dropped by someone adding a feature in a hurry. Hence a required override rather than
  * an optional one that defaults to nothing.
+ *
+ * [voice] overrides [PANDIT_VOICE] on the same principle, and for one reason only: the
+ * Roman-letters rule in it is a *rendering* constraint, not a stylistic one — the PDF font
+ * subset and the device TTS, neither of which the chat has. A feature that can honestly carry
+ * another script says so by passing its own voice; palm and face pass nothing and keep the rule.
+ * [BOUNDARIES] is deliberately not overridable, because it is the safety layer.
  */
 export function panditSystemPrompt(
-  { craft, lengths, grounding = GROUNDING }: {
+  { craft, lengths, grounding = GROUNDING, voice = PANDIT_VOICE }: {
     craft: string;
     lengths: string;
     grounding?: string;
+    voice?: string;
   },
 ): string {
-  return [PANDIT_VOICE, "", craft, "", grounding, "", BOUNDARIES, "", lengths, "", STYLE]
+  return [voice, "", craft, "", grounding, "", BOUNDARIES, "", lengths, "", STYLE]
     .join("\n");
 }
 

@@ -3,6 +3,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   buildUserPrompt,
   FACE_KEYS,
+  faceSystemPrompt,
   focusMismatch,
   normaliseFaceReading,
   SYSTEM_PROMPT,
@@ -326,11 +327,32 @@ Deno.test("the boundaries the feature depends on are actually in the system prom
   }
 });
 
-Deno.test("the prompt asks for transliteration and not Devanagari", () => {
-  // The bundled Poppins subset is not verified for the script, the device TTS cannot read it,
-  // and a mixed-script paragraph wraps badly on a phone.
+Deno.test("an English reading still asks for transliteration and not Devanagari", () => {
+  // The no-language prompt is what shipped, and it keeps the original rule: a reading written
+  // for a Latin-script language must stay in Roman letters so the PDF's real text path is used
+  // rather than the rasteriser.
   assert(SYSTEM_PROMPT.includes("Devanagari"));
   assert(!/[ऀ-ॿ]/.test(SYSTEM_PROMPT), "the system prompt contains Devanagari");
+});
+
+Deno.test("a reading in another language is told to write in it, script and all", () => {
+  // The rule above is a *rendering* constraint, not a stylistic one, and both things it
+  // protected are now answered on the client: the export rasterises what the PDF engine cannot
+  // shape, and the Listen control hides itself when the device has no voice. So a Hindi reading
+  // is written in Hindi rather than transliterated at it.
+  const hindi = faceSystemPrompt("Hindi");
+
+  assert(hindi.includes("THE LANGUAGE YOU WRITE IN"));
+  assert(hindi.includes("Hindi"));
+  assert(
+    !hindi.includes("Never write in Devanagari"),
+    "the Roman-letters rule survived into a Hindi reading",
+  );
+
+  // And the safety layer is untouched by any of it — that is the thing a voice override must
+  // never be able to reach.
+  assert(hindi.includes("BOUNDARIES — these are absolute"));
+  assert(hindi.includes("Never use deterministic verbs"));
 });
 
 Deno.test("the user prompt names the focus and every feature to read", () => {

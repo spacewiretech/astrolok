@@ -6,6 +6,7 @@ import {
   focusMismatch,
   LINE_KEYS,
   normalisePalmReading,
+  palmSystemPrompt,
 } from "../_shared/palm_reading.ts";
 
 /**
@@ -252,4 +253,23 @@ Deno.test("the prompt carries the focus and never invents a name", () => {
   const anonymous = buildUserPrompt({ name: null, age: null, focus: "money" });
   assert(anonymous.includes("do not invent one"));
   assert(anonymous.includes("Money & Abundance"));
+});
+
+Deno.test("a palm reading follows the user's language, and the boundaries follow it there", () => {
+  // Palm and face share `panditVoice`, so this is the same guarantee as the face test — asserted
+  // separately because the two features are allowed to drift apart in every other respect, and a
+  // safety block that reached only one of them is exactly the failure `pandit.ts` exists to stop.
+  const english = palmSystemPrompt();
+  assert(english.includes("Never write in Devanagari"));
+
+  const hindi = palmSystemPrompt("Hindi");
+  assert(hindi.includes("THE LANGUAGE YOU WRITE IN"));
+  assert(!hindi.includes("Never write in Devanagari"));
+
+  for (const forbidden of ["health", "diagnosis", "deterministic verbs", "gemstone", "caste"]) {
+    assert(
+      hindi.toLowerCase().includes(forbidden),
+      `a translated reading no longer forbids "${forbidden}"`,
+    );
+  }
 });

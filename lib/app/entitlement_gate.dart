@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'analytics_observer.dart';
+import '../data/analytics/analytics.dart';
+import '../data/analytics/analytics_events.dart';
 import '../data/entitlement.dart';
 import '../data/providers.dart';
 import 'router.dart';
@@ -95,10 +98,26 @@ class _EntitlementGateState extends ConsumerState<EntitlementGate>
       // A null user means the session itself is gone, which is a sign-in problem rather than a
       // payment one — send them to the start of onboarding, not to the paywall.
       if (user == null) {
+        // Being thrown out mid-use, which the user experiences as the app logging them out on
+        // its own. Distinct from a deliberate sign-out, and far more alarming to them.
+        analytics.track(Ev.entitlementLapsed, {
+          P.reason: 'signed_out',
+          P.screen: analyticsObserver.currentScreen,
+        });
+        analytics.reset();
         context.go(Routes.onboarding);
         return;
       }
       if (!user.entitled) {
+        // The moment a paying relationship ends from the app's side — a trial that ran out, a
+        // renewal that failed, a mandate the user cancelled in their UPI app. Which of those it
+        // was is in `previous_payment_type` and `billing_state`.
+        analytics.track(Ev.entitlementLapsed, {
+          P.reason: 'not_entitled',
+          P.screen: analyticsObserver.currentScreen,
+          P.previousPaymentType: user.paymentType.name,
+          P.billingState: user.billingState?.name,
+        });
         context.go(Routes.subscribe);
         return;
       }

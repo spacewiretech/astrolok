@@ -56,7 +56,7 @@ class FeaturePills extends StatelessWidget {
                   const SizedBox(height: 10),
                   Text(
                     feature.label,
-                    style: AppText.tileLabel,
+                    style: AppText.tileLabel.copyWith(fontSize: 9),
                     textAlign: TextAlign.center,
                     // The labels carry their own line break; a third line means the text has
                     // outgrown the column and should be shortened rather than clipped.

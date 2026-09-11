@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/analytics/analytics.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/models/astro_message.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/chat_repository.dart';
@@ -60,6 +62,10 @@ class MemoryViewModel extends AutoDisposeNotifier<MemoryState> {
       final snapshot = await ref.read(chatRepositoryProvider).threads();
       if (_disposed) return;
       state = state.copyWith(facts: snapshot.facts, loading: false);
+      // How much Astro has actually learned about this person. A profile with no facts after
+      // several conversations means the extraction is not working, which is invisible in the
+      // chat itself.
+      analytics.track(Ev.memoryViewed, {P.factCount: snapshot.facts.length});
     } catch (error) {
       // An empty list and an unreachable server look the same on this screen, and the way out is
       // the same either way, so a failure is not worth its own state.
@@ -78,9 +84,18 @@ class MemoryViewModel extends AutoDisposeNotifier<MemoryState> {
     state = state.copyWith(busy: true, clearError: true);
 
     try {
+      final before = state.facts.length;
       final facts = await ref.read(chatRepositoryProvider).forget(key: key);
       if (_disposed) return;
       state = state.copyWith(facts: facts, busy: false);
+
+      // A deliberate act of erasure, and the strongest privacy signal this app gets. Forgetting
+      // everything is a different message from correcting one wrong fact, so they are counted
+      // as different events rather than one with a flag.
+      analytics.track(
+        key == null ? Ev.memoryCleared : Ev.memoryFactForgotten,
+        {P.factCount: before, P.count: facts.length},
+      );
     } on ChatException catch (e) {
       if (_disposed) return;
       state = state.copyWith(busy: false, error: e.message);

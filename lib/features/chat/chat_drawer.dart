@@ -45,8 +45,8 @@ class ChatDrawer extends ConsumerWidget {
 
             Expanded(
               child: threads.when(
-                // Only ever seen on a first run with nothing cached — `build` paints the cache
-                // before the request goes out.
+                // Barely reachable: the list is warmed on Home and kept, so this is a first run
+                // with nothing cached, opened before that first fetch has landed.
                 loading: () => const Center(
                   child: CircularProgressIndicator(color: AppColors.gold),
                 ),
@@ -141,6 +141,9 @@ class _Empty extends StatelessWidget {
 }
 
 /// The conversations, under their date headings.
+///
+/// Pull to re-sync. Nothing else here reaches the server: opening the drawer shows the list the
+/// app already has, and this is the one gesture that asks whether another device has changed it.
 class _ThreadList extends ConsumerWidget {
   const _ThreadList({
     required this.threads,
@@ -156,28 +159,36 @@ class _ThreadList extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final grouped = groupThreads(threads, now: DateTime.now());
 
-    return ListView(
-      padding: const EdgeInsets.only(bottom: 12),
-      children: [
-        for (final entry in grouped.entries) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 6),
-            child: Text(
-              _label(entry.key),
-              style: AppText.tileLabel.copyWith(
-                color: AppColors.muted,
-                letterSpacing: 0.6,
+    return RefreshIndicator(
+      color: AppColors.goldDeep,
+      backgroundColor: AppColors.surface,
+      onRefresh: () => ref.read(chatThreadsProvider.notifier).refresh(),
+      child: ListView(
+        // Two conversations do not fill the drawer, and a list that cannot scroll cannot be
+        // pulled — which would leave the gesture working only for people who already have plenty.
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.only(bottom: 12),
+        children: [
+          for (final entry in grouped.entries) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 6),
+              child: Text(
+                _label(entry.key),
+                style: AppText.tileLabel.copyWith(
+                  color: AppColors.muted,
+                  letterSpacing: 0.6,
+                ),
               ),
             ),
-          ),
-          for (final thread in entry.value)
-            _ThreadRow(
-              thread: thread,
-              selected: thread.id == selectedId,
-              onOpen: () => onOpen(thread.id),
-            ),
+            for (final thread in entry.value)
+              _ThreadRow(
+                thread: thread,
+                selected: thread.id == selectedId,
+                onOpen: () => onOpen(thread.id),
+              ),
+          ],
         ],
-      ],
+      ),
     );
   }
 

@@ -2,8 +2,13 @@ import 'package:camera/camera.dart' show CameraLensDirection;
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:video_player/video_player.dart';
 
 import '../app/env.dart';
+import 'analytics/analytics.dart';
+import 'analytics/analytics_events.dart';
+import 'analytics/facebook_analytics.dart';
+import 'analytics/mixpanel_analytics.dart';
 import 'camera/reading_camera.dart';
 import 'cashfree/cashfree_checkout.dart';
 import 'cashfree/upi_app_preference.dart';
@@ -17,6 +22,7 @@ import 'fast2sms/fast2sms_auth_repository.dart';
 import 'fast2sms/fast2sms_client.dart';
 import 'local/reading_image_store.dart';
 import 'local/reading_store.dart';
+import 'media/promo_video_source.dart';
 import 'repositories/app_config_repository.dart';
 import 'repositories/auth_repository.dart';
 import 'repositories/chat_repository.dart';
@@ -40,9 +46,97 @@ final fakeSessionProvider = Provider<FakeSession>((ref) => FakeSession.instance)
 
 final sessionStoreProvider = Provider<SessionStore>((ref) => SessionStore());
 
+// ---------------------------------------------------------------- analytics
+
+/// Where events go.
+///
+/// Defaults to the no-op so tests and any build that never ran `bootMobileApp` behave exactly as
+/// they did before analytics existed. Boot overrides it with the same instance installed in the
+/// global holder, so the two can never disagree about which sink is live.
+final analyticsProvider = Provider<Analytics>((ref) => const NoopAnalytics());
+
+/// Starts Mixpanel once the fetched config arrives, and stamps the environment onto every event.
+///
+/// Watched by [AstrolokApp] so it runs for the life of the app. It is a no-op whenever boot
+/// already started Mixpanel from the cached config — which is every launch after the first — but
+/// it is what covers the first launch on a device, where there was no cache to read.
+final analyticsBootstrapProvider = FutureProvider<void>((ref) async {
+  var config = await ref.watch(appConfigProvider.future);
+
+  final analytics = ref.read(analyticsProvider);
+  analytics.registerSuper({
+    P.env: config.configString('env'),
+    P.backendMode: backendMode,
+  });
+
+  // A row added to `app_config` after this install last cached is invisible for the whole
+  // six-hour TTL, because a fresh cache is served without asking the server at all. That is
+  // correct for a value that changed and wrong for a key that did not exist yet: on the day
+  // `mixpanel_token` was added, every already-installed app ran blind until its cache aged out.
+  //
+  // The test is *absence*, not emptiness. A missing key means this cache predates the row; a
+  // present-but-blank one is someone having deliberately cleared it, and re-fetching on every
+  // launch to rediscover that would make the off switch cost a request per launch.
+  //
+  // Asked of `remoteKeys` rather than of `config`, because `app.env` now ships both of these
+  // keys and the merged map therefore answers to both whatever the server knows — which would
+  // quietly retire this refresh altogether.
+  //
+  // `chat_languages` is here for the same reason and is the case that will recur: the whole
+  // point of keeping the language list in config is that adding one reaches users without a
+  // release, and it does not if every installed app spends six hours serving the list compiled
+  // into it. Any future key whose *arrival* is the event belongs on this line.
+  final repository = ref.read(appConfigRepositoryProvider);
+  if (!repository.remoteKeys.contains(mixpanelTokenKey) ||
+      !repository.remoteKeys.contains(facebookAppIdKey) ||
+      !repository.remoteKeys.contains(chatLanguagesKey)) {
+    try {
+      config = await repository.load(force: true);
+    } catch (error) {
+      debugPrint('[analytics] forced config refresh failed: $error');
+    }
+  }
+
+  // Resolved through [analyticsSink] rather than a direct `is` test, because the installed sink
+  // is a [MultiAnalytics] fan-out and a plain `analytics is MixpanelAnalytics` would now be false
+  // — silently leaving Mixpanel unstarted on exactly the first launch this provider exists to
+  // cover. The helper looks inside the fan-out, and still copes with a bare sink in tests.
+  final mixpanel = analyticsSink<MixpanelAnalytics>(analytics);
+  if (mixpanel != null) await mixpanel.start(config[mixpanelTokenKey]);
+
+  final facebook = analyticsSink<FacebookAnalytics>(analytics);
+  if (facebook != null) await startFacebook(facebook, config);
+});
+
+/// Set by boot once `Supabase.initialize` has actually returned.
+///
+/// [Env.hasSupabase] only says the env file named a project; it cannot say whether the client
+/// was built. `bootMobileApp` is deliberately allowed to swallow an init failure and carry on,
+/// and every provider below would then reach through `Supabase.instance` to a client that does
+/// not exist — an assertion in debug, a late-initialisation error in release, on every screen.
+bool supabaseInitialised = false;
+
+/// The condition every Supabase-backed provider actually wants: configured *and* up.
+bool get supabaseReady => Env.hasSupabase && supabaseInitialised;
+
+/// Which rung of the repository ladder below is live.
+///
+/// On every event, because without it a developer running against the fakes — where any code
+/// signs in and the paywall charges nothing — pollutes the same funnels as production traffic.
+/// Reads [supabaseReady] rather than [Env.hasSupabase] so that a build whose init failed reports
+/// the tier it fell back to instead of the one it was pointed at.
+String get backendMode {
+  if (supabaseReady) return BackendMode.supabase;
+  if (Env.isConfigured) return BackendMode.fast2sms;
+  return BackendMode.fake;
+}
+
 /// Runtime config, served from `app_config` and cached on disk.
+///
+/// The fake rung is not empty here: it serves `shippedAppConfig`, so an app that never reached
+/// Supabase still runs on the env rows rather than on the compiled defaults alone.
 final appConfigRepositoryProvider = Provider<AppConfigRepository>((ref) {
-  if (!Env.hasSupabase) return const FakeAppConfigRepository();
+  if (!supabaseReady) return const FakeAppConfigRepository();
   return SupabaseAppConfigRepository(Supabase.instance.client);
 });
 
@@ -59,7 +153,7 @@ final appConfigProvider = FutureProvider<Map<String, String>>(
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
   final session = ref.watch(fakeSessionProvider);
 
-  if (Env.hasSupabase) {
+  if (supabaseReady) {
     return SupabaseAuthRepository(
       SupabaseEdgeFunctions(Supabase.instance.client),
       ref.watch(sessionStoreProvider),
@@ -89,10 +183,10 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
 /// The real payment path whenever Supabase is configured — mirroring [authRepositoryProvider].
 ///
 /// This binding is the whole difference between a paywall that charges and one that only looks
-/// like it does, so it deliberately follows the same `Env.hasSupabase` rule as auth rather than
+/// like it does, so it deliberately follows the same `supabaseReady` rule as auth rather than
 /// having a flag of its own that could be left pointing at the fake.
 final subscriptionRepositoryProvider = Provider<SubscriptionRepository>((ref) {
-  if (Env.hasSupabase) {
+  if (supabaseReady) {
     return SupabaseSubscriptionRepository(
       SupabaseEdgeFunctions(Supabase.instance.client),
       ref.watch(sessionStoreProvider),
@@ -106,7 +200,7 @@ final subscriptionRepositoryProvider = Provider<SubscriptionRepository>((ref) {
 
 /// The Cashfree SDK, or a stand-in that reports success without opening a UPI app.
 final cashfreeCheckoutProvider = Provider<CashfreeCheckout>((ref) {
-  if (Env.hasSupabase) return SdkCashfreeCheckout();
+  if (supabaseReady) return SdkCashfreeCheckout();
   return const FakeCashfreeCheckout();
 });
 
@@ -115,15 +209,33 @@ final upiAppPreferenceProvider = Provider<UpiAppPreference>(
   (ref) => const UpiAppPreference(),
 );
 
+/// The paywall's promo clip, opened long before the paywall is reached.
+///
+/// Warmed from the onboarding phone sheet, so the whole of onboarding and the birth date are
+/// lead time and the paywall paints a playing frame on its first build rather than a spinner.
+/// See [PromoVideoSource] for what "opened" costs and why it is worth moving.
+///
+/// Deliberately **not** `autoDispose`, for the same reason as `chatThreadsProvider`: the screen
+/// that starts this is torn down four routes before the screen that uses it.
+///
+/// [PromoVideoSource.close] is registered before the first await, so config re-emitting with a
+/// different URL tears the old player down before the new one is built.
+final promoVideoProvider = FutureProvider<VideoPlayerController?>((ref) async {
+  final source = PromoVideoSource();
+  ref.onDispose(source.close);
+  final config = await ref.watch(appConfigProvider.future);
+  return source.open(config.configString('paywall_video_url'));
+});
+
 // ---------------------------------------------------------------- palm reading
 
 /// Reads a palm photograph, through the Edge Function that holds the Gemini key.
 ///
-/// Same `Env.hasSupabase` rule as the two above: there is no direct-to-Gemini rung, because
+/// Same `supabaseReady` rule as the two above: there is no direct-to-Gemini rung, because
 /// that would mean shipping the key inside the app, and the fake is a canned reading so the
 /// four screens stay walkable on a checkout that has never been pointed at a project.
 final palmRepositoryProvider = Provider<PalmRepository>((ref) {
-  if (Env.hasSupabase) {
+  if (supabaseReady) {
     return SupabasePalmRepository(
       SupabaseEdgeFunctions(Supabase.instance.client),
       ref.watch(sessionStoreProvider),
@@ -156,7 +268,7 @@ final palmReadingStoreProvider =
 ///
 /// Same rule and same reasons as [palmRepositoryProvider].
 final faceRepositoryProvider = Provider<FaceRepository>((ref) {
-  if (Env.hasSupabase) {
+  if (supabaseReady) {
     return SupabaseFaceRepository(
       SupabaseEdgeFunctions(Supabase.instance.client),
       ref.watch(sessionStoreProvider),
@@ -193,7 +305,7 @@ final faceReadingStoreProvider =
 /// Same rule and same reasons as the two reading repositories: no direct-to-Gemini rung, because
 /// that would mean shipping the key inside the app.
 final chatRepositoryProvider = Provider<ChatRepository>((ref) {
-  if (Env.hasSupabase) {
+  if (supabaseReady) {
     return SupabaseChatRepository(
       SupabaseEdgeFunctions(Supabase.instance.client),
       ref.watch(sessionStoreProvider),
