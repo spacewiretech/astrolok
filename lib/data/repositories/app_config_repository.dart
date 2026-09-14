@@ -70,6 +70,14 @@ const facebookEnabledKey = 'facebook_events_enabled';
 const chatLanguagesKey = 'chat_languages';
 const chatLanguageDefaultKey = 'chat_language_default';
 
+/// The referral master switch.
+///
+/// A named constant for the same reason as the two above: it is read in two places that must not
+/// drift — the invite row in the profile menu, and the forced refresh in `providers.dart` that
+/// exists so a row added to the dashboard reaches installed apps without waiting out the
+/// six-hour cache.
+const referralEnabledKey = 'referral_enabled';
+
 /// Values the app falls back to when config has never been fetched and there is no network.
 ///
 /// A cold start must never block on the network, so these have to be good enough to run on.
@@ -129,6 +137,14 @@ const defaultAppConfig = <String, String>{
   // the dashboard is the off switch: an empty list hides the row entirely.
   chatLanguagesKey: 'Hinglish,English,Hindi',
   chatLanguageDefaultKey: 'Hinglish',
+  // Referral invites. Defaulted on, because the backend is the real switch — with no
+  // `referral_codes` row nothing can be claimed anyway, and a client that defaulted this off
+  // would hide the invite screen on exactly the first launch, before config has resolved.
+  //
+  // The store URL that an invite actually links to lives only on the server: it is needed to
+  // *build* a share link, never to read one, and `referral-code` refuses to hand out a link it
+  // cannot build. Shipping a copy here would only create a second place for it to be wrong.
+  referralEnabledKey: 'true',
 };
 
 /// Typed reads over the raw key/value map, so a bad or missing value can never crash a screen.

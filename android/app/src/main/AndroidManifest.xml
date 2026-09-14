@@ -66,6 +66,16 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="astrolok" android:host="payment"/>
             </intent-filter>
+
+            <!-- No App Link filter for referral invites, deliberately.
+
+                 An invite is a Play Store link carrying `referrer=ref_code=<CODE>`, which Google
+                 returns through the Install Referrer API on first launch — so the code reaches
+                 the app without any https link ever being handled here. Claiming
+                 `https://astrolok.app/r/*` would add domain verification, an assetlinks.json that
+                 must list the Play App Signing certificate, and a hosting rule that must not
+                 swallow /.well-known — all to open the app for a user who by definition does not
+                 have it installed yet. See lib/data/attribution/README.md. -->
         </activity>
 
         <!-- Don't delete the meta-data below.

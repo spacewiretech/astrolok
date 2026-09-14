@@ -186,6 +186,40 @@ abstract final class Ev {
   static const memoryCleared = 'Memory Cleared';
   static const supportLinkOpened = 'Support Link Opened';
   static const renewTapped = 'Renew Tapped';
+
+  // ---------------------------------------------------------------- referral & attribution
+
+  /// A link carrying campaign parameters or an invite code opened the app directly.
+  ///
+  /// Rare by design. An invite is a Play Store link, so a referred user does not have the app to
+  /// open — this covers the `astrolok://` scheme only, and exists so that a link which *does*
+  /// reach a running app is visible rather than silently absorbed.
+  static const referralLinkOpened = 'Referral Link Opened';
+
+  /// The acquisition source was decided for this install. Fires once per resolution, not per
+  /// launch: the install referrer never changes, so re-reporting it every time would turn one
+  /// fact into a daily event.
+  static const attributionResolved = 'Attribution Resolved';
+
+  /// The backend accepted the referral and the relationship now exists.
+  ///
+  /// **Raised only by `referral-claim`, server-side.** Named here so the constant is greppable
+  /// beside the events it belongs with, but deliberately never passed to `track` from the app: a
+  /// client event carries no `$insert_id`, so a client twin of this would not be deduplicated
+  /// against the server's and every referral would be counted twice.
+  static const referralAttributed = 'Referral Attributed';
+
+  /// The claim was refused. `reason` carries which of the terminal answers it was —
+  /// `invalid_code`, `self_referral`, `not_eligible` — each of which is a different story about
+  /// whether the feature is working or being probed.
+  static const referralClaimFailed = 'Referral Claim Failed';
+
+  static const inviteScreenViewed = 'Invite Screen Viewed';
+  static const inviteShared = 'Invite Shared';
+  static const inviteCodeCopied = 'Invite Code Copied';
+
+  /// A code typed by hand, which is the iOS fallback when no deferred match was found.
+  static const inviteCodeSubmitted = 'Invite Code Submitted';
 }
 
 /// Property keys.
@@ -293,6 +327,52 @@ abstract final class P {
   /// False when the status was already settled on a previous launch, so the opt-in *rate* can be
   /// measured over the users who were actually asked rather than over every launch.
   static const prompted = 'prompted';
+
+  // ---------------------------------------------------------------- acquisition
+  //
+  // Where a user came from. Split deliberately into two halves that must never be confused:
+  //
+  //  * **Last touch** — [acquisitionSource] and friends, which move whenever a newer attribution
+  //    arrives and describe how the user got here *this time*.
+  //  * **First touch** — the `initial_*` People properties, written by the backend with `setOnce`
+  //    and by an insert that does nothing on conflict. Those describe the acquisition, and are the
+  //    ones a cost-per-acquisition number is actually built on.
+  //
+  // They are separate keys rather than one key with a policy because a single key cannot be both,
+  // and every attribution system that tries eventually overwrites the expensive answer with a
+  // cheap one — a retargeting click reattributing a user who was bought months ago.
+
+  /// `referral` | `meta` | `google_ads` | `paid_other` | `organic`.
+  static const acquisitionSource = 'acquisition_source';
+
+  /// How the attribution reached us: `install_referrer` | `manual_code` | `deep_link`.
+  ///
+  /// Worth splitting from the source because it says how much the answer can be trusted.
+  /// `install_referrer` is Google handing back what we put in the store link and covers very
+  /// nearly everything; `manual_code` is the user typing it, for an install the referrer could
+  /// not cover.
+  static const acquisitionChannel = 'acquisition_channel';
+
+  static const campaign = 'campaign';
+  static const campaignId = 'campaign_id';
+  static const adset = 'adset';
+  static const ad = 'ad';
+
+  /// The invite code that brought this user in, on their own events.
+  static const referralCode = 'referral_code';
+
+  /// The `user_id` of whoever invited them.
+  static const referredBy = 'referred_by';
+
+  /// Which mechanism resolved a particular attribution, as an event property. Mirrors
+  /// [acquisitionChannel] but travels on the one-off referral events rather than on everything.
+  static const attributionType = 'attribution_type';
+
+  static const isReferred = 'is_referred';
+
+  /// True when this resolution was the one that set first touch. Lets a funnel separate a genuine
+  /// acquisition from a later re-attribution without joining anything.
+  static const isFirstTouch = 'is_first_touch';
 
   // ---------------------------------------------------------------- onboarding
 

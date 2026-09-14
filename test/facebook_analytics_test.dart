@@ -28,6 +28,13 @@ void main() {
 
   late List<MethodCall> calls;
 
+  /// Makes the channel throw the way a native SDK that never initialised does.
+  ///
+  /// The state 1.0.2+5 shipped in: `AutoInitEnabled=false`, so the plugin had no `AppEventsLogger`
+  /// to log through and every call failed. Recorded before it throws, so a test can still see what
+  /// was attempted.
+  late bool failSends;
+
   /// A sink already started with the amounts `app_config` would have supplied.
   Future<FacebookAnalytics> started({
     String appId = '1234567890',
@@ -50,10 +57,18 @@ void main() {
 
   setUp(() {
     calls = [];
+    failSends = false;
     SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.empty();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(const MethodChannel(channelName), (call) async {
       calls.add(call);
+      if (failSends) {
+        throw PlatformException(
+          code: 'error',
+          message: 'The SDK has not been initialized, make sure to call '
+              'FacebookSdk.sdkInitialize() first.',
+        );
+      }
       return null;
     });
   });
@@ -215,6 +230,130 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(callsNamed('logPurchase'), isEmpty);
+    });
+
+    test('a send that throws leaves the conversion reportable', () async {
+      final facebook = await started();
+      failSends = true;
+
+      facebook.track(Ev.paymentCompleted, {P.outcome: 'success', P.offerType: 'trial'});
+      await Future<void>.delayed(Duration.zero);
+      expect(callsNamed('logPurchase'), hasLength(1));
+
+      // The bug this ordering exists for. With the flag written first, a build whose native SDK
+      // never came up spent every payer's one conversion on a send that could not land — and no
+      // later attempt, on any version, could ever report it again.
+      calls.clear();
+      failSends = false;
+      facebook.track(Ev.paymentCompleted, {P.outcome: 'success', P.offerType: 'trial'});
+      await Future<void>.delayed(Duration.zero);
+
+      expect(callsNamed('logPurchase'), hasLength(1));
+    });
+
+    test('a device holding the burned v1 flag can report once more', () async {
+      // What every paying device looks like after 1.0.2+5: the old key set, against an SDK that
+      // was switched off and received nothing.
+      SharedPreferencesAsyncPlatform.instance = InMemorySharedPreferencesAsync.withData(
+        {'astrolok.fb_purchase_reported': true},
+      );
+      final facebook = await started();
+
+      facebook.track(Ev.paymentCompleted, {P.outcome: 'success', P.offerType: 'trial'});
+      await Future<void>.delayed(Duration.zero);
+
+      expect(callsNamed('logPurchase'), hasLength(1));
+    });
+  });
+
+  group('reconciling a late mandate', () {
+    /// The sequence a real UPI payer produces: tap subscribe, then the webhook misses the
+    /// paywall's poll window and the attempt ends as pending.
+    Future<FacebookAnalytics> pendingCheckout() async {
+      final facebook = await started();
+      facebook.track(Ev.subscribeTapped, {P.offerType: 'trial'});
+      facebook.track(Ev.paymentCompleted, {P.outcome: 'pending'});
+      await Future<void>.delayed(Duration.zero);
+      calls.clear();
+      return facebook;
+    }
+
+    test('the resume check reports what the poll never saw', () async {
+      final facebook = await pendingCheckout();
+
+      await facebook.reconcilePurchase(entitled: true);
+
+      // Previously lost entirely unless the user watched the status screen to completion: the
+      // server booked the subscription and Facebook was never told.
+      expect(callsNamed('logPurchase').single.arguments['amount'], 3.0);
+    });
+
+    test('an existing subscriber is not reported as a fresh sale', () async {
+      // No checkout on this install — the case that would otherwise fire on first resume after an
+      // update for every long-standing subscriber in the base.
+      final facebook = await started();
+
+      await facebook.reconcilePurchase(entitled: true);
+
+      expect(calls, isEmpty);
+    });
+
+    test('a user who has not paid is not reported', () async {
+      final facebook = await pendingCheckout();
+
+      // Entitlement is the server's answer, and it is the only thing that makes this a sale.
+      await facebook.reconcilePurchase(entitled: false);
+
+      expect(calls, isEmpty);
+    });
+
+    test('the plan amount survives the round trip through disk', () async {
+      final facebook = await started();
+      facebook.track(Ev.subscribeTapped, {P.offerType: 'plan'});
+      await Future<void>.delayed(Duration.zero);
+      calls.clear();
+
+      await facebook.reconcilePurchase(entitled: true);
+
+      // Read from what was bought, not from where the subscription has since got to.
+      expect(callsNamed('logPurchase').single.arguments['amount'], 499.0);
+    });
+
+    test('reconciling twice reports one purchase', () async {
+      final facebook = await pendingCheckout();
+
+      await facebook.reconcilePurchase(entitled: true);
+      await facebook.reconcilePurchase(entitled: true);
+
+      // Every resume calls this, so it runs far more often than any other purchase path.
+      expect(callsNamed('logPurchase'), hasLength(1));
+    });
+
+    test('a paywall success already reported is not reconciled again', () async {
+      final facebook = await started();
+      facebook.track(Ev.subscribeTapped, {P.offerType: 'trial'});
+      facebook.track(Ev.paymentCompleted, {P.outcome: 'success', P.offerType: 'trial'});
+      await Future<void>.delayed(Duration.zero);
+      expect(callsNamed('logPurchase'), hasLength(1));
+
+      calls.clear();
+      await facebook.reconcilePurchase(entitled: true);
+
+      expect(callsNamed('logPurchase'), isEmpty);
+    });
+
+    test('a concurrent paywall success and resume report one purchase', () async {
+      final facebook = await started();
+      facebook.track(Ev.subscribeTapped, {P.offerType: 'trial'});
+      await Future<void>.delayed(Duration.zero);
+      calls.clear();
+
+      // Both read the flag before either writes it, now that the write follows the send.
+      facebook.track(Ev.paymentCompleted, {P.outcome: 'success', P.offerType: 'trial'});
+      await facebook.reconcilePurchase(entitled: true);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(callsNamed('logPurchase'), hasLength(1));
     });
   });
 

@@ -13,6 +13,7 @@ import '../data/analytics/analytics_events.dart';
 import '../data/analytics/analytics_session.dart';
 import '../data/analytics/facebook_analytics.dart';
 import '../data/analytics/mixpanel_analytics.dart';
+import '../data/attribution/attribution_service.dart';
 import '../data/providers.dart';
 import '../data/repositories/app_config_repository.dart';
 import '../data/supabase/supabase_app_config_repository.dart';
@@ -84,6 +85,17 @@ Future<Analytics> _startAnalytics() async {
   // The single place device, locale, version and install context is gathered. Awaited before the
   // token so that even the very first buffered event — `App Launched` — already carries it.
   await analyticsContext.collect(analytics);
+
+  // Where this install came from, resolved before the first event for the same reason.
+  //
+  // Only the cheap half is awaited: an incoming link, which is already in hand. The Play Install
+  // Referrer read binds a store service and is left to finish on its own, because nothing about
+  // attribution justifies holding the first frame. See `attribution_service.dart`.
+  //
+  // The network half — claiming a referral, reporting the acquisition — cannot happen here at
+  // all: there is no session yet, and usually no account. `attributionBootstrapProvider` picks it
+  // up once the repositories exist.
+  await attributionService.start();
 
   try {
     final cached = await SupabaseAppConfigRepository.readCachedConfig();

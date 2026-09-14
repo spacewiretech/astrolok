@@ -22,3 +22,13 @@
 # flutter_secure_storage delegates to the AndroidX security library.
 -keep class androidx.security.crypto.** { *; }
 -dontwarn androidx.security.crypto.**
+
+# Google Play Install Referrer, behind `play_install_referrer`.
+#
+# Release builds run R8 with `isMinifyEnabled` and `isShrinkResources` on. The referrer client is
+# reached over an AIDL service binding, so nothing in this app statically references the generated
+# stub classes and R8 removes them — leaving a plugin that throws at the moment it is asked for
+# the referrer, in release only. A debug build attributes installs correctly and the store build
+# silently does not, which is the worst possible way to discover a keep rule is missing.
+-keep class com.android.installreferrer.** { *; }
+-dontwarn com.android.installreferrer.**

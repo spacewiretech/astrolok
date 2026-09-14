@@ -160,6 +160,33 @@ export async function setProfile(
 }
 
 /**
+ * Adds to a numeric People property — a running count kept on the profile.
+ *
+ * `$add` rather than reading, incrementing and writing back: the read-modify-write version races
+ * with itself the moment two webhooks for two different referred users land at once, and the
+ * loser's increment disappears. Mixpanel applies `$add` atomically on its side.
+ *
+ * The catch is that `$add` is only correct if the caller fires exactly once per real event, since
+ * nothing here can deduplicate an increment the way `$insert_id` deduplicates an event. Every
+ * caller must therefore sit behind a database guard that has already established this occurrence
+ * is new — `qualifyReferral`'s `is null` predicate, for instance.
+ */
+export async function incrementProfile(
+  distinctId: string | null,
+  property: string,
+  by: number,
+): Promise<void> {
+  if (!token || !distinctId) return;
+
+  await send(ENGAGE_URL, [{
+    $token: token,
+    $distinct_id: distinctId,
+    $ip: "0",
+    $add: { [property]: by },
+  }]);
+}
+
+/**
  * Hands the send to the runtime and returns immediately.
  *
  * This matters more than it looks. These calls sit inside `recordPayment` and `syncSubscription`,

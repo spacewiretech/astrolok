@@ -148,6 +148,11 @@ class ProfileView extends ConsumerWidget {
                             onTap: () => _pickLanguage(context, ref, languages, language),
                           ),
                         _MenuRow(
+                          icon: Icons.card_giftcard_rounded,
+                          label: 'Invite friends',
+                          onTap: () => context.push(Routes.invite),
+                        ),
+                        _MenuRow(
                           icon: Icons.phone_outlined,
                           label: 'Contact us',
                           // Launched with whatever scheme config gives it, so support can

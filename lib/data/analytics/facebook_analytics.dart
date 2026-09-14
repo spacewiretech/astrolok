@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:facebook_app_events/facebook_app_events.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -43,7 +45,27 @@ class FacebookAnalytics implements Analytics {
   /// The one purchase this app can ever report, remembered across launches.
   ///
   /// See [_logPurchase] for why a flag on disk is the only thing that can hold this line.
-  static const _purchaseReportedKey = 'astrolok.fb_purchase_reported';
+  ///
+  /// `.v2` because the unsuffixed key was set on every payer's device by a build that shipped with
+  /// `com.facebook.sdk.AutoInitEnabled=false` — the flag was written before the SDK call, and the
+  /// SDK call could not succeed, so each of those devices spent its one conversion on a send that
+  /// never happened. Rotating gives them it back.
+  ///
+  /// Safe exactly once, and only because no flag anywhere corresponded to a purchase Facebook had
+  /// actually received. Do not rotate it again: against a working SDK that is a double-report, and
+  /// an inflated ROAS teaches the optimiser to buy the wrong people.
+  static const _purchaseReportedKey = 'astrolok.fb_purchase_reported.v2';
+
+  /// What this install took to the UPI hand-off, and the gate on [reconcilePurchase].
+  ///
+  /// Holds the offer type rather than a bare flag, so a reconciled conversion is priced from what
+  /// was actually bought rather than from where the subscription has since got to.
+  ///
+  /// Load-bearing for a reason that is easy to miss: without it, the first resume after this
+  /// version landed would report a Purchase for every *existing* subscriber, booking months-old
+  /// payments as same-day conversions. Written only when this install runs a checkout, which is
+  /// what confines reconciliation to a purchase that really did just happen.
+  static const _checkoutStartedKey = 'astrolok.fb_checkout_started';
 
   /// The events Facebook is allowed to see. Everything else [track] ignores.
   ///
@@ -60,6 +82,14 @@ class FacebookAnalytics implements Analytics {
   double _trialAmount = 0;
   double _planAmount = 0;
   String _currency = 'INR';
+
+  /// Held for the duration of a [_logPurchase], because the disk flag is now written after the send
+  /// rather than before it and two callers can otherwise both read it unset.
+  ///
+  /// The pair that can collide in one process: the paywall's own success, and the resume
+  /// reconciliation firing while that send is still in flight. Across processes the flag on disk is
+  /// still what holds the line.
+  bool _reporting = false;
 
   /// True once [start] has been handed a real App ID and told it is enabled.
   ///
@@ -132,6 +162,9 @@ class FacebookAnalytics implements Analytics {
         // it useful: it is the last step the user controls, so the gap between this and a
         // purchase is checkout friction rather than intent.
         case Ev.subscribeTapped:
+          // Also remembered on disk, so a later resume can tell a payer who just checked out from
+          // one who subscribed months ago. Not awaited: this runs on the tap.
+          unawaited(_rememberCheckout(properties[P.offerType]));
           _events.logInitiatedCheckout(
             totalPrice: _amountFor(properties[P.offerType]),
             currency: _currency,
@@ -174,32 +207,116 @@ class FacebookAnalytics implements Analytics {
   /// would not catch it: the app is routinely killed during the UPI hand-off, so the second
   /// attempt is usually a fresh process. Hence a flag on disk.
   ///
-  /// Written *before* the SDK call and never cleared. Over-reporting inflates ROAS and teaches
-  /// the optimiser to buy the wrong people; a lost conversion after a reinstall costs one row.
+  /// ## Why the flag is written *after* the send
+  ///
+  /// It used to be written first, which quietly turned every failed send into a permanently lost
+  /// conversion — and then a release shipped in which no send could succeed at all
+  /// (`AutoInitEnabled=false`, no native credentials), so the flag was spent on nothing across
+  /// every paying device. See [_purchaseReportedKey] on the rotation that recovers them.
+  ///
+  /// The ordering now costs a double-report in one narrow case: both SDK calls land and then the
+  /// preferences write fails, leaving the next attempt free to send again. That is the right way
+  /// round. A send that fails is common, and its old cost was a conversion that could never be
+  /// reported again on that device; a preferences write that fails immediately after two successful
+  /// channel calls is rare, and costs one extra row.
   Future<void> _logPurchase(Map<String, Object?> properties) async {
+    if (_reporting) return;
+    _reporting = true;
+
     try {
-      if (await _preferences.getBool(_purchaseReportedKey) ?? false) {
-        debugPrint('[facebook] purchase already reported, not sending a second');
+      try {
+        if (await _preferences.getBool(_purchaseReportedKey) ?? false) {
+          debugPrint('[facebook] purchase already reported, not sending a second');
+          return;
+        }
+      } catch (error) {
+        // A preferences read failure must not become a silent double-report, so this gives up on
+        // the conversion rather than on the guard.
+        debugPrint('[facebook] could not read the purchase guard, skipping: $error');
         return;
       }
-      await _preferences.setBool(_purchaseReportedKey, true);
-    } catch (error) {
-      // A preferences failure must not become a silent double-report, so this gives up on the
-      // conversion rather than on the guard.
-      debugPrint('[facebook] could not read the purchase guard, skipping: $error');
-      return;
+
+      final amount = _amountFor(properties[P.offerType]);
+      final orderId = properties[P.paymentAttemptId]?.toString() ??
+          'astrolok_${DateTime.now().millisecondsSinceEpoch}';
+
+      try {
+        await _events.logPurchase(
+          amount: amount,
+          currency: _currency,
+          parameters: {'fb_content_id': 'astrolok_subscription', 'fb_order_id': orderId},
+        );
+        await _events.logStartTrial(price: amount, currency: _currency, orderId: orderId);
+      } catch (error) {
+        // Caught here rather than by [track], which cannot see it: this runs unawaited, so its
+        // failure arrives after that `try` has already returned and would otherwise surface as an
+        // unhandled async error — a crash-reporter entry for a dropped analytics event.
+        //
+        // Returns without setting the flag, which is the point: the conversion stays reportable on
+        // the next success or the next resume.
+        debugPrint('[facebook] could not report the purchase, leaving it reportable: $error');
+        return;
+      }
+
+      // Only now that both have actually gone.
+      try {
+        await _preferences.setBool(_purchaseReportedKey, true);
+        // Nothing left to reconcile once the purchase is reported.
+        await _preferences.remove(_checkoutStartedKey);
+      } catch (error) {
+        debugPrint('[facebook] reported the purchase but could not persist the guard: $error');
+      }
+    } finally {
+      _reporting = false;
     }
+  }
 
-    final amount = _amountFor(properties[P.offerType]);
-    final orderId = properties[P.paymentAttemptId]?.toString() ??
-        'astrolok_${DateTime.now().millisecondsSinceEpoch}';
+  /// Remembers that this install reached the UPI hand-off, for [reconcilePurchase].
+  ///
+  /// Stores the same normalisation [_amountFor] applies, so the two cannot disagree about what an
+  /// absent or unrecognised offer type is worth.
+  Future<void> _rememberCheckout(Object? offerType) async {
+    try {
+      await _preferences.setString(
+        _checkoutStartedKey,
+        offerType == 'plan' ? 'plan' : 'trial',
+      );
+    } catch (error) {
+      debugPrint('[facebook] could not record the checkout marker: $error');
+    }
+  }
 
-    await _events.logPurchase(
-      amount: amount,
-      currency: _currency,
-      parameters: {'fb_content_id': 'astrolok_subscription', 'fb_order_id': orderId},
-    );
-    await _events.logStartTrial(price: amount, currency: _currency, orderId: orderId);
+  /// Reports a purchase the paywall's own poll never saw.
+  ///
+  /// A UPI Autopay mandate is confirmed by a webhook, and that webhook routinely lands after
+  /// `_pollForEntitlement` has run out — so a real payer's attempt ends as `pending` and reports
+  /// nothing. `Payment Confirmed Late` recovers it, but only while the user sits on the status
+  /// screen watching it poll. Anyone who backgrounded the app there was never reported at all: the
+  /// server booked the subscription and Facebook never heard about it, which is how a campaign ends
+  /// up optimising against a fraction of its real conversions.
+  ///
+  /// So the entitlement gate calls this on every resume, where a fresh `AppUser` is already in
+  /// hand. Three conditions, all necessary: the sink is live, the account is *actually* entitled
+  /// (the server's answer, never the payment SDK's), and [_checkoutStartedKey] says this install
+  /// ran a checkout. That last one is what stops a long-standing subscriber's first resume after an
+  /// update being reported as a fresh sale.
+  ///
+  /// De-duplication, pricing and ordering are [_logPurchase]'s, deliberately — a second route to
+  /// `logPurchase` with its own guard is how the same ₹3 gets counted twice.
+  Future<void> reconcilePurchase({required bool entitled}) async {
+    if (!_started || !entitled) return;
+
+    try {
+      if (await _preferences.getBool(_purchaseReportedKey) ?? false) return;
+
+      final offerType = await _preferences.getString(_checkoutStartedKey);
+      if (offerType == null) return;
+
+      debugPrint('[facebook] reporting a purchase the paywall poll did not see');
+      await _logPurchase({P.offerType: offerType});
+    } catch (error) {
+      debugPrint('[facebook] could not reconcile the purchase: $error');
+    }
   }
 
   /// The charge for an offer type, from the amounts `app_config` supplied at [start].

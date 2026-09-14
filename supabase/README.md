@@ -184,7 +184,7 @@ break the reading contract, since the screen renders whatever comes out of it.
 
 ### Subfolders
 
-- `functions/` — the whole backend API: 14 Edge Functions, plus `_shared/` and `tests/`. Its
+- `functions/` — the whole backend API: 17 Edge Functions, plus `_shared/` and `tests/`. Its
   README carries the endpoint-by-endpoint table with the auth mechanism for each.
 - `functions/_shared/` — credentials, the billing state machine (`subscription_sync.ts`,
   `cashfree.ts`), the model prompts and normalisers, and the non-LLM astronomy in `jyotish.ts`.

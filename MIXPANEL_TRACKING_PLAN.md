@@ -303,7 +303,7 @@ The single most instrumented flow in the app. **Every event in one checkout atte
 
 ---
 
-## 9. Server events (9)
+## 9. Server events (11)
 
 Sent from Supabase Edge Functions when Cashfree reports a payment-lifecycle change, or when the hourly reconcile sweep catches one that never arrived. **Never sent from the app.**
 
@@ -320,10 +320,46 @@ Every server event carries `source: "server"`, `server_function` (which Edge Fun
 | `Refund Recorded` | Cashfree reports a refund | `refund:{cf_refund_id}:{status}` | `amount`, `currency`, `refund_status`, `refund_reason`, `attributed` (**false = we cannot tie it to a subscription, which usually means the charge it reverses was never recorded either**) |
 | `Dispute Recorded` | Cashfree reports a chargeback/dispute | `dispute:{cf_dispute_id}:{status}` | `amount`, `dispute_status`, `dispute_type`, `dispute_reason`, `respond_by`, `lost`, `attributed` |
 | `Webhook Retrying` | One notification crosses the retry-storm threshold — a webhook Cashfree cannot deliver successfully | `wh:{notification}:retry_storm` | `cf_event_type`, `deliveries`, `signature_ok`, `subscription_id` |
+| **`Referral Attributed`** | A referral relationship is created by `referral-claim`. Fires **once per referred user, ever** — the `referrals` primary key makes a second one impossible | `ref:{referred_user_id}` | `referral_code`, `referred_by`, `attribution_type`, `acquisition_source` |
+| **`Referral Converted`** | A referred user's first successful charge — the ₹3 mandate. **This is the event a referral programme is judged on** | `refconv:{referred_user_id}` | `referred_by`, `referral_code`, `cf_payment_id`, `amount`, `currency` |
+| `Attribution Recorded` | `attribution-report` stores a user's acquisition. **Distinct from the app's `Attribution Resolved`** — that one fires when an install works out where it came from, including for the many installs that never sign up; this one fires when the backend stores it against an account | `attr:{user_id}:{source}:{channel}` | `acquisition_source`, `acquisition_channel`, `campaign`, `campaign_id`, `adset`, `ad`, `referral_code`, `is_first_touch` |
 
 > **⚠️ The distinction that matters most:** `Payment Completed` (app, `outcome = success`) is the app *believing* a payment landed. `Mandate Authorised` and `Subscription Renewed` (server) are Cashfree confirming money actually moved. **Use the server events for anything revenue-shaped.**
 
 > **Deduplication is load-bearing.** Cashfree redelivers webhooks freely and the reconcile sweep replays history hourly. Every `$insert_id` is keyed on the *occurrence* (the charge, the cancellation), never on the delivery attempt. Without it, one renewal would be counted every hour for a month. Ids longer than 36 characters are hashed, because Mixpanel silently ignores over-long ones.
+
+---
+
+## 9a. Referral & acquisition attribution
+
+Where a user came from. Split into a **last touch** that moves freely and a **first touch** that is written once and never again — see §13 for the People properties.
+
+### App events
+
+| Event | Fires when | Key properties |
+|-------|-----------|----------------|
+| `Attribution Resolved` | The source is settled for this install, **once** — not per launch | `acquisition_source`, `acquisition_channel`, `campaign`, `campaign_id`, `adset`, `ad`, `referral_code`, `is_first_touch` |
+| `Referral Claim Failed` | A claim was refused | `reason` (`invalidCode` / `selfReferral` / `notEligible`), `referral_code`, `attribution_type` |
+| `Invite Screen Viewed` | The invite screen opens | — |
+| `Invite Shared` | The share sheet was opened for an invite | `referral_code` |
+| `Invite Code Copied` | The link was copied to the clipboard | `referral_code` |
+| `Invite Code Submitted` | A code was typed by hand — the iOS deferred fallback | `referral_code` |
+
+### `acquisition_source`
+
+`referral` > `google_ads` > `meta` > `paid_other` > `organic`, resolved in that precedence. A referral code outranks any campaign parameter on the same link, because it is an explicit statement that a named user sent this person. Paid beats organic because `utm_medium=organic` is what the Play Store stamps on *every* store visit, including one that began with an ad click.
+
+> **One event name, one source.** `Referral Attributed` is raised **only** by the server, and `Attribution Resolved` **only** by the app. An early draft of this emitted both names from both sides; client SDK events carry no `$insert_id`, so Mixpanel cannot collapse a client event against a server one however carefully the server keys its own, and every referral would have been counted twice.
+
+### `acquisition_channel`
+
+`install_referrer` is Google handing back the code or UTMs we put in the Play Store link — deterministic, and the source of very nearly everything. `manual_code` is the user typing a code, the fallback for an install the referrer could not cover. `deep_link` is reserved for the `astrolok://` scheme.
+
+There is no `ip_match`: the probabilistic iOS recovery path was removed along with the rest of the iOS and web layer when the launch scope became Android-only.
+
+> **⚠️ Campaign detail on App Install campaigns comes from Ads Manager, not Mixpanel.** On Meta and Google App Install campaigns the network controls the Play Store hand-off and sets its own referrer, so custom UTMs do not survive. `acquisition_source` still resolves (`gclid` → `google_ads`, Meta's own stamp → `meta`), but campaign/adset/ad breakdown is only reliable on traffic campaigns pointing at a store link we build ourselves.
+
+> **⚠️ The Facebook SDK does not feed Mixpanel.** It reports installs and conversions to Meta, for Meta's dashboard and optimiser. The Play Install Referrer is the only thing that tells *Mixpanel* where a user came from. Two pipes, two consumers.
 
 ---
 
@@ -368,6 +404,8 @@ These names exist as constants in `analytics_events.dart` but **nothing currentl
 
 **Signup order:** `identify()` → `people.set()` → `track("Signup Completed")`.
 
+**Attribution and identity.** There is no `alias()` call anywhere in this app — identity is bound purely by `identify(user_id)`. Events fired before signup therefore sit on an anonymous distinct id and stitch to the account only if the project is on **Simplified ID Merge**. This is why the durable attribution record lives in Supabase (`user_attribution`, keyed on `users.user_id`) and is mirrored onto the profile from the server: the record stays correct regardless of merge mode, and client-side stitching becomes a convenience rather than the thing the data depends on.
+
 ---
 
 ## 13. People profile properties
@@ -387,6 +425,10 @@ These names exist as constants in `analytics_events.dart` but **nothing currentl
 | `last_payment_at`, `last_payment_status` | Server | |
 | `cancelled_at`, `cancelled_by` | Server | |
 | `last_seen` | App | Written on every resume |
+| `initial_acquisition_source`, `initial_acquisition_channel`, `initial_campaign`, `initial_campaign_id`, `initial_adset`, `initial_ad`, `initial_referral_code` | Server | **First touch. `setOnce`, and backed by an insert that does nothing on conflict.** Never overwritten — a first touch replaced by a later retargeting click re-attributes the acquisition to the campaign that had the least to do with it, and is invisible once it has happened |
+| `acquisition_source`, `acquisition_channel`, `campaign`, `campaign_id`, `adset`, `ad`, `referral_code` | Server | Last touch. Freely updated — this is the half that is *supposed* to move |
+| `is_referred` | Server | Boolean, cheap to segment on |
+| `referrals_converted` | Server | On the **referrer's** profile. `$add`, incremented once per conversion behind the `qualified_at is null` database guard |
 
 The server never *creates* a profile for someone who has not used the app — `identify()` from the client owns profile creation, and a server `$set` on an unknown id would mint a bare profile with no name, phone or device.
 

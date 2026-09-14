@@ -14,6 +14,10 @@ class AstrolokApp extends ConsumerWidget {
     // a first launch, where boot found no cached token to start it with.
     ref.watch(analyticsBootstrapProvider);
 
+    // Likewise, and for the mirror-image reason: boot works out where this install came from but
+    // has no session to report it with, so the sending half waits until the repositories exist.
+    ref.watch(attributionBootstrapProvider);
+
     return MaterialApp.router(
       title: 'Astrolok',
       debugShowCheckedModeBanner: false,

@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'analytics_observer.dart';
 import '../data/analytics/analytics.dart';
 import '../data/analytics/analytics_events.dart';
+import '../data/analytics/facebook_analytics.dart';
 import '../data/entitlement.dart';
 import '../data/providers.dart';
 import 'router.dart';
@@ -123,6 +124,15 @@ class _EntitlementGateState extends ConsumerState<EntitlementGate>
       }
 
       _armExpiryTimer(user.entitlementExpiresAt);
+
+      // A mandate whose webhook landed after the paywall's poll gave up. The server has booked it;
+      // this is what tells Facebook, and a resume is the first moment it is knowable for a user who
+      // walked away from the status screen. Gated on a checkout marker and de-duplicated inside the
+      // sink, so it is silent for everyone who did not just buy something.
+      final facebook = analyticsSink<FacebookAnalytics>(analytics);
+      if (facebook != null) {
+        unawaited(facebook.reconcilePurchase(entitled: user.entitled));
+      }
     } catch (_) {
       // An unreachable backend must not evict a paying user. The cached entitlement stands
       // until a call actually succeeds.

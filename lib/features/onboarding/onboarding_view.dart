@@ -8,8 +8,10 @@ import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../data/attribution/attribution_service.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/app_config_repository.dart';
+import '../../data/repositories/referral_repository.dart';
 import '../../widgets/astral_background.dart';
 import '../../widgets/otp_field.dart';
 import '../../widgets/phone_field.dart';
@@ -256,10 +258,22 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
           busy: state.busy,
           onPressed: state.canSaveName ? _saveName : null,
         ),
+        // Below the primary action and collapsed by default, so it competes with nothing. The
+        // last-resort path for a referred install the Play referrer could not cover — see
+        // `attribution_service.dart` — and most users should never open it.
+        //
+        // Hidden entirely when referrals are off, which makes `referral_enabled` a real switch
+        // for the signup screen and not just for the invite screen.
+        if (_referralsEnabled) const _InviteCodeRow(),
         const SizedBox(height: 16),
         _termsFooter,
       ],
     );
+  }
+
+  bool get _referralsEnabled {
+    final config = ref.watch(appConfigProvider).valueOrNull ?? shippedAppConfig;
+    return config.configFlag(referralEnabledKey);
   }
 
   /// [entryMethod] separates a code the OS auto-filled from the SMS from one the user typed.
@@ -391,6 +405,126 @@ class _HeroPlaceholder extends StatelessWidget {
           alignment: Alignment.center,
           child: const ZodiacRing(diameter: 150),
         ),
+      ),
+    );
+  }
+}
+
+/// "Have an invite code?" — the manual fallback, collapsed until asked for.
+///
+/// ## Why this exists at all
+///
+/// An invite is a Play Store link carrying `ref_code`, and Google hands that back through the
+/// Install Referrer API on first launch — so almost every referred install attributes itself with
+/// nobody typing anything. This covers the cases where Google has no referrer to give: a build
+/// installed from an APK, a device restored from a backup, or someone who reached the listing by
+/// searching for the app after being told about it rather than by tapping the link.
+///
+/// Deliberately unobtrusive. There is no reward yet, so almost nobody has a reason to open it, and
+/// a mandatory field here would cost more signups than the attribution is worth.
+///
+/// ## Why it is safe to leave in the funnel
+///
+/// It renders as a single text button until tapped, it never blocks `continue`, and the whole row
+/// disappears when `referral_enabled` is false — so if it ever does measurably hurt conversion it
+/// can be switched off from the dashboard without a release.
+class _InviteCodeRow extends StatefulWidget {
+  const _InviteCodeRow();
+
+  @override
+  State<_InviteCodeRow> createState() => _InviteCodeRowState();
+}
+
+class _InviteCodeRowState extends State<_InviteCodeRow> {
+  final _controller = TextEditingController();
+  bool _open = false;
+  bool _busy = false;
+  String? _message;
+  bool _applied = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+
+    final result = await attributionService.submitManualCode(_controller.text);
+    if (!mounted) return;
+
+    setState(() {
+      _busy = false;
+      // `alreadyReferred` counts as applied: the user's install is attributed, just not to the
+      // code they typed, and telling them their invite "failed" would be both confusing and
+      // untrue.
+      _applied = result.status == ReferralClaimStatus.created ||
+          result.status == ReferralClaimStatus.alreadyReferred;
+      _message = switch (result.status) {
+        ReferralClaimStatus.created => 'Invite applied',
+        ReferralClaimStatus.alreadyReferred => 'Invite applied',
+        ReferralClaimStatus.invalidCode => 'That code is not valid',
+        ReferralClaimStatus.selfReferral => 'You cannot use your own invite code',
+        ReferralClaimStatus.notEligible => 'This code cannot be applied to your account',
+        // Everything else is a "not now" rather than a "no" — an unreachable backend, or the
+        // feature switched off between the screen rendering and the tap.
+        _ => 'Could not apply that code right now',
+      };
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_applied) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 12),
+        child: Text(
+          _message ?? 'Invite applied',
+          style: AppText.meta.copyWith(color: AppColors.success),
+          textAlign: TextAlign.center,
+        ),
+      );
+    }
+
+    if (!_open) {
+      return TextButton(
+        onPressed: () => setState(() => _open = true),
+        child: Text(
+          'Have an invite code?',
+          style: AppText.meta.copyWith(color: AppColors.muted),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Column(
+        children: [
+          TextFieldBox(
+            controller: _controller,
+            hint: 'Invite code',
+            onSubmitted: (_) => _submit(),
+          ),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: _busy ? null : _submit,
+            child: Text(
+              _busy ? 'Applying…' : 'Apply code',
+              style: AppText.meta.copyWith(color: AppColors.goldDeep),
+            ),
+          ),
+          if (_message != null)
+            Text(
+              _message!,
+              style: AppText.meta.copyWith(color: AppColors.danger),
+              textAlign: TextAlign.center,
+            ),
+        ],
       ),
     );
   }

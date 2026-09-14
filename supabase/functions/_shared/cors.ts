@@ -50,7 +50,11 @@ export function fail(
     // The thing asked for is gone — a chat thread deleted on another device, say. Distinct from
     // `unauthorized`, which would send the user back to sign-in, and from `server_error`, which
     // would invite a retry that cannot succeed. The app drops what it was holding and moves on.
-    | "not_found",
+    | "not_found"
+    // A referral code that is malformed or names nobody. Terminal, like `not_found`: the app
+    // discards the pending referral rather than retrying, because no number of retries will make
+    // a code that does not exist start existing.
+    | "invalid_code",
   message: string,
   status = 400,
 ): Response {
