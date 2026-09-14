@@ -9,6 +9,7 @@ import 'analytics/analytics.dart';
 import 'analytics/analytics_events.dart';
 import 'analytics/facebook_analytics.dart';
 import 'analytics/mixpanel_analytics.dart';
+import 'attribution/attribution_service.dart';
 import 'camera/reading_camera.dart';
 import 'cashfree/cashfree_checkout.dart';
 import 'cashfree/upi_app_preference.dart';
@@ -28,6 +29,7 @@ import 'repositories/auth_repository.dart';
 import 'repositories/chat_repository.dart';
 import 'repositories/face_repository.dart';
 import 'repositories/palm_repository.dart';
+import 'repositories/referral_repository.dart';
 import 'repositories/subscription_repository.dart';
 import 'supabase/edge_functions.dart';
 import 'supabase/session_store.dart';
@@ -36,6 +38,7 @@ import 'supabase/supabase_auth_repository.dart';
 import 'supabase/supabase_chat_repository.dart';
 import 'supabase/supabase_face_repository.dart';
 import 'supabase/supabase_palm_repository.dart';
+import 'supabase/supabase_referral_repository.dart';
 import 'supabase/supabase_subscription_repository.dart';
 import 'tts/reading_speech.dart';
 
@@ -89,7 +92,8 @@ final analyticsBootstrapProvider = FutureProvider<void>((ref) async {
   final repository = ref.read(appConfigRepositoryProvider);
   if (!repository.remoteKeys.contains(mixpanelTokenKey) ||
       !repository.remoteKeys.contains(facebookAppIdKey) ||
-      !repository.remoteKeys.contains(chatLanguagesKey)) {
+      !repository.remoteKeys.contains(chatLanguagesKey) ||
+      !repository.remoteKeys.contains(referralEnabledKey)) {
     try {
       config = await repository.load(force: true);
     } catch (error) {
@@ -106,6 +110,35 @@ final analyticsBootstrapProvider = FutureProvider<void>((ref) async {
 
   final facebook = analyticsSink<FacebookAnalytics>(analytics);
   if (facebook != null) await startFacebook(facebook, config);
+});
+
+/// Hands the attribution service a backend, and drains whatever it has been holding.
+///
+/// The second half of the two-phase startup in `attribution_service.dart`. Boot resolves where the
+/// install came from before the first frame, but it cannot *report* it: there is no session then,
+/// and on a referred install there is usually no account either. This runs once the repositories
+/// exist and sends anything outstanding.
+///
+/// Separate from [analyticsBootstrapProvider] rather than folded into it because the two answer to
+/// different things — that one waits on `app_config` for a token, this one waits on a session — and
+/// a claim must not be delayed behind a config fetch it does not need.
+///
+/// Watched by [AstrolokApp] alongside the analytics bootstrap, so it runs for the life of the app.
+final attributionBootstrapProvider = FutureProvider<void>((ref) async {
+  await attributionService.attachBackend(ref.watch(referralRepositoryProvider));
+});
+
+/// Referral and attribution calls.
+///
+/// Supabase only. The Fast2SMS and fake rungs have no `users` table, so there is nothing a
+/// referral could point at — the no-op reports everything as disabled and the invite screen says
+/// so, which keeps the whole app walkable on a fresh checkout exactly like the fake payment tier.
+final referralRepositoryProvider = Provider<ReferralRepository>((ref) {
+  if (!supabaseReady) return const NoopReferralRepository();
+  return SupabaseReferralRepository(
+    SupabaseEdgeFunctions(Supabase.instance.client),
+    ref.watch(sessionStoreProvider),
+  );
 });
 
 /// Set by boot once `Supabase.initialize` has actually returned.

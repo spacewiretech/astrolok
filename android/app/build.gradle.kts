@@ -36,6 +36,42 @@ val facebookAppId = (facebookProperties["appId"] as String? ?: "").trim()
 val facebookClientToken = (facebookProperties["clientToken"] as String? ?: "").trim()
 val facebookConfigured = facebookAppId.isNotEmpty() && facebookClientToken.isNotEmpty()
 
+// Debug builds may ship unconfigured — that is the whole point of the gate above. A *release*
+// may not, and this is the only thing that says so.
+//
+// The silent-by-design failure is correct for a fresh clone and disastrous for a campaign: 1.0.2+5
+// went to Play with AutoInitEnabled=false and reported nothing at all to Facebook — no purchases,
+// no installs — while the bundle built, uploaded and ran perfectly. Nothing in the build output
+// mentioned it. Checked against the task graph rather than the build type so `flutter run` and
+// `flutter test` stay unaffected.
+if (!facebookConfigured) {
+    val releaseTask = Regex("^:app:(assemble|bundle)([A-Z]\\w*)?Release$")
+    // Spelled with an explicit Action because the untyped lambda resolves to the deprecated
+    // Closure overload, which does not compile under the Kotlin DSL. The graph arrives as the
+    // lambda's *receiver* under that SAM conversion, hence the bare `allTasks`.
+    gradle.taskGraph.whenReady(
+        Action<org.gradle.api.execution.TaskExecutionGraph> {
+            if (allTasks.any { releaseTask.matches(it.path) }) {
+                throw GradleException(
+                    """
+                    Facebook conversion reporting is not configured, so this release would ship
+                    with the SDK switched off (com.facebook.sdk.AutoInitEnabled=false) and report
+                    no conversions at all — not even installs.
+
+                    Fill in both values in android/facebook.properties:
+                      appId       = ${if (facebookAppId.isEmpty()) "MISSING" else "ok"}
+                      clientToken = ${if (facebookClientToken.isEmpty()) "MISSING" else "ok"}
+
+                    See android/facebook.properties.example for where each one lives in the Meta
+                    App Dashboard. To ship a release deliberately without Facebook, blank out
+                    facebook_app_id in app_config instead — that is the supported off switch.
+                    """.trimIndent(),
+                )
+            }
+        },
+    )
+}
+
 android {
     namespace = "com.spacewire.astrolok"
     // Pinned above Flutter's default: flutter_secure_storage pulls an AndroidX release

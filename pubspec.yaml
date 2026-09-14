@@ -2,7 +2,7 @@ name: astrolok
 description: "Astrology, palm reading and astro talk."
 publish_to: 'none'
 
-version: 1.0.2+5
+version: 1.0.3+6
 
 environment:
   sdk: ^3.12.2
@@ -88,6 +88,27 @@ dependencies:
   # iOS hands out no IDFA without an ATT consent prompt, and Facebook cannot attribute an install
   # to an ad without one. The prompt is deliberately not shown at launch — see `att_consent.dart`.
   app_tracking_transparency: ^2.0.6
+
+  # Referral links. Already in the tree as a transitive dependency of supabase_flutter, so
+  # declaring it ships no new code — but a direct import of a transitive dependency breaks
+  # silently the day supabase_flutter drops it, and this one carries the whole referral feature.
+  #
+  # Used by hand rather than through the engine: `flutter_deeplinking_enabled` stays false on both
+  # platforms, because letting the engine route a link straight to a screen would walk the user
+  # past the splash's session gate. See `attribution_service.dart`.
+  app_links: ^7.2.1
+
+  # Android's half of deferred attribution, and the only deterministic one either platform has.
+  #
+  # The Play Store hands back whatever was in the store link's `referrer` parameter, so a referral
+  # code survives an install that had no app to open — and Google Ads' `gclid` arrives the same
+  # way. iOS has no equivalent: nothing survives the App Store, which is why the iOS path falls
+  # back to matching a recent click and then to a typed code.
+  #
+  # `android_play_install_referrer` is the package most guides still name; it is discontinued and
+  # points here. Wraps Google's official `com.android.installreferrer` client either way, and
+  # needs a ProGuard keep rule — release builds minify, and without it this fails in release only.
+  play_install_referrer: ^0.5.0
 
 dev_dependencies:
   flutter_test:

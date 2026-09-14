@@ -148,6 +148,11 @@ class ProfileView extends ConsumerWidget {
                             onTap: () => _pickLanguage(context, ref, languages, language),
                           ),
                         _MenuRow(
+                          icon: Icons.card_giftcard_rounded,
+                          label: 'Invite friends',
+                          onTap: () => context.push(Routes.invite),
+                        ),
+                        _MenuRow(
                           icon: Icons.phone_outlined,
                           label: 'Contact us',
                           // Launched with whatever scheme config gives it, so support can
@@ -248,10 +253,15 @@ class ProfileView extends ConsumerWidget {
     });
 
     try {
-      await ref.read(authRepositoryProvider).saveChatLanguage(picked);
-      // The picker reads `chatLanguage` off the entitlement, so the row only updates once this
-      // refetches — the save alone would leave the old value on screen.
-      ref.invalidate(entitlementProvider);
+      // `update-profile` answers with the whole entitlement, not just the language, so the saved
+      // user is the freshest one the app has. Installing it updates the row and leaves the plan
+      // card, the name and the phone exactly as they were.
+      //
+      // Emphatically not `invalidate`: `entitlementProvider` is a write-only store whose `build`
+      // returns null, so invalidating it does not refetch — it blanks the entitlement, and the
+      // screen reads that as a lapsed subscription until something else happens to set it again.
+      final user = await ref.read(authRepositoryProvider).saveChatLanguage(picked);
+      ref.read(entitlementProvider.notifier).set(user);
     } catch (error) {
       if (context.mounted) {
         showAppSnackBar(

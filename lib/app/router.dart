@@ -22,6 +22,7 @@ import '../features/payment_status/payment_outcome.dart';
 import '../features/profile/downloads_view.dart';
 import '../features/profile/memory_view.dart';
 import '../features/profile/profile_view.dart';
+import '../features/referral/referral_view.dart';
 import '../features/payment_status/payment_status_view.dart';
 import '../features/splash/splash_view.dart';
 import '../features/splash/splash_viewmodel.dart';
@@ -79,6 +80,14 @@ abstract final class Routes {
   static const profile = '/profile';
   static const downloads = '/profile/downloads';
   static const memory = '/profile/memory';
+
+  /// Invite friends. Nested under the profile like the two above, so popping lands there.
+  ///
+  /// Note this is *not* the referral link's path — that is `/r/<CODE>` on the website, and it
+  /// deliberately never becomes a route in this app. An incoming link is read as data by
+  /// `attribution_service.dart` and the splash still decides where the user goes; routing
+  /// straight to a screen would walk them past the session gate.
+  static const invite = '/profile/invite';
 
   static String onboardingAt(OnboardingStep step) => '$onboarding?step=${step.name}';
 
@@ -229,6 +238,13 @@ final appRouter = GoRouter(
     GoRoute(
       path: Routes.memory,
       builder: (context, state) => const EntitlementGate(child: MemoryView()),
+    ),
+
+    // Gated like the rest of the account section: an invite screen is reached from the profile,
+    // and a lapsed user belongs on /subscribe rather than being invited to recruit others.
+    GoRoute(
+      path: Routes.invite,
+      builder: (context, state) => const EntitlementGate(child: ReferralView()),
     ),
 
     GoRoute(

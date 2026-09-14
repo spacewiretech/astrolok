@@ -369,12 +369,14 @@ void _bootstrapTests() {
           // Present, so this cache is not one that predates a row — which is the other reason
           // the bootstrap re-fetches, and would otherwise mask what this test is asserting.
           chatLanguagesKey: 'Hinglish',
+          referralEnabledKey: 'true',
         },
         {
           'env': 'production',
           mixpanelTokenKey: '',
           facebookAppIdKey: '',
           chatLanguagesKey: 'Hinglish',
+          referralEnabledKey: 'true',
         },
       );
 
@@ -390,12 +392,14 @@ void _bootstrapTests() {
           mixpanelTokenKey: 'tok',
           facebookAppIdKey: '123',
           chatLanguagesKey: 'Hinglish,English,Hindi',
+          referralEnabledKey: 'true',
         },
         {
           'env': 'production',
           mixpanelTokenKey: 'tok',
           facebookAppIdKey: '123',
           chatLanguagesKey: 'Hinglish,English,Hindi',
+          referralEnabledKey: 'true',
         },
       );
 
@@ -415,6 +419,31 @@ void _bootstrapTests() {
           mixpanelTokenKey: 'tok',
           facebookAppIdKey: '123',
           chatLanguagesKey: 'Hinglish,English,Hindi,Marathi',
+        },
+      );
+
+      await _runBootstrap(config);
+
+      expect(config.calls, [false, true], reason: 'cached read, then a forced one');
+    });
+
+    test('a cache that predates the referral switch is refreshed', () async {
+      // `referral_enabled` is the newest instance of the same rule, and the reason it belongs on
+      // that line: an install that cached before referrals existed would otherwise hide the
+      // invite screen for six hours after the feature was switched on.
+      final config = _RecordingConfig(
+        {
+          'env': 'production',
+          mixpanelTokenKey: 'tok',
+          facebookAppIdKey: '123',
+          chatLanguagesKey: 'Hinglish',
+        },
+        {
+          'env': 'production',
+          mixpanelTokenKey: 'tok',
+          facebookAppIdKey: '123',
+          chatLanguagesKey: 'Hinglish',
+          referralEnabledKey: 'true',
         },
       );
 

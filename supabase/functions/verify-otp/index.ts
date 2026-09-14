@@ -98,6 +98,13 @@ Deno.serve(async (req) => {
 
   // Upsert, not insert: a returning user verifies the same number again and must land on the
   // row they already own rather than colliding with the unique index.
+  //
+  // Referral attribution deliberately does **not** hang off this call. An earlier pass split it
+  // into insert-then-select so the response could carry an `is_new_user` flag, which turned out
+  // to be dead weight: `isEligibleForReferral` in `_shared/referral.ts` decides eligibility from
+  // `creation_time` and entitlement history, server-side, and would not have trusted a flag the
+  // client round-tripped anyway. Sign-in is the most load-bearing path in the app and now carries
+  // no extra query for a feature that does not read it.
   const { data: user, error: upsertError } = await db
     .from("users")
     .upsert({ mobile_no: mobile }, { onConflict: "mobile_no", ignoreDuplicates: false })

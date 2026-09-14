@@ -1,4 +1,13 @@
+import 'package:astrolok/app/theme/app_theme.dart';
+import 'package:astrolok/data/entitlement.dart';
+import 'package:astrolok/data/language.dart';
 import 'package:astrolok/data/models/app_user.dart';
+import 'package:astrolok/data/providers.dart';
+import 'package:astrolok/data/repositories/app_config_repository.dart';
+import 'package:astrolok/data/repositories/auth_repository.dart';
+import 'package:astrolok/features/profile/profile_view.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -220,4 +229,168 @@ void main() {
       );
     });
   });
+
+  _pickerTests();
+}
+
+/// The store is write-only, so invalidating it is not a refetch — it is a wipe.
+///
+/// This is the shape of the bug these tests exist for: Profile used to `invalidate` after saving
+/// a language, on the assumption that the provider would go and ask the server again. It has no
+/// way to. `build` returns null, so the entitlement went null, and the screen read that as a
+/// lapsed subscription — "Subscription Ended" on a paid-up account, until a restart.
+void _pickerTests() {
+  /// A paid-up account, a month into a subscription that runs to the new year.
+  AppUser subscriber() => AppUser(
+        id: 'u1',
+        phone: '9876543210',
+        name: 'Asha',
+        paymentType: PaymentType.active,
+        currentPeriodEnd: DateTime(2027, 1, 4),
+        entitled: true,
+      );
+
+  ProviderContainer containerWith(AuthRepository auth) {
+    final container = ProviderContainer(overrides: [
+      appConfigRepositoryProvider.overrideWithValue(
+        const _StaticConfig({
+          chatLanguagesKey: 'English, Hindi, Tamil',
+          chatLanguageDefaultKey: 'English',
+        }),
+      ),
+      authRepositoryProvider.overrideWithValue(auth),
+    ]);
+    addTearDown(container.dispose);
+    return container;
+  }
+
+  /// Taps the language row and picks [language] out of the sheet, the way a user does.
+  Future<void> pickLanguage(WidgetTester tester, String language) async {
+    await tester.tap(find.text('Astro language'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(language).last);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('picking a language leaves the plan card alone', (tester) async {
+    // 900 tall so the whole list — plan card and menu both — is laid out without scrolling.
+    tester.view.physicalSize = const Size(400, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final auth = _LanguageRepository(subscriber());
+    final container = containerWith(auth);
+    await container.read(appConfigProvider.future);
+    container.read(entitlementProvider.notifier).set(subscriber());
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(theme: buildAppTheme(), home: const ProfileView()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Premium Active'), findsOneWidget);
+
+    await pickLanguage(tester, 'Hindi');
+
+    expect(auth.saved, 'Hindi');
+    // The regression. Before the fix the entitlement was null here, and every one of these
+    // assertions failed at once — which is exactly how it looked on screen.
+    expect(container.read(entitlementProvider)?.entitled, isTrue);
+    expect(find.text('Premium Active'), findsOneWidget);
+    expect(find.text('Subscription Ended'), findsNothing);
+    expect(find.text('January 4, 2027'), findsOneWidget);
+    // The name and the phone come off the same object, so they went with it.
+    expect(find.text('Asha'), findsOneWidget);
+    expect(find.text('+91 9876543210'), findsOneWidget);
+  });
+
+  testWidgets('the row shows the language that was just picked', (tester) async {
+    tester.view.physicalSize = const Size(400, 900);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final auth = _LanguageRepository(subscriber());
+    final container = containerWith(auth);
+    await container.read(appConfigProvider.future);
+    container.read(entitlementProvider.notifier).set(subscriber());
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(theme: buildAppTheme(), home: const ProfileView()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Never chosen, so it follows `chat_language_default`.
+    expect(container.read(languageProvider), 'English');
+
+    await pickLanguage(tester, 'Tamil');
+
+    // The other half of the same bug: a null entitlement re-resolved to the default, so the row
+    // snapped back to English the instant it was set to anything else.
+    expect(container.read(languageProvider), 'Tamil');
+    expect(find.text('Tamil'), findsOneWidget);
+  });
+}
+
+/// Answers with a fixed map, the way [analyticsProvider]'s tests do.
+class _StaticConfig implements AppConfigRepository {
+  const _StaticConfig(this._values);
+
+  final Map<String, String> _values;
+
+  @override
+  Future<Map<String, String>> load({bool force = false, Duration? maxAge}) async => _values;
+
+  @override
+  Set<String> get remoteKeys => _values.keys.toSet();
+}
+
+/// Stands in for `update-profile`, which answers with the whole entitlement rather than just the
+/// language — the fact the fix turns on. A repository that returned a bare language would hide
+/// the bug rather than pin it.
+class _LanguageRepository implements AuthRepository {
+  _LanguageRepository(this._user);
+
+  AppUser _user;
+
+  /// What the last save was asked to store.
+  String? saved;
+
+  @override
+  Future<AppUser> saveChatLanguage(String? language) async {
+    saved = language?.trim();
+    _user = _user.copyWith(
+      chatLanguage: saved,
+      clearChatLanguage: saved == null || saved!.isEmpty,
+    );
+    return _user;
+  }
+
+  @override
+  Future<AppUser?> currentUser() async => _user;
+
+  // Profile never reaches the rest.
+  @override
+  Future<void> sendOtp(String phone) => throw UnimplementedError();
+
+  @override
+  Future<void> resendOtp(String phone) => throw UnimplementedError();
+
+  @override
+  Future<AppUser> verifyOtp({required String phone, required String code}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<AppUser> saveName(String name) => throw UnimplementedError();
+
+  @override
+  Future<AppUser> saveBirthDate(DateTime date) => throw UnimplementedError();
+
+  @override
+  Future<void> signOut() => throw UnimplementedError();
 }

@@ -63,4 +63,10 @@ and run in lexical order.
   updates it. Check the latest definition rather than the first.
 - Config rows are seeded **blank** on purpose: a half-configured project must not be able to
   take real money or send real SMS. `cashfree_env` ships as `sandbox` for the same reason.
+- `referrals.referred_user_id` is the **primary key**, not just a column. Every duplicate-claim
+  case — a retried call, an app killed mid-attribution, two links clicked, a reinstall, two
+  concurrent requests — collapses into "the second insert conflicts", which is what lets the
+  claim code be idempotent by reading the winner back rather than by guarding the race.
+- `user_attribution.first_*` is written by an insert that does nothing on conflict, so first
+  touch is physically incapable of being overwritten. See `20260911000001_referrals.sql`.
 - Steps 2 and 5 of the setup in [../README.md](../README.md) are manual and easy to miss.

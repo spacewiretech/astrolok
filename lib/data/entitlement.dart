@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'attribution/attribution_service.dart';
 import 'models/app_user.dart';
 import 'providers.dart';
 
@@ -26,6 +29,14 @@ class EntitlementNotifier extends Notifier<AppUser?> {
     // re-resolves on every resume; it compares the *profile* rather than the id, so a trial
     // converting to a paid month still updates.
     if (user != null) ref.read(analyticsProvider).identify(user);
+
+    // And the same hook claims a pending referral, for exactly the same reason: this is the one
+    // place that reliably holds a *signed-in* user, and a claim needs a session token.
+    //
+    // Unawaited — nothing on screen waits for a referral, and this runs on every resume. The
+    // service guards itself against overlapping drains and against re-asking once the backend has
+    // given a terminal answer, so the repeat calls cost a single flag read.
+    if (user != null) unawaited(attributionService.onUserResolved());
   }
 
   void clear() => state = null;

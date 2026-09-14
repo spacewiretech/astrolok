@@ -30,7 +30,8 @@ import {
   WebhookRefund,
 } from "./cashfree.ts";
 import { asUserRow, USER_COLUMNS, UserRow } from "./entitlement.ts";
-import { setProfile, trackServer } from "./mixpanel.ts";
+import { incrementProfile, setProfile, trackServer } from "./mixpanel.ts";
+import { qualifyReferral } from "./referral.ts";
 
 export interface SubscriptionRow {
   id: string;
@@ -383,6 +384,19 @@ export async function recordPayment(
     },
   });
 
+  // A referred user becoming a paying one is the moment the referral is worth anything, and it
+  // is deliberately *here* rather than below the `buysAMonth` guard: the ₹3 trial authorisation
+  // credits no month and returns early, but it is a real bank mandate and is exactly the
+  // milestone a referral is judged on.
+  //
+  // Any successful charge qualifies — trial authorisation, full-price authorisation, or a
+  // renewal for a referral that was somehow never marked. `qualifyReferral` only ever moves a
+  // row whose `qualified_at` is still null, so whichever arrives first wins and the rest are
+  // no-ops.
+  if (payment.status === "SUCCESS" && !alreadyCredited) {
+    await creditReferral(db, subscription.user_id, payment);
+  }
+
   await db.from("subscriptions").update({
     last_payment_at: payment.paymentTime,
     last_payment_status: payment.status,
@@ -433,6 +447,60 @@ export async function recordPayment(
     last_payment_at: payment.paymentTime,
     last_payment_status: payment.status,
   });
+}
+
+/**
+ * Marks this user's referral as having converted, and says so exactly once.
+ *
+ * ## Why two guards and not one
+ *
+ * `qualifyReferral` updates only where `qualified_at is null`, so a redelivered webhook moves
+ * zero rows and returns false — the event never fires a second time. The `$insert_id` below is
+ * keyed on the referred user, so even if that predicate were somehow defeated Mixpanel would
+ * collapse the duplicate. Either alone would probably do; both are here because a conversion
+ * counted twice is the number a referral programme is judged on, and the redelivery that would
+ * expose a single-guard bug arrives weeks later on a machine nobody is watching.
+ *
+ * Never throws. This hangs off the only code path that makes an account paid, and a referral
+ * bookkeeping failure may not cost anyone their subscription.
+ */
+async function creditReferral(
+  db: SupabaseClient,
+  userId: string,
+  payment: WebhookPayment,
+): Promise<void> {
+  try {
+    const at = payment.paymentTime ?? new Date().toISOString();
+    const result = await qualifyReferral(db, userId, at);
+    if (!result.qualified) return;
+
+    await trackServer({
+      event: "Referral Converted",
+      // The *referred* user, so the conversion lands on the same profile as the signup and the
+      // payment that caused it. The referrer travels as a property; putting the event on their
+      // profile instead would make a referrer's timeline read as though they paid.
+      distinctId: userId,
+      insertId: `refconv:${userId}`,
+      time: at,
+      properties: {
+        referred_by: result.referrerUserId,
+        referral_code: result.code,
+        acquisition_source: "referral",
+        cf_payment_id: payment.cfPaymentId,
+        amount: payment.amount,
+        currency: payment.currency,
+      },
+    });
+
+    // Mirrored onto the referrer's profile so "how many of my invites paid" is answerable in
+    // Mixpanel without joining anything. `$add` rather than a recomputed total: this runs once
+    // per conversion by the guard above, which is exactly the condition an increment needs.
+    if (result.referrerUserId) {
+      await incrementProfile(result.referrerUserId, "referrals_converted", 1);
+    }
+  } catch (error) {
+    console.error("referral credit failed", error);
+  }
 }
 
 /**
