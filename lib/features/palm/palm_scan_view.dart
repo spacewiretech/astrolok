@@ -94,6 +94,12 @@ class _PalmScanViewState extends ConsumerState<PalmScanView>
         ref.read(palmLimitProvider.notifier).state = state.error;
         context.pop();
 
+      case PalmScanOutcome.trialLimitReached:
+        // Back to the capture screen like the daily limit, which closes its button and explains
+        // the trial allowance in a popup. Nothing changes the answer until the trial ends.
+        ref.read(palmTrialLimitProvider.notifier).state = state.error;
+        context.pop();
+
       case PalmScanOutcome.notEntitled:
         context.go(Routes.subscribe);
 

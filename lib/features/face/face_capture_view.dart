@@ -6,6 +6,8 @@ import '../../app/assets.dart';
 import '../../app/router.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../app/trial_scan_guard.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../widgets/app_snackbar.dart';
 import '../../widgets/astral_background.dart';
 import '../../widgets/brand_logo.dart';
@@ -81,6 +83,23 @@ class _FaceCaptureViewState extends ConsumerState<FaceCaptureView>
     // today will change the answer, so it stays on screen and closes both buttons.
     ref.listen(faceLimitProvider, (_, message) {
       if (message != null) model.setLimitReached(message);
+    });
+
+    // The trial's face reading is spent, reported by the scan screen when the server refused a
+    // photo the device did not know to stop. The same standing notice as the daily limit — which
+    // closes the gallery button too — plus the popup saying what the rule is.
+    //
+    // The popup waits for the frame: the scan screen pops itself straight after reporting this, and
+    // a dialog pushed before that pop would be the route it removed. Cleared once shown, so a
+    // second refusal carrying the same message still reaches this listener.
+    ref.listen(faceTrialLimitProvider, (_, message) {
+      if (message == null) return;
+      model.setLimitReached(message);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(faceTrialLimitProvider.notifier).state = null;
+        showTrialScanLimit(context, ref, ReadingFeature.face, source: 'server');
+      });
     });
 
     return Scaffold(
@@ -236,6 +255,11 @@ final faceRejectionProvider = StateProvider<String?>((ref) => null);
 /// Carries the daily allowance message back, so a second attempt is blocked here rather than
 /// spending another round trip to be refused again.
 final faceLimitProvider = StateProvider<String?>((ref) => null);
+
+/// Carries the trial allowance message back, so this screen closes both buttons and shows the
+/// popup. Separate from [faceLimitProvider] because the two say different things: that one lifts
+/// tomorrow, this one when the trial ends.
+final faceTrialLimitProvider = StateProvider<String?>((ref) => null);
 
 const _cameraCopy = CameraCopy(
   denied: FaceCopy.cameraDenied,

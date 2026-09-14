@@ -75,3 +75,8 @@ verify_jwt = false
 # Called by pg_cron, authenticated with app_config.reconcile_secret.
 [functions.subscription-reconcile]
 verify_jwt = false
+
+# Push. Requires a bearer session token, and stores the device token against that session so
+# sign-out and expiry remove it by cascade.
+[functions.push-token]
+verify_jwt = false

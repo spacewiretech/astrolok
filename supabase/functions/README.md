@@ -5,12 +5,12 @@
 The Edge Functions — the whole backend API. Every third-party credential lives here, so none of
 them ship inside the app. Deployed with `supabase functions deploy`.
 
-## The 14 functions
+## The 15 functions
 
 Each is a folder holding one `index.ts`. They are indexed here rather than each carrying its
 own README, so the auth column can be compared at a glance.
 
-**"Auth" means the function's own check.** All 14 are `verify_jwt = false` in `config.toml` —
+**"Auth" means the function's own check.** All 15 are `verify_jwt = false` in `config.toml` —
 they are invoked with the anon key, before any session exists — so each validates for itself.
 
 | Function | Endpoint | Auth | Notes |
@@ -20,6 +20,7 @@ they are invoked with the anon key, before any session exists — so each valida
 | `verify-otp` | POST `{mobile, otp}` | none | **mints the session token**; upserts `users`, inserts `user_sessions` |
 | `me` | GET → user + entitlement; DELETE → account deletion | bearer | the relaunch session restore. Only `DELETE` is branched; any other method reads |
 | `update-profile` | POST `{name?, dob?, birth_time?, birth_place?}` | bearer | the post-OTP steps |
+| `push-token` | POST `{token, platform}` | bearer | upserts `push_tokens` on the FCM token, bound to the caller's session so sign-out removes it by cascade |
 | `palm-reading` | POST `{image, mime_type, focus}` | bearer + entitled | Gemini palm read, quota-anchored row |
 | `face-reading` | POST `{image, mime_type, focus}` | bearer + entitled | the face mirror |
 | `astro-chat` | POST `{message, thread_id?}` | bearer + entitled | one metered, chart-aware chat turn |
@@ -34,7 +35,7 @@ they are invoked with the anon key, before any session exists — so each valida
 
 - `_shared/` — everything more than one function needs: credentials, the billing state machine,
   the model prompts, the astronomy. Not deployed on its own.
-- `tests/` — `deno test`, 182 tests over the pure logic.
+- `tests/` — `deno test`, 226 tests over the pure logic.
 - One folder per function in the table above.
 
 ## Notes
@@ -48,4 +49,6 @@ they are invoked with the anon key, before any session exists — so each valida
   and rejects the anon key the app calls with.
 - Gemini, Fast2SMS and Cashfree are reached **only** from here. The client sends no amount and
   no plan id — everything billable is resolved server-side from `app_config`.
+- `push-token` only registers. Nothing sends a push yet; a sender needs an FCM service-account
+  credential as a function secret, and should target tokens whose session is still live.
 - See [../README.md](../README.md) for the security model, setup and the money table.

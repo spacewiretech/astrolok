@@ -38,6 +38,9 @@ export function fail(
     | "already_connected"
     // add-person: the caller is at max_tracked_people, or the day's palm readings are used up.
     | "limit_reached"
+    // A trial account has had its palm or face reading. Distinct from `limit_reached`: that one
+    // lifts tomorrow and this one when the trial ends, and the app explains it with a popup.
+    | "trial_limit_reached"
     // The photo did not show a readable palm. Distinct from a failure: nothing went wrong, the
     // user simply needs to take another photo, so the app sends them back to the camera.
     | "no_palm"

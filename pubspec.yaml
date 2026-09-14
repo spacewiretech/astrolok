@@ -110,6 +110,20 @@ dependencies:
   # needs a ProGuard keep rule — release builds minify, and without it this fails in release only.
   play_install_referrer: ^0.5.0
 
+  # Firebase, initialised from `lib/firebase_options.dart` on Android and iOS only — the web build
+  # is the marketing site and never reaches it.
+  #
+  # Crashlytics is the app's crash reporter; before it, a crash was invisible the moment no
+  # debugger was attached. Analytics is a third sink beside Mixpanel and Facebook and a narrow one:
+  # screens, identity and the four conversions — see `firebase_analytics_sink.dart`. Messaging
+  # registers the device for push against the signed-in session — see `push_messaging.dart`.
+  #
+  # Firebase 4.x requires iOS 15, which is what sets the iOS deployment target.
+  firebase_core: ^4.14.0
+  firebase_analytics: ^12.5.0
+  firebase_crashlytics: ^5.3.0
+  firebase_messaging: ^16.6.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

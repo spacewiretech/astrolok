@@ -17,6 +17,8 @@ key is present on this tier.**
 - `supabase_face_repository.dart` — Declares: `SupabaseFaceRepository`.
 - `supabase_chat_repository.dart` — Declares: `SupabaseChatRepository`.
 - `supabase_subscription_repository.dart` — Declares: `SupabaseSubscriptionRepository`.
+- `supabase_push_repository.dart` — Declares: `SupabasePushRepository`. Calls `push-token`;
+  false with no session.
 - `supabase_app_config_repository.dart` — Declares: `SupabaseAppConfigRepository` (disk-cached,
   `readCachedConfig()` static, and it never hangs the splash), `FakeAppConfigRepository`.
 

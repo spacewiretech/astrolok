@@ -178,18 +178,18 @@ break the reading contract, since the screen renders whatever comes out of it.
 
 - `config.toml` — Supabase CLI project config. Two structurally important settings:
   **`[auth] enabled = false`** (hence no `auth.uid()`, hence RLS with zero policies) and
-  **`verify_jwt = false` on all 14 functions** (they are called with the anon key before a
+  **`verify_jwt = false` on all 15 functions listed there** (they are called with the anon key before a
   session exists, so each authenticates for itself). Also `[api] max_rows = 1000`,
   Postgres 17, local ports 54321/54322/54323.
 
 ### Subfolders
 
-- `functions/` — the whole backend API: 17 Edge Functions, plus `_shared/` and `tests/`. Its
+- `functions/` — the whole backend API: 18 Edge Functions, plus `_shared/` and `tests/`. Its
   README carries the endpoint-by-endpoint table with the auth mechanism for each.
 - `functions/_shared/` — credentials, the billing state machine (`subscription_sync.ts`,
   `cashfree.ts`), the model prompts and normalisers, and the non-LLM astronomy in `jyotish.ts`.
-- `functions/tests/` — `deno test`, 182 tests over the pure logic.
-- `migrations/` — 16 `.sql` files in lexical order. See its README for what each adds and for
+- `functions/tests/` — `deno test`, 226 tests over the pure logic.
+- `migrations/` — 20 `.sql` files in lexical order. See its README for what each adds and for
   the two manual setup steps that are easy to miss.
 
 ### Notes
@@ -197,4 +197,4 @@ break the reading contract, since the screen renders whatever comes out of it.
 - Not deployed from here: `.temp/` and `.branches/` are gitignored CLI machine state, local to
   whoever ran `supabase link` or `supabase start`.
 - The test counts quoted above (58, and 38 in the root README) predate later additions —
-  `deno test functions/tests/` currently runs 182.
+  `deno test functions/tests/` currently runs 226.

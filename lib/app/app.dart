@@ -18,6 +18,10 @@ class AstrolokApp extends ConsumerWidget {
     // has no session to report it with, so the sending half waits until the repositories exist.
     ref.watch(attributionBootstrapProvider);
 
+    // And push, for the same reason again: the device token is registered against a session, so it
+    // waits for the repositories rather than for boot.
+    ref.watch(pushBootstrapProvider);
+
     return MaterialApp.router(
       title: 'Astrolok',
       debugShowCheckedModeBanner: false,

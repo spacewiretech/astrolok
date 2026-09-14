@@ -9,9 +9,10 @@ startup sequence.
 
 - `mobile_boot.dart` — a conditional export on `dart.library.io`: the stub for web, the real
   one otherwise. No logic of its own.
-- `mobile_boot_io.dart` — startup. Declares: `bootMobileApp()`, plus private `_startAnalytics()`
-  and `_reportUncaughtErrors()`. Loads `Env`, optionally calls `Supabase.initialize`, brings
-  analytics up, then `runApp`.
+- `mobile_boot_io.dart` — startup. Declares: `bootMobileApp()`, plus private `_startAnalytics()`,
+  `_reportUncaughtErrors()` and `_recordCrash()`. Starts Firebase and installs the crash handlers,
+  loads `Env`, optionally calls `Supabase.initialize`, brings analytics up, starts listening for
+  push taps, then `runApp`.
 - `mobile_boot_stub.dart` — a no-op `bootMobileApp()` for web. Never called; it exists so the
   web build has a symbol to resolve without pulling in the `dart:io` half.
 
@@ -22,6 +23,9 @@ startup sequence.
   `reading_speech.dart`, `reading_image_store.dart`, and both reading viewmodels), and dart2js
   rejects the import before tree-shaking can drop it — so a runtime `if (kIsWeb)` would not
   compile.
+- **Firebase comes up first**, ahead of `Env` and Supabase, so Crashlytics sees a failure anywhere
+  later in boot. Like Supabase, a failed init is logged rather than fatal: `firebaseInitialised`
+  stays false, the Firebase sink is left out of the fan-out, and push does nothing.
 - **`ProviderScope` is created here, not in `app.dart`**, with one override:
   `analyticsProvider.overrideWithValue(analytics)`, so the global holder (`installAnalytics`)
   and Riverpod can never disagree about the sink.
@@ -30,3 +34,5 @@ startup sequence.
 - Analytics starts twice on purpose: here from the disk-cached `app_config`, then again via
   `analyticsBootstrapProvider` for a first launch where no cache existed. Events fired in
   between are buffered by `MixpanelAnalytics`.
+- `pushMessaging.start()` runs after analytics and is not awaited, so a launch from a notification
+  tap reaches a real sink as `Push Opened` without holding the first frame.

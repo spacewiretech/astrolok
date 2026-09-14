@@ -69,6 +69,18 @@ from here. This is where the credentials, the billing state machine and the mode
 - `mixpanel.ts` — server-side events the client can never observe (renewals, holds,
   chargebacks). Exports: `configureMixpanel`, `mixpanelConfigured`, `trackServer`, `setProfile`.
 
+**Trial allowance**
+- `trial_reading_limit.ts` — one palm and one face reading per trial, checked by both reading
+  functions before the daily quota. Counts only `ready` rows (plus `pending` ones younger than
+  `PENDING_HOLD_MS`, so concurrent requests cannot both pass) since `trial_started_at`. Exports:
+  `ReadingTable`, `TRIAL_LIMIT_KEYS`, `PENDING_HOLD_MS`, `trialReadingLimitFrom`,
+  `trialLimitMessage`, `countedReadingsFilter`, `trialReadingsUsed`.
+
+**Push**
+- `push.ts` — the pure half of `push-token`: validates a registration body before it reaches the
+  table's CHECKs. Exports: `PushPlatform`, `PushRegistration`, `MAX_PUSH_TOKEN_LENGTH`,
+  `parsePushRegistration`.
+
 **Small helpers**
 - `person.ts` — Exports: `ageFrom`, `firstName`.
 

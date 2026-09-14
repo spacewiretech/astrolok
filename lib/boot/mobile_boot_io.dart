@@ -1,4 +1,7 @@
 
+import 'dart:async';
+
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,8 +15,11 @@ import '../data/analytics/analytics_context.dart';
 import '../data/analytics/analytics_events.dart';
 import '../data/analytics/analytics_session.dart';
 import '../data/analytics/facebook_analytics.dart';
+import '../data/analytics/firebase_analytics_sink.dart';
 import '../data/analytics/mixpanel_analytics.dart';
 import '../data/attribution/attribution_service.dart';
+import '../data/firebase/firebase_boot.dart';
+import '../data/firebase/push_messaging.dart';
 import '../data/providers.dart';
 import '../data/repositories/app_config_repository.dart';
 import '../data/supabase/supabase_app_config_repository.dart';
@@ -21,6 +27,12 @@ import '../data/supabase/supabase_app_config_repository.dart';
 /// The phone app's real entry point, lifted out of `main()` so that the web build never
 /// imports the app tree. See `mobile_boot.dart` for why that has to be a compile-time split.
 Future<void> bootMobileApp() async {
+  // First, so the crash reporter is watching everything after it: a Supabase or analytics failure
+  // during boot is exactly the crash nobody would otherwise see. Never throws — a Firebase that
+  // will not come up leaves `firebaseInitialised` false and the app carries on without it.
+  await startFirebase();
+  _reportUncaughtErrors();
+
   await Env.load();
 
   if (Env.hasSupabase) {
@@ -46,6 +58,11 @@ Future<void> bootMobileApp() async {
   // before runApp, because the first events are launch events.
   final analytics = await _startAnalytics();
 
+  // After analytics, because a notification that launched the app is reported as `Push Opened`,
+  // and that must reach a real sink rather than the no-op. Unawaited: reading the launch message
+  // is a platform round trip the first frame has no reason to wait on.
+  unawaited(pushMessaging.start());
+
   runApp(
     ProviderScope(
       // The same instance the global holder has, so the router observer, the shared widgets and
@@ -68,10 +85,15 @@ Future<Analytics> _startAnalytics() async {
   final mixpanel = MixpanelAnalytics();
   final facebook = FacebookAnalytics();
 
-  // Two sinks with very different appetites behind one interface: Mixpanel answers product
-  // questions and takes everything, Facebook trains an ad optimiser and takes four conversions.
-  // The fan-out is what keeps that a property of the sinks rather than of every call site.
-  final analytics = MultiAnalytics([mixpanel, facebook]);
+  // Only when Firebase actually came up. `FirebaseAnalytics.instance` throws without an app, and
+  // a sink that failed on every call would be absorbed by the fan-out but is still pure noise.
+  final firebase = firebaseInitialised ? FirebaseAnalyticsSink() : null;
+
+  // Three sinks with very different appetites behind one interface: Mixpanel answers product
+  // questions and takes everything, Facebook trains an ad optimiser and takes four conversions,
+  // and Firebase takes screens, identity and those same conversions for Google's side. The
+  // fan-out is what keeps that a property of the sinks rather than of every call site.
+  final analytics = MultiAnalytics([mixpanel, facebook, ?firebase]);
 
   // Installed before anything is tracked, and before the token is known, because the buffer is
   // what makes an unstarted sink useful rather than lossy.
@@ -101,29 +123,45 @@ Future<Analytics> _startAnalytics() async {
     final cached = await SupabaseAppConfigRepository.readCachedConfig();
     await mixpanel.start(cached[mixpanelTokenKey]);
     await startFacebook(facebook, cached);
+    if (firebase != null) startFirebaseAnalytics(firebase, cached);
   } catch (error) {
     debugPrint('[analytics] could not read the cached config: $error');
   }
 
-  _reportUncaughtErrors();
   await analyticsSession.attach(screensViewed: () => analyticsObserver.screensViewed);
 
   return analytics;
 }
 
-/// Routes uncaught errors to Mixpanel as well as to the console.
+/// Sends uncaught errors to Crashlytics, and keeps them on the console.
 ///
-/// There is no crash reporter in this app, so without this a crash is invisible the moment the
-/// user is not attached to a debugger. `App Crashed` is not a substitute for one — it has no
-/// symbolication and no grouping — but it does answer the question that matters most for a
-/// funnel: whether the users who dropped out of a flow dropped out because it crashed.
+/// Installed straight after Firebase, ahead of everything else in boot, so a failure while
+/// Supabase or analytics comes up is reported rather than lost. Crashlytics symbolicates and groups
+/// what arrives here, which is what a crash actually needs.
+///
+/// The commented-out `App Crashed` below was the stand-in from before there was a crash reporter.
+/// It stays because it answers a different question — whether the users who dropped out of a
+/// funnel dropped out because it crashed — and switching it back on is a decision about Mixpanel
+/// volume, not about crash reporting.
 ///
 /// Both handlers chain to whatever was installed before them, so the framework still prints the
-/// error to the console and any future crash reporter still sees it.
+/// error to the console; Crashlytics is told not to print it a second time.
 void _reportUncaughtErrors() {
   final previousFlutterError = FlutterError.onError;
   FlutterError.onError = (details) {
     previousFlutterError?.call(details);
+    if (firebaseInitialised) {
+      // Non-fatal, for the reason `P.fatal` is false below: a framework error is usually
+      // recoverable — a bad layout, a failed image — and the app carries on. `recordError` rather
+      // than `recordFlutterError`, which presents the error again after the handler above has.
+      _recordCrash(() => FirebaseCrashlytics.instance.recordError(
+            details.exception,
+            details.stack,
+            reason: details.context,
+            information: details.informationCollector?.call() ?? const [],
+            printDetails: false,
+          ));
+    }
     // analytics.track(Ev.appCrashed, {
     //   P.error: details.exceptionAsString(),
     //   P.stackHead: _stackHead(details.stack),
@@ -135,6 +173,16 @@ void _reportUncaughtErrors() {
 
   final previousPlatformError = PlatformDispatcher.instance.onError;
   PlatformDispatcher.instance.onError = (error, stack) {
+    if (firebaseInitialised) {
+      // Fatal: an error that reached the dispatcher escaped every handler in the app, and may be
+      // about to take the isolate down.
+      _recordCrash(() => FirebaseCrashlytics.instance.recordError(
+            error,
+            stack,
+            fatal: true,
+            printDetails: false,
+          ));
+    }
     // analytics.track(Ev.appCrashed, {
     //   P.error: error.toString(),
     //   P.stackHead: _stackHead(stack),
@@ -145,6 +193,20 @@ void _reportUncaughtErrors() {
     // analytics.flush();
     return previousPlatformError?.call(error, stack) ?? false;
   };
+}
+
+/// Runs one Crashlytics report without letting its own failure escape.
+///
+/// An unawaited report that failed would surface as an unhandled async error — which lands back in
+/// `PlatformDispatcher.onError` above and asks Crashlytics to report its own failure, in a loop.
+void _recordCrash(Future<void> Function() report) {
+  try {
+    unawaited(report().catchError((Object error) {
+      debugPrint('[crashlytics] could not record an error: $error');
+    }));
+  } catch (error) {
+    debugPrint('[crashlytics] could not record an error: $error');
+  }
 }
 
 /// The first three frames of a stack, which is enough to tell two crashes apart without

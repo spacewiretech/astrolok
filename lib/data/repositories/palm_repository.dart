@@ -35,6 +35,12 @@ class PalmLimitReachedException extends PalmException {
   const PalmLimitReachedException(super.message);
 }
 
+/// The trial's palm reading is spent. Nothing changes that until the trial ends, so — like the
+/// daily limit — the capture screen closes its button rather than offering a retry.
+class PalmTrialLimitException extends PalmException {
+  const PalmTrialLimitException(super.message);
+}
+
 /// The model is unreachable, overloaded, or answered with something unusable. Retryable, and
 /// nothing is wrong with the photo — so the scan screen offers to try again with the same one.
 class PalmUnavailableException extends PalmException {

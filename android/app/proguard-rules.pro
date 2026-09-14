@@ -32,3 +32,12 @@
 # silently does not, which is the worst possible way to discover a keep rule is missing.
 -keep class com.android.installreferrer.** { *; }
 -dontwarn com.android.installreferrer.**
+
+# Firebase Crashlytics.
+#
+# R8 renames classes and strips line tables, which leaves a release crash as a stack of `a.b.c`
+# frames with no line numbers. The Crashlytics Gradle plugin uploads the mapping file that undoes
+# the renaming; these keep what a mapping file cannot restore. The Firebase AARs ship their own
+# consumer rules for everything else.
+-keepattributes SourceFile,LineNumberTable
+-keep public class * extends java.lang.Exception

@@ -6,6 +6,7 @@ import {
   asUserRow,
   graceHoursFrom,
   isEntitled,
+  isInTrial,
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
 import { GeminiError, geminiSettings, readImage } from "../_shared/gemini.ts";
@@ -19,6 +20,12 @@ import {
   normaliseFaceReading,
   faceSystemPrompt,
 } from "../_shared/face_reading.ts";
+import {
+  TRIAL_LIMIT_KEYS,
+  trialLimitMessage,
+  trialReadingLimitFrom,
+  trialReadingsUsed,
+} from "../_shared/trial_reading_limit.ts";
 
 /**
  * Reads a photograph of a face and returns a written reading.
@@ -112,6 +119,30 @@ Deno.serve(async (req) => {
   const user = asUserRow(userRow);
   if (!isEntitled(user, graceHoursFrom(config))) {
     return fail("not_entitled", "Your subscription has ended. Renew to keep reading.", 402);
+  }
+
+  // ------------------------------------------------------------ trial allowance
+  //
+  // A trial is one face reading, not a day of them, counted separately from the palm one. Checked
+  // before the daily quota so a trial user is told the rule that actually applies to them. Only
+  // readings they received count — see `trial_reading_limit.ts` — so a photo that was not a face
+  // does not spend it.
+  if (isInTrial(user, graceHoursFrom(config))) {
+    const trialLimit = trialReadingLimitFrom(config, TRIAL_LIMIT_KEYS.face_readings);
+
+    let used: number;
+    try {
+      used = await trialReadingsUsed(db, "face_readings", user);
+    } catch (error) {
+      // Fail closed, like the quota below: if the allowance cannot be checked, do not spend
+      // against it.
+      console.error("face-reading: trial allowance check failed", error);
+      return fail("server_error", "Something went wrong. Please try again.", 500);
+    }
+
+    if (used >= trialLimit) {
+      return fail("trial_limit_reached", trialLimitMessage("face", trialLimit), 403);
+    }
   }
 
   // ------------------------------------------------------------ quota

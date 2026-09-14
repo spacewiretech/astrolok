@@ -87,6 +87,12 @@ class _FaceScanViewState extends ConsumerState<FaceScanView>
         ref.read(faceLimitProvider.notifier).state = state.error;
         context.pop();
 
+      case FaceScanOutcome.trialLimitReached:
+        // Back to the capture screen like the daily limit, which closes both buttons and explains
+        // the trial allowance in a popup. Nothing changes the answer until the trial ends.
+        ref.read(faceTrialLimitProvider.notifier).state = state.error;
+        context.pop();
+
       case FaceScanOutcome.notEntitled:
         context.go(Routes.subscribe);
 

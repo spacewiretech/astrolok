@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Push notifications, for Firebase Messaging. `development` is correct in the file: Xcode
+	     re-signs App Store and TestFlight exports with `production`. The App ID must also have the
+	     Push Notifications capability enabled in the Apple Developer portal, or signing fails. -->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

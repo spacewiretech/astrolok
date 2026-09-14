@@ -1,6 +1,7 @@
 # Pinned rather than left to CocoaPods' default, which is far older than the camera and
-# TTS pods accept. Matches IPHONEOS_DEPLOYMENT_TARGET in the Xcode project.
-platform :ios, '13.0'
+# TTS pods accept. Firebase now sets the floor: firebase_core 4.x and the Firebase iOS SDK 12
+# behind it require iOS 15. Matches IPHONEOS_DEPLOYMENT_TARGET in the Xcode project.
+platform :ios, '15.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'

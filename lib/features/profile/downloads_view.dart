@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../app/assets.dart';
 import '../../app/router.dart';
+import '../../app/trial_scan_guard.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
@@ -189,11 +190,23 @@ class _ReadingRow extends StatelessWidget {
   }
 }
 
-class _Empty extends StatelessWidget {
+class _Empty extends ConsumerWidget {
   const _Empty();
 
+  /// The same trial check as Home, so this is not the one door that opens a camera whose photo
+  /// the server would refuse.
+  Future<void> _open(
+    BuildContext context,
+    WidgetRef ref,
+    String feature,
+    String route,
+  ) async {
+    if (await guardTrialScan(context, ref, feature, source: 'downloads')) return;
+    if (context.mounted) context.push(route);
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Padding(
       padding: const EdgeInsets.all(AppShape.gutter),
       child: Column(
@@ -220,13 +233,15 @@ class _Empty extends StatelessWidget {
           PrimaryButton(
             label: 'Read my palm',
             tone: ButtonTone.navy,
-            onPressed: () => context.push(Routes.palmCapture),
+            onPressed: () =>
+                _open(context, ref, ReadingFeature.palm, Routes.palmCapture),
           ),
           const SizedBox(height: 10),
           PrimaryButton(
             label: 'Read my face',
             tone: ButtonTone.outline,
-            onPressed: () => context.push(Routes.faceCapture),
+            onPressed: () =>
+                _open(context, ref, ReadingFeature.face, Routes.faceCapture),
           ),
         ],
       ),

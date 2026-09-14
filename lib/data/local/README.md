@@ -13,6 +13,11 @@ make deep links survive a cold start.
   `PalmReadingStore`, `FaceReadingStore`, `ChatThreadStore` (also `load()`, `recent()`).
 - `reading_image_store.dart` — the captured photographs, kept on the device and nowhere else.
   Declares: `ReadingImageStore`.
+- `trial_scan_tracker.dart` — how many palm and face readings each account has had during its
+  trial, keyed by user id **and** feature (the reading caches are per device, not per account).
+  Declares: `TrialScanTracker` (`used`, `recordReading`, `markExhausted`, `limitFrom`). Only a
+  hint for the popup on Home — `palm-reading` and `face-reading` enforce the allowance — so every
+  failure reads as nothing used.
 
 ## Notes
 

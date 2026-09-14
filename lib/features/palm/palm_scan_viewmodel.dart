@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/analytics/analytics.dart';
 import '../../data/analytics/analytics_events.dart';
+import '../../data/entitlement.dart';
+import '../../data/local/trial_scan_tracker.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/palm_repository.dart';
 import 'palm_capture_viewmodel.dart';
@@ -87,6 +89,16 @@ class PalmScanViewModel extends AutoDisposeNotifier<PalmScanState> {
       await ref.read(palmReadingStoreProvider).save(saved);
       if (_disposed) return;
 
+      // Counted on this device too, so a trial user's next tap on Home explains the allowance
+      // instead of opening the camera. The server keeps the count that actually decides.
+      final user = ref.read(entitlementProvider);
+      if (user != null && user.inTrial) {
+        await ref
+            .read(trialScanTrackerProvider)
+            .recordReading(user.id, ReadingFeature.palm);
+        if (_disposed) return;
+      }
+
       await _holdMinimum(startedAt);
       if (_disposed) return;
 
@@ -119,6 +131,24 @@ class PalmScanViewModel extends AutoDisposeNotifier<PalmScanState> {
       // the rest of the day.
       await ref.read(palmImageStoreProvider).discardPending();
       await _settle(startedAt, e.message, PalmScanOutcome.limitReached);
+    } on PalmTrialLimitException catch (e) {
+      // The trial's palm reading is spent: a dead end until the trial ends, caught by name for the
+      // same reason as the daily limit above. The server refusing means this device's count was
+      // behind — a reinstall, or a reading taken on another phone — so it is brought up to the
+      // allowance, and the next tap on Home says so before the camera opens.
+      await ref.read(palmImageStoreProvider).discardPending();
+      final user = _disposed ? null : ref.read(entitlementProvider);
+      if (user != null) {
+        await ref.read(trialScanTrackerProvider).markExhausted(
+              user.id,
+              ReadingFeature.palm,
+              TrialScanTracker.limitFrom(
+                ref.read(appConfigProvider).valueOrNull,
+                ReadingFeature.palm,
+              ),
+            );
+      }
+      await _settle(startedAt, e.message, PalmScanOutcome.trialLimitReached);
     } on PalmNotEntitledException catch (e) {
       await _settle(startedAt, e.message, PalmScanOutcome.notEntitled);
     } on PalmSignedOutException catch (e) {

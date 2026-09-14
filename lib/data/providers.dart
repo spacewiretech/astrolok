@@ -8,6 +8,7 @@ import '../app/env.dart';
 import 'analytics/analytics.dart';
 import 'analytics/analytics_events.dart';
 import 'analytics/facebook_analytics.dart';
+import 'analytics/firebase_analytics_sink.dart';
 import 'analytics/mixpanel_analytics.dart';
 import 'attribution/attribution_service.dart';
 import 'camera/reading_camera.dart';
@@ -21,14 +22,17 @@ import 'fake/fake_session.dart';
 import 'fake/fake_subscription_repository.dart';
 import 'fast2sms/fast2sms_auth_repository.dart';
 import 'fast2sms/fast2sms_client.dart';
+import 'firebase/push_messaging.dart';
 import 'local/reading_image_store.dart';
 import 'local/reading_store.dart';
+import 'local/trial_scan_tracker.dart';
 import 'media/promo_video_source.dart';
 import 'repositories/app_config_repository.dart';
 import 'repositories/auth_repository.dart';
 import 'repositories/chat_repository.dart';
 import 'repositories/face_repository.dart';
 import 'repositories/palm_repository.dart';
+import 'repositories/push_repository.dart';
 import 'repositories/referral_repository.dart';
 import 'repositories/subscription_repository.dart';
 import 'supabase/edge_functions.dart';
@@ -38,6 +42,7 @@ import 'supabase/supabase_auth_repository.dart';
 import 'supabase/supabase_chat_repository.dart';
 import 'supabase/supabase_face_repository.dart';
 import 'supabase/supabase_palm_repository.dart';
+import 'supabase/supabase_push_repository.dart';
 import 'supabase/supabase_referral_repository.dart';
 import 'supabase/supabase_subscription_repository.dart';
 import 'tts/reading_speech.dart';
@@ -110,6 +115,11 @@ final analyticsBootstrapProvider = FutureProvider<void>((ref) async {
 
   final facebook = analyticsSink<FacebookAnalytics>(analytics);
   if (facebook != null) await startFacebook(facebook, config);
+
+  // Present only when Firebase came up at boot. Started again from the fetched config so a price
+  // corrected in `app_config` reaches the purchase value without waiting for the next launch.
+  final firebase = analyticsSink<FirebaseAnalyticsSink>(analytics);
+  if (firebase != null) startFirebaseAnalytics(firebase, config);
 });
 
 /// Hands the attribution service a backend, and drains whatever it has been holding.
@@ -136,6 +146,26 @@ final attributionBootstrapProvider = FutureProvider<void>((ref) async {
 final referralRepositoryProvider = Provider<ReferralRepository>((ref) {
   if (!supabaseReady) return const NoopReferralRepository();
   return SupabaseReferralRepository(
+    SupabaseEdgeFunctions(Supabase.instance.client),
+    ref.watch(sessionStoreProvider),
+  );
+});
+
+/// Hands push messaging a backend, so this device's token can be registered once a user resolves.
+///
+/// The mirror of [attributionBootstrapProvider], waiting on the same thing for the same reason:
+/// the token is stored against a session, and there is none at boot. Watched by [AstrolokApp].
+final pushBootstrapProvider = FutureProvider<void>((ref) async {
+  await pushMessaging.attachBackend(ref.watch(pushRepositoryProvider));
+});
+
+/// Push-token registration.
+///
+/// Supabase only, like [referralRepositoryProvider]: the other rungs have no `users` table for a
+/// token to belong to, so the no-op answers "not registered" and push stays walkable.
+final pushRepositoryProvider = Provider<PushRepository>((ref) {
+  if (!supabaseReady) return const NoopPushRepository();
+  return SupabasePushRepository(
     SupabaseEdgeFunctions(Supabase.instance.client),
     ref.watch(sessionStoreProvider),
   );
@@ -330,6 +360,14 @@ final faceImageStoreProvider =
 
 final faceReadingStoreProvider =
     Provider<FaceReadingStore>((ref) => const FaceReadingStore());
+
+// ---------------------------------------------------------------- trial allowance
+
+/// How many palm and face readings each account has had during its trial, on this device.
+///
+/// A hint for the tap on Home. The reading functions enforce the allowance themselves.
+final trialScanTrackerProvider =
+    Provider<TrialScanTracker>((ref) => const TrialScanTracker());
 
 // ---------------------------------------------------------------- astro chat
 

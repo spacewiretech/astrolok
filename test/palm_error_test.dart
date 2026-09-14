@@ -90,6 +90,17 @@ void main() {
       await expectLater(read(), throwsA(isA<PalmLimitReachedException>()));
     });
 
+    test('trial_limit_reached is its own dead end, not the daily limit', () async {
+      functions.error = const EdgeError(
+        'trial_limit_reached',
+        'Trial users can scan their palm only once.',
+      );
+
+      // Kept apart from `PalmLimitReachedException`: that one lifts tomorrow and this one when the
+      // trial ends, and the capture screen explains the second with a popup.
+      await expectLater(read(), throwsA(isA<PalmTrialLimitException>()));
+    });
+
     test('not_entitled', () async {
       functions.error = const EdgeError('not_entitled', 'Your subscription has ended.');
       await expectLater(read(), throwsA(isA<PalmNotEntitledException>()));

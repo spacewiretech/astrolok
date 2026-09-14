@@ -23,6 +23,9 @@ line.
   `ChatSignedOut…`, `ChatThreadGone…`.
 - `subscription_repository.dart` — Declares: `SubscriptionRepository` (`offer`, `start`,
   `refreshStatus`, `cancel`), `SubscriptionException`.
+- `push_repository.dart` — Declares: `PushRepository` (`register({token, platform})`, which
+  answers whether the backend accepted it and never throws), `NoopPushRepository` for the tiers
+  with no `users` table.
 - `app_config_repository.dart` — runtime config served from the backend rather than baked into
   the build. Declares: `AppConfigRepository` (`load({force})`, `remoteKeys`), `defaultAppConfig`,
   `shippedAppConfig`, and the `AppConfigValues` extension on `Map<String, String>`

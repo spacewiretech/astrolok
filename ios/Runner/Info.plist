@@ -26,6 +26,12 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Lets Firebase Messaging wake the app for a push that arrives while it is backgrounded.
+	     Without it iOS still displays a notification, but a data message never reaches Dart. -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<!-- Both strings are shown verbatim in the system permission dialog. iOS terminates the
 	     app on first access if the matching key is absent, so these are load-bearing, not
 	     documentation. -->
