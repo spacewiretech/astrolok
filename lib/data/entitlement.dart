@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'attribution/attribution_service.dart';
+import 'firebase/push_messaging.dart';
 import 'models/app_user.dart';
 import 'providers.dart';
 
@@ -37,6 +38,11 @@ class EntitlementNotifier extends Notifier<AppUser?> {
     // service guards itself against overlapping drains and against re-asking once the backend has
     // given a terminal answer, so the repeat calls cost a single flag read.
     if (user != null) unawaited(attributionService.onUserResolved());
+
+    // And registers this device for push, once more for the same reason: the token is stored
+    // against the session. Unawaited, and de-duplicated inside by token and account, so the resume
+    // that re-resolves the same user costs a token read and no request.
+    if (user != null) unawaited(pushMessaging.onUserResolved(user));
   }
 
   void clear() => state = null;

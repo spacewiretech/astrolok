@@ -19,6 +19,11 @@ signature check. No network, no database.
   duplicate lines, incompleteness.
 - `mixpanel_test.ts` (11) — server-side Mixpanel: token gating, `$ip` suppression, insert-id
   hashing and dedupe, profile writes.
+- `push_test.ts` (7) — `parsePushRegistration`: the two platforms, the length bound shared with
+  the `push_tokens` CHECK, whitespace inside a token, and bodies that are not objects.
+- `trial_reading_limit_test.ts` (7) — the per-trial reading allowance: limit parsing and its
+  fallback to one, that only a live trial is limited, and that only `ready` (and still-in-flight
+  `pending`) readings count — never `rejected` or `failed`.
 - `review_account_test.ts` (6) — the store-review sign-in gate, focused on when it must stay
   **off**: half-filled config, placeholder values, malformed input.
 
@@ -31,7 +36,7 @@ signature check. No network, no database.
   ```
 
   The root README quotes `deno test functions/tests/payments_test.ts` for the payments file
-  alone. 182 tests in total.
+  alone. 233 tests in total.
 - Everything under test is deliberately pure, which is why the normalisers in `_shared/` take
   and return plain data rather than touching the DB themselves.
 - `mixpanel_test.ts` guards a specific past failure: the server `$insert_id` must key on the

@@ -12,10 +12,12 @@ import '../../data/analytics/analytics.dart';
 import '../../data/analytics/att_consent.dart';
 import '../../data/analytics/analytics_events.dart';
 import '../../app/router.dart';
+import '../../app/trial_scan_guard.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
 import '../../data/entitlement.dart';
+import '../../data/firebase/push_messaging.dart';
 import '../../data/providers.dart';
 import '../../widgets/astral_background.dart';
 import '../../widgets/brand_logo.dart';
@@ -102,7 +104,11 @@ class _HomeViewState extends ConsumerState<HomeView> {
       // The paywall asks first for anyone on the purchase path; this covers the already-entitled
       // user who lands straight here and never sees one. Idempotent — iOS only prompts while the
       // status is undetermined, and the helper guards against a second request in-process.
-      unawaited(ensureTrackingConsent());
+      //
+      // The notification prompt follows it rather than running beside it: two system dialogs
+      // requested at once on iOS contend, and one of them is silently dropped. Same once-settled
+      // shape — see `PushMessaging.ensurePermission`.
+      unawaited(ensureTrackingConsent().whenComplete(pushMessaging.ensurePermission));
 
       // The paywall is behind this user, so the promo player onboarding warmed is a video
       // decoder held open for nothing. Dropping it is safe precisely because nothing is
@@ -215,17 +221,24 @@ class _HomeViewState extends ConsumerState<HomeView> {
   /// The carousel and the cards below it advertise exactly the same three things, so without
   /// [surface] the two are one number and there is no way to tell whether the strip at the top
   /// of the screen earns the space it takes.
-  void _openReading(
+  Future<void> _openReading(
     BuildContext context,
     String route,
     String destination,
     String surface,
-  ) {
+  ) async {
     analytics.track(Ev.readingCardTapped, {
       P.destination: destination,
       P.source: surface,
     });
-    context.push(route);
+
+    // A trial is one palm reading and one face reading. Once one is spent, the tap explains that
+    // rather than opening a camera whose photo the server would refuse.
+    if (destination != ReadingFeature.chat &&
+        await guardTrialScan(context, ref, destination, source: surface)) {
+      return;
+    }
+    if (context.mounted) context.push(route);
   }
 }
 

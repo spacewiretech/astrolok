@@ -3,6 +3,11 @@ import java.io.FileInputStream
 
 plugins {
     id("com.android.application")
+    // Firebase. No Firebase entries belong in `dependencies` below: the FlutterFire plugins bring
+    // their own Firebase BoM, and a second one pinned here would override the version they were
+    // built and tested against.
+    id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }

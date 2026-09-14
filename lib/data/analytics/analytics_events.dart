@@ -35,6 +35,17 @@ abstract final class Ev {
   /// account, and this is the only thing that tells them apart.
   static const trackingConsentResolved = 'Tracking Consent Resolved';
 
+  /// The answer to the notification permission prompt, whether it was just given or was already
+  /// standing. Asked from Home, once the ATT prompt has settled.
+  ///
+  /// The opt-in rate this measures is the ceiling on how many users a push can ever reach, and on
+  /// Android 13+ and iOS it is the only thing standing between a registered token and a delivery.
+  static const pushPermissionResolved = 'Push Permission Resolved';
+
+  /// A push notification was tapped. [P.source] is `launch` when the tap started the app and
+  /// `background` when it brought a running app forward.
+  static const pushOpened = 'Push Opened';
+
   // ---------------------------------------------------------------- navigation
 
   static const screenViewed = 'Screen Viewed';
@@ -154,6 +165,11 @@ abstract final class Ev {
   static const readingNarrationStopped = 'Reading Narration Stopped';
   static const readingPdfExported = 'Reading PDF Exported';
   static const readingShared = 'Reading Shared';
+
+  /// The popup telling a trial user their palm or face reading is spent. `source` is the surface
+  /// that was tapped (`carousel` / `card` / `downloads`), or `server` when the server refused a
+  /// photo the device did not know to stop — a reinstall, or a reading taken on another phone.
+  static const trialScanLimitShown = 'Trial Scan Limit Shown';
 
   /// The bridge between a reading and the chat. Worth its own event because it is the app's main
   /// cross-sell, and the only way to tell an organic chat from a prompted one.
@@ -320,13 +336,21 @@ abstract final class P {
 
   // ---------------------------------------------------------------- ad attribution
 
-  /// The raw ATT authorisation status — `authorized`, `denied`, `restricted`, `notDetermined`.
+  /// The raw authorisation status of whichever prompt the event is about: ATT's `authorized`,
+  /// `denied`, `restricted`, `notDetermined`, or the notification prompt's `authorized`, `denied`,
+  /// `notDetermined`, `provisional`.
   static const status = 'status';
   static const granted = 'granted';
 
   /// False when the status was already settled on a previous launch, so the opt-in *rate* can be
   /// measured over the users who were actually asked rather than over every launch.
   static const prompted = 'prompted';
+
+  // ---------------------------------------------------------------- push
+
+  /// FCM's id for the message that was tapped, so an open can be joined to the send that caused it
+  /// once a sender exists.
+  static const messageId = 'message_id';
 
   // ---------------------------------------------------------------- acquisition
   //

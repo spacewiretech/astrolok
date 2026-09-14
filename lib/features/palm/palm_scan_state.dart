@@ -23,6 +23,10 @@ enum PalmScanOutcome {
   /// The day's allowance is gone. Back to the camera, with the buttons closed.
   limitReached,
 
+  /// The trial's palm reading is spent. Back to the camera with the buttons closed, and a popup
+  /// saying why.
+  trialLimitReached,
+
   /// The subscription lapsed while waiting.
   notEntitled,
 

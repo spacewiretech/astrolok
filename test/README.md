@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The Flutter test suite — 23 files, a mix of pure unit tests and `testWidgets` layout tests.
+The Flutter test suite — 30 files, a mix of pure unit tests and `testWidgets` layout tests.
 Run with `flutter test` (the root README quotes 246 tests, 52 of them the website).
 
 ## Files
@@ -29,7 +29,12 @@ Run with `flutter test` (the root README quotes 246 tests, 52 of them the websit
 - `palm_camera_test.dart` — `palmCameraProvider` lifecycle (ready / unavailable / capture); the
   autoDispose spin-forever bug.
 - `palm_error_test.dart` — every failure mode of the reading endpoint and its mapping to app
-  outcomes (`no_palm`, `limit_reached`, long timeout).
+  outcomes (`no_palm`, `limit_reached`, `trial_limit_reached`, long timeout).
+- `face_error_test.dart` — the face endpoint's two dead ends kept apart: the daily limit and the
+  trial allowance.
+- `trial_scan_tracker_test.dart` — the device-side trial count: per account and per feature,
+  `markExhausted` never lowering a count, a corrupt value reading as nothing used, and
+  `limitFrom` parsing like the server.
 - `palm_progress_test.dart` — scan progress curve invariants: monotonic, never reaches 1 before
   the reading completes.
 - `palm_reading_parse_test.dart`, `face_reading_parse_test.dart` — `fromServer` ordering,
@@ -50,6 +55,12 @@ Run with `flutter test` (the root README quotes 246 tests, 52 of them the websit
   the others their event.
 - `facebook_analytics_test.dart` — the off switches (blank app id, `facebook_events_enabled =
   false`) and the event allowlist.
+- `firebase_analytics_sink_test.dart` — the GA4 allowlist, conversions waiting on prices, the
+  persisted purchase guard (independent of Facebook's), identity mirrored onto Crashlytics, and
+  that an SDK failure never escapes the sink.
+- `push_messaging_test.dart` — the notification prompt (once per install on Android, never
+  re-asked on iOS), token registration once per token and account, and tap reporting. Firebase
+  is stood in by a `PushPlatform` fake.
 - `asset_fallback_test.dart` — missing image/SVG fallbacks, so screens lay out correctly before
   the artwork exists.
 - `website_test.dart` — the marketing site: headline and price, reading names, "Chat with Astro
@@ -61,7 +72,8 @@ Run with `flutter test` (the root README quotes 246 tests, 52 of them the websit
 - Several tests exist because of a specific bug that shipped; the file comments say which. Treat
   those as regression guards, not coverage padding.
 - Widget tests run without a camera or platform channels, which is why `FakeReadingCamera` and
-  `NoopAnalytics` exist in the app tree rather than here.
+  `NoopAnalytics` exist in the app tree rather than here. Firebase is never initialised under
+  `flutter test`; everything that touches it checks `firebaseInitialised` first.
 - `subscriptionPollDelaysProvider` is overridable precisely so the paywall tests do not wait out
   the real poll schedule.
 - The backend has its own suite: `supabase/functions/tests/`, run with `deno test`.

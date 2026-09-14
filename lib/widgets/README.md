@@ -23,6 +23,9 @@ The shared design-system widgets: everything more than one screen draws. Present
   `PrimaryButton`, `GoldPillButton`.
 - `circle_icon_button.dart` — the round white top-corner button. Declares: `CircleIconButton`.
 - `app_snackbar.dart` — Declares: `showAppSnackBar()` (a function, not a widget).
+- `trial_scan_limit_dialog.dart` — the popup for a trial user whose palm or face reading is
+  spent. Declares: `TrialScanCopy`, `showTrialScanLimitDialog()`. Pure UI; the data-aware caller
+  is `lib/app/trial_scan_guard.dart`.
 
 **Input**
 - `phone_field.dart` — Declares: `PhoneField`, `TextFieldBox`.

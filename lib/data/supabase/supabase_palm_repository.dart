@@ -52,6 +52,7 @@ class SupabasePalmRepository implements PalmRepository {
         // why ("a bit too dark", "hold steady"), so it is passed through unchanged.
         'no_palm' => NoPalmDetectedException(e.message),
         'limit_reached' => PalmLimitReachedException(e.message),
+        'trial_limit_reached' => PalmTrialLimitException(e.message),
         'not_entitled' => PalmNotEntitledException(e.message),
         'unauthorized' => const PalmSignedOutException('Please sign in again.'),
         'ai_unavailable' => PalmUnavailableException(e.message),

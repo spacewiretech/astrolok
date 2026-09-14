@@ -9,14 +9,16 @@ domain models, and the single Riverpod binding surface the features reach all of
 
 - `providers.dart` — **the one place the app is wired together.** Declares every provider the
   features use: `sessionStoreProvider`, `analyticsProvider`, `analyticsBootstrapProvider`,
+  `pushBootstrapProvider`, `pushRepositoryProvider`,
   `backendMode`, `appConfigRepositoryProvider`, `appConfigProvider`, `authRepositoryProvider`,
   `subscriptionRepositoryProvider`, `cashfreeCheckoutProvider`, `upiAppPreferenceProvider`,
   `promoVideoProvider`, `palmRepositoryProvider`, `faceRepositoryProvider`,
   `chatRepositoryProvider`, the per-feature
   camera/image/reading stores, `chatThreadStoreProvider`, `readingSpeechProvider`,
   `fakeSessionProvider`.
-- `entitlement.dart` — the last entitlement answer the server gave, readable by routing.
-  Declares: `EntitlementNotifier`, `entitlementProvider`.
+- `entitlement.dart` — the last entitlement answer the server gave, readable by routing. Its
+  `set` is also the one hook that identifies analytics, claims a referral and registers the
+  device for push. Declares: `EntitlementNotifier`, `entitlementProvider`.
 
 ## Subfolders
 
@@ -25,7 +27,8 @@ domain models, and the single Riverpod binding surface the features reach all of
 - `fast2sms/` — direct-SMS OTP fallback; ships the key in the app.
 - `fake/` — in-memory tier, so a fresh checkout is walkable.
 - `models/` — plain domain types; `fromServer` degrades rather than throwing.
-- `analytics/` — the `Analytics` port, the Mixpanel and Facebook sinks, ATT consent.
+- `analytics/` — the `Analytics` port, the Mixpanel, Facebook and Firebase sinks, ATT consent.
+- `firebase/` — Firebase start-up, and push: the permission prompt, token registration, taps.
 - `camera/` — the camera port and capture downscale/crop.
 - `cashfree/` — the UPI checkout SDK wrapper.
 - `local/` — on-device caches for readings, threads and photos.
@@ -43,6 +46,9 @@ domain models, and the single Riverpod binding surface the features reach all of
   one-line edit on the right-hand side of a provider here.
 - `backendMode` stamps the active rung onto every analytics event, so fake-tier traffic never
   pollutes production funnels.
+- `firebaseInitialised` (in `firebase/firebase_boot.dart`) is the Firebase twin of
+  `supabaseInitialised`: set by boot only once init has returned, and checked before anything
+  touches a Firebase instance.
 - A few providers live outside this file on purpose: `entitlementProvider` (next door),
   the palm/face rejection and limit providers (in their capture *views*), `selectedThreadProvider`
   and `subscriptionPollDelaysProvider` (in their viewmodels).

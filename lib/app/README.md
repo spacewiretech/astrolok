@@ -14,6 +14,9 @@ paths, the paid-content gate, and the analytics navigation observer.
   `paymentStatusFor`, `palmReadingFor`, `palmLineFor`, `faceReadingFor`, `facePartFor`),
   `SplashDestinationRoute` extension, `appRouter`.
 - `entitlement_gate.dart` — Declares: `EntitlementGate`.
+- `trial_scan_guard.dart` — stops a trial account at the tap once its palm or face reading is
+  spent. Declares: `guardTrialScan()` (Home and Downloads) and `showTrialScanLimit()` (also the
+  capture screens, after a server refusal).
 - `analytics_observer.dart` — Declares: `screenNameFor()`, `AnalyticsNavigatorObserver`,
   `analyticsObserver`, and the private route→name tables `_screenNames` / `_modalNames`.
 - `assets.dart` — every bundled asset path in one place. Declares: `Img`, `Brand`, `PalmIcon`,

@@ -6,6 +6,7 @@ import {
   asUserRow,
   graceHoursFrom,
   isEntitled,
+  isInTrial,
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
 import { GeminiError, geminiSettings, readImage } from "../_shared/gemini.ts";
@@ -19,6 +20,12 @@ import {
   PALM_SCHEMA,
   palmSystemPrompt,
 } from "../_shared/palm_reading.ts";
+import {
+  TRIAL_LIMIT_KEYS,
+  trialLimitMessage,
+  trialReadingLimitFrom,
+  trialReadingsUsed,
+} from "../_shared/trial_reading_limit.ts";
 
 /**
  * Reads a photograph of a palm and returns a written reading.
@@ -101,6 +108,29 @@ Deno.serve(async (req) => {
   const user = asUserRow(userRow);
   if (!isEntitled(user, graceHoursFrom(config))) {
     return fail("not_entitled", "Your subscription has ended. Renew to keep reading.", 402);
+  }
+
+  // ------------------------------------------------------------ trial allowance
+  //
+  // A trial is one palm reading, not a day of them. Checked before the daily quota so a trial user
+  // is told the rule that actually applies to them. Only readings they received count — see
+  // `trial_reading_limit.ts` — so a photo that was not a palm does not spend it.
+  if (isInTrial(user, graceHoursFrom(config))) {
+    const trialLimit = trialReadingLimitFrom(config, TRIAL_LIMIT_KEYS.palm_readings);
+
+    let used: number;
+    try {
+      used = await trialReadingsUsed(db, "palm_readings", user);
+    } catch (error) {
+      // Fail closed, like the quota below: if the allowance cannot be checked, do not spend
+      // against it.
+      console.error("palm-reading: trial allowance check failed", error);
+      return fail("server_error", "Something went wrong. Please try again.", 500);
+    }
+
+    if (used >= trialLimit) {
+      return fail("trial_limit_reached", trialLimitMessage("palm", trialLimit), 403);
+    }
   }
 
   // ------------------------------------------------------------ quota

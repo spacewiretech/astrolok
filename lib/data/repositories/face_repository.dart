@@ -41,6 +41,12 @@ class FaceLimitReachedException extends FaceException {
   const FaceLimitReachedException(super.message);
 }
 
+/// The trial's face reading is spent. Counted separately from the palm one, and — like the daily
+/// limit — a dead end until the trial ends, so the capture screen closes both buttons.
+class FaceTrialLimitException extends FaceException {
+  const FaceTrialLimitException(super.message);
+}
+
 /// The model is unreachable, overloaded, or answered with something unusable. Retryable, and
 /// nothing is wrong with the photo — so the scan screen offers to try again with the same one.
 class FaceUnavailableException extends FaceException {

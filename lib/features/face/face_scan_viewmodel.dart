@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/analytics/analytics.dart';
 import '../../data/analytics/analytics_events.dart';
+import '../../data/entitlement.dart';
+import '../../data/local/trial_scan_tracker.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/face_repository.dart';
 import 'face_capture_viewmodel.dart';
@@ -88,6 +90,16 @@ class FaceScanViewModel extends AutoDisposeNotifier<FaceScanState> {
       await ref.read(faceReadingStoreProvider).save(saved);
       if (_disposed) return;
 
+      // Counted on this device too, so a trial user's next tap on Home explains the allowance
+      // instead of opening the camera. The server keeps the count that actually decides.
+      final user = ref.read(entitlementProvider);
+      if (user != null && user.inTrial) {
+        await ref
+            .read(trialScanTrackerProvider)
+            .recordReading(user.id, ReadingFeature.face);
+        if (_disposed) return;
+      }
+
       await _holdMinimum(startedAt);
       if (_disposed) return;
 
@@ -119,6 +131,24 @@ class FaceScanViewModel extends AutoDisposeNotifier<FaceScanState> {
       // which is exactly what the palm screen used to do.
       await ref.read(faceImageStoreProvider).discardPending();
       await _settle(startedAt, e.message, FaceScanOutcome.limitReached);
+    } on FaceTrialLimitException catch (e) {
+      // The trial's face reading is spent: a dead end until the trial ends, caught by name for the
+      // same reason as the daily limit above. The server refusing means this device's count was
+      // behind — a reinstall, or a reading taken on another phone — so it is brought up to the
+      // allowance, and the next tap on Home says so before the camera opens.
+      await ref.read(faceImageStoreProvider).discardPending();
+      final user = _disposed ? null : ref.read(entitlementProvider);
+      if (user != null) {
+        await ref.read(trialScanTrackerProvider).markExhausted(
+              user.id,
+              ReadingFeature.face,
+              TrialScanTracker.limitFrom(
+                ref.read(appConfigProvider).valueOrNull,
+                ReadingFeature.face,
+              ),
+            );
+      }
+      await _settle(startedAt, e.message, FaceScanOutcome.trialLimitReached);
     } on FaceNotEntitledException catch (e) {
       await _settle(startedAt, e.message, FaceScanOutcome.notEntitled);
     } on FaceSignedOutException catch (e) {

@@ -12,9 +12,9 @@
 
 | Source | Live events | What it answers |
 |--------|-------------|-----------------|
-| **Flutter app** | 103 | Everything the user does in front of the screen: onboarding, paywall, payments, readings, chat, profile |
+| **Flutter app** | 105 | Everything the user does in front of the screen: onboarding, paywall, payments, readings, chat, profile |
 | **Supabase Edge Functions** | 9 | Everything that happens while the app is closed: recurring UPI debits, mandate holds, cancellations, refunds, disputes |
-| **Total live** | **112** | |
+| **Total live** | **114** | |
 
 Six more events are declared in code but not currently emitted — see [§11](#11-declared-but-not-emitted).
 
@@ -40,7 +40,7 @@ ViewModel / widget
 Three things a PM should know about this:
 
 - **The Mixpanel token lives in Supabase `app_config`, not in the build.** It can be rotated or switched off without shipping a new app version. Because the token is not in hand at launch, the first events (`App Launched`, `Session Started`, the first screen views) are **queued** and sent once the token arrives, each carrying `queued_lag_ms` so a delayed event is never mistaken for a slow user. Queue caps: 300 events / 5 minutes.
-- **Facebook only ever receives 4 of the 103 events** (see [§9](#9-facebook-ads-conversions)). Mixpanel answers product questions and needs everything; an ad optimiser needs a handful of conversions.
+- **Facebook only ever receives 4 of the 105 events** (see [§9](#9-facebook-ads-conversions)). Mixpanel answers product questions and needs everything; an ad optimiser needs a handful of conversions.
 - **Server events never delay a payment.** Mixpanel sends from the webhook run on `EdgeRuntime.waitUntil` with a 4-second timeout, and every failure is logged and swallowed. An unreachable Mixpanel costs us analytics, never someone's subscription.
 
 **Code map**
@@ -135,6 +135,8 @@ App Launched
 | `UPI App Opened` | The app backgrounds while a UPI hand-off is outstanding | `analytics_session.dart` | `app_id` |
 | `UPI App Returned` | The app foregrounds after that hand-off | `analytics_session.dart` | `app_id`, `seconds_in_upi_app` |
 | `Tracking Consent Resolved` | iOS ATT status is answered, or was already standing | `att_consent.dart` | `status`, `granted`, `prompted` |
+| `Push Permission Resolved` | The notification permission prompt is answered, or was already standing. Asked from Home once the ATT prompt settles, never at launch | `push_messaging.dart` | `status`, `granted`, `prompted` |
+| `Push Opened` | A push notification is tapped. **Nothing sends pushes yet** — live so the first campaign is measurable from its first send | `push_messaging.dart` | `source` (`launch` / `background`), `message_id` |
 | `Screen Viewed` | Any route is pushed, replaced, or resurfaced after a back | `analytics_observer.dart` | `screen`, `previous_screen`, `route_path`, `nav_type`, `is_modal`, plus `route_*` params |
 | `Screen Exited` | Any route is popped, replaced or removed | `analytics_observer.dart` | `screen`, `exit_type`, `seconds_on_screen` |
 | `Back Pressed` | The user goes back (system or in-app) | `analytics_observer.dart` | `screen`, `blocked`, `is_modal` |
@@ -264,7 +266,8 @@ The single most instrumented flow in the app. **Every event in one checkout atte
 | `Reading Capture Failed` | Shutter failed, image unreadable, gallery pick cancelled, or an exception | `*_capture_viewmodel.dart` | `reason` (`shutter_failed` / `unreadable` / `cancelled` / `exception`), `source`, `focus`, `error` |
 | `Reading Scan Started` | The image goes to the model | `*_scan_viewmodel.dart` | `focus`, `bytes`, `attempt` |
 | **`Reading Succeeded`** | A reading comes back and is saved | `*_scan_viewmodel.dart` | `reading_id`, `focus`, `line_count` (palm) / `section_count` (face), `attempt`, `ms` (**to the model's answer, not to the screen** — the progress animation's padding is excluded) |
-| `Reading Failed` | No palm/face detected, daily limit reached, or an error | `*_scan_viewmodel.dart` | `outcome`, `message`, `focus`, `attempt`, `blocked` (**`true` = a dead end with no retry, the worst moment this flow has**), `ms` |
+| `Reading Failed` | No palm/face detected, daily or trial limit reached, or an error | `*_scan_viewmodel.dart` | `outcome` (`rejected` / `limitReached` / `trialLimitReached` / `notEntitled` / `signedOut` / `failed`), `message`, `focus`, `attempt`, `blocked` (**`true` = a dead end with no retry, the worst moment this flow has**), `ms` |
+| `Trial Scan Limit Shown` | The popup telling a trial user their one palm or face reading is spent | `lib/app/trial_scan_guard.dart` | `source` (`carousel` / `card` / `downloads` = stopped at the tap, before the camera opened; `server` = the server refused a photo the device did not know to stop — a reinstall, or a reading taken on another phone) |
 | `Reading Viewed` | The results screen paints | `*_reading_viewmodel.dart` | `reading_id`, `state` (`with_image` / `no_image`) |
 | `Reading Detail Opened` | A specific line or facial part is opened | `*_reading_view.dart` | `reading_id`, `detail` |
 | `Reading Narrated` | Text-to-speech starts | `*_reading_viewmodel.dart`, `chat_viewmodel.dart` | `surface` (`reading` / `chat`), `reading_id` or `thread_id`, `chars` |
@@ -365,7 +368,7 @@ There is no `ip_match`: the probabilistic iOS recovery path was removed along wi
 
 ## 10. Facebook Ads conversions
 
-Only **4** of the 103 app events are forwarded to Meta, chosen to give the ad optimiser a funnel it can train on before there are enough weekly purchases to optimise for purchases directly (which, on a ₹3 trial, takes a while).
+Only **4** of the 105 app events are forwarded to Meta, chosen to give the ad optimiser a funnel it can train on before there are enough weekly purchases to optimise for purchases directly (which, on a ₹3 trial, takes a while).
 
 | Astrolok event | Facebook event | Value |
 |----------------|----------------|-------|
@@ -376,6 +379,20 @@ Only **4** of the 103 app events are forwarded to Meta, chosen to give the ad op
 
 Facebook takes its amounts from `app_config`, never from a paywall label, and never reaches Mixpanel's revenue series — so the two systems stay independent and Mixpanel keeps exactly one revenue number.
 
+### Google Analytics for Firebase
+
+The same four conversions also reach Firebase, as GA4's recommended events, together with screen views and identity. Nothing else crosses: Mixpanel stays the product-analytics system of record, and Firebase exists for Google's side — Ads conversion import, audiences, crash-free users.
+
+| Astrolok event | GA4 event | Value |
+|----------------|-----------|-------|
+| `Screen Viewed` | `screen_view` (`screen_name` = `screen`) | — |
+| `Signup Completed` | `sign_up` (`method` = `phone_otp`) | — |
+| `Subscribe Tapped` | `begin_checkout` | Amount for `offer_type`, from `app_config` |
+| `Payment Completed` (only when `outcome = success`) | `purchase` (`transaction_id` = `payment_attempt_id`) | Amount for `offer_type` |
+| `Payment Confirmed Late` | `purchase` | Amount for `offer_type` |
+
+Identity is the account id only (`setUserId`, mirrored onto Crashlytics), and `backend_mode` is a user property so fake-tier traffic can be filtered out. Purchases carry their own persisted guard (`astrolok.ga_purchase_reported.v1`), independent of Facebook's, and read the same `app_config` amounts.
+
 ---
 
 ## 11. Declared but not emitted
@@ -384,7 +401,7 @@ These names exist as constants in `analytics_events.dart` but **nothing currentl
 
 | Event | Status |
 |-------|--------|
-| `App Crashed` | Crash reporting is **commented out** in `lib/boot/mobile_boot_io.dart`. Uncommenting restores it, with `error`, `stack_head`, `fatal` |
+| `App Crashed` | **Crashes are reported to Firebase Crashlytics**, which symbolicates and groups them. This Mixpanel twin stays commented out in `lib/boot/mobile_boot_io.dart`; uncommenting it restores a funnel-joinable crash event with `error`, `stack_head`, `fatal` |
 | `Webhook Received` | **Deliberately suppressed** in `cashfree-webhook/index.ts` — foreign Cashfree traffic on a shared account produced an event flood that buried everything else. The full audit row is still written to `payment_events`, so nothing is lost and this can be reconstructed. To restore: deal with the foreign traffic first, then re-enable the block |
 | `UPI Picker Dismissed` | No call site |
 | `Promo Slide Viewed` | No call site |
@@ -463,7 +480,7 @@ The server never *creates* a profile for someone who has not used the app — `i
 3. **Identity** — signup and login land on the same profile; sign-out starts a fresh anonymous session; `install_id` stays constant across both
 4. **App vs server** — `Payment Completed` only from the app, `Mandate Authorised` / `Subscription Renewed` only from the server. Use the server pair for revenue
 5. **Dedupe** — redeliver a Cashfree webhook and confirm the renewal count does not move
-6. **Lexicon** — add descriptions for all 112 live events in Mixpanel Data Management
+6. **Lexicon** — add descriptions for all 114 live events in Mixpanel Data Management
 7. **Funnels** — build the five funnels in [§4](#4-core-funnels)
 
 ---
@@ -472,7 +489,7 @@ The server never *creates* a profile for someone who has not used the app — `i
 
 | Category | Live events |
 |----------|-------------|
-| Lifecycle & sessions | 9 |
+| Lifecycle & sessions | 11 |
 | Navigation & infrastructure | 7 |
 | Onboarding & birth date | 20 |
 | Paywall & payment | 31 |
@@ -480,7 +497,7 @@ The server never *creates* a profile for someone who has not used the app — `i
 | Readings (palm + face, shared vocabulary) | 15 |
 | Chat | 11 |
 | Profile | 7 |
-| **App subtotal** | **103** |
+| **App subtotal** | **105** |
 | Server / webhook | 9 |
-| **Total live** | **112** |
+| **Total live** | **114** |
 | Declared but not emitted | 7 (6 app + 1 server) |

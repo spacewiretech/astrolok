@@ -53,6 +53,7 @@ class SupabaseFaceRepository implements FaceRepository {
         // why ("a bit too dark", "hold steady"), so it is passed through unchanged.
         'no_face' => NoFaceDetectedException(e.message),
         'limit_reached' => FaceLimitReachedException(e.message),
+        'trial_limit_reached' => FaceTrialLimitException(e.message),
         'not_entitled' => FaceNotEntitledException(e.message),
         'unauthorized' => const FaceSignedOutException('Please sign in again.'),
         'ai_unavailable' => FaceUnavailableException(e.message),

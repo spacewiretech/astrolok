@@ -6,6 +6,8 @@ import '../../app/assets.dart';
 import '../../app/router.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../app/trial_scan_guard.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../widgets/app_snackbar.dart';
 import '../../widgets/astral_background.dart';
 import '../../widgets/brand_logo.dart';
@@ -77,6 +79,23 @@ class _PalmCaptureViewState extends ConsumerState<PalmCaptureView>
     // way, for the rest of the day.
     ref.listen(palmLimitProvider, (_, message) {
       if (message != null) model.setLimitReached(message);
+    });
+
+    // The trial's palm reading is spent, reported by the scan screen when the server refused a
+    // photo the device did not know to stop. The same standing notice as the daily limit, plus the
+    // popup saying what the rule is.
+    //
+    // The popup waits for the frame: the scan screen pops itself straight after reporting this, and
+    // a dialog pushed before that pop would be the route it removed. Cleared once shown, so a
+    // second refusal carrying the same message still reaches this listener.
+    ref.listen(palmTrialLimitProvider, (_, message) {
+      if (message == null) return;
+      model.setLimitReached(message);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(palmTrialLimitProvider.notifier).state = null;
+        showTrialScanLimit(context, ref, ReadingFeature.palm, source: 'server');
+      });
     });
 
     return Scaffold(
@@ -227,6 +246,11 @@ final palmRejectionProvider = StateProvider<String?>((ref) => null);
 /// Carries the daily allowance message back, so a second attempt is blocked here rather than
 /// spending another round trip to be refused again.
 final palmLimitProvider = StateProvider<String?>((ref) => null);
+
+/// Carries the trial allowance message back, so this screen closes its button and shows the
+/// popup. Separate from [palmLimitProvider] because the two say different things: that one lifts
+/// tomorrow, this one when the trial ends.
+final palmTrialLimitProvider = StateProvider<String?>((ref) => null);
 
 const _cameraCopy = CameraCopy(
   denied: PalmCopy.cameraDenied,

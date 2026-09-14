@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "125649192472",
+    "project_id": "astrolok-21088",
+    "storage_bucket": "astrolok-21088.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:125649192472:android:33ccd89eda0f22872d256d",
+        "android_client_info": {
+          "package_name": "com.spacewire.astrolok"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBEprnSzkGpDoGk8apfwlsUgogi6dK5wW8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

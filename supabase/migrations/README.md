@@ -48,6 +48,13 @@ and run in lexical order.
 - `20260909000003_payment_events_reported.sql` — a reported/notification-key column on
   `payment_events` plus `payment_events_notification_idx`, so Mixpanel emits one event per
   notification rather than per delivery attempt.
+- `20260914000001_push_tokens.sql` — `push_tokens` (FCM token as primary key, `user_id`,
+  `session_token_hash`, `platform`), RLS on with zero policies. The foreign key to
+  `user_sessions` cascades, so sign-out and session expiry remove a device's token and
+  **`purge_expired` needs no change**.
+- `20260914000002_trial_reading_limit.sql` — `trial_palm_readings` and `trial_face_readings`
+  (both `1`, public), the per-trial reading allowance. No schema change: the count comes from the
+  reading tables and `users.trial_started_at`.
 
 ## Notes
 
