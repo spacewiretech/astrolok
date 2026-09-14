@@ -55,6 +55,8 @@ class SupabaseChatRepository implements ChatRepository {
       threadId: landedIn,
       threadTitle: _text(thread['title']),
       remaining: data['remaining'] is int ? data['remaining'] as int : null,
+      savedLanguage: _text(data['saved_language']).isEmpty ? null : _text(data['saved_language']),
+      askRating: data['ask_rating'] == true,
     );
   }
 
@@ -100,6 +102,14 @@ class SupabaseChatRepository implements ChatRepository {
     // caller, so no screen can widen a single deletion by accident.
     final data = await _call('chat-history', {'forget': key ?? '*'}, null);
     return _facts(data);
+  }
+
+  @override
+  Future<void> rate({required String threadId, int? rating}) async {
+    await _call('chat-history', {
+      // An explicit null is a dismissal, which the server records so the card is not raised again.
+      'rate': {'thread_id': threadId, 'rating': rating},
+    }, null);
   }
 
   ChatThreadList _threadList(Map<String, dynamic> data) {

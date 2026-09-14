@@ -9,14 +9,19 @@ signature check. No network, no database.
 
 - `payments_test.ts` (62 tests) — entitlement boundaries (trial / grace / active / none) and
   webhook signature verification. **The silent-and-expensive logic**, and the largest file here.
-- `chat_test.ts` (35) — `normaliseChatReply`: malformed and partial model replies, `ask_for`
-  fallback, verdict clamping.
-- `face_test.ts` (27) — `normaliseFaceReading`: display ordering, unknown and duplicate part
-  keys, server focus winning over the model's echo.
-- `jyotish_test.ts` (21) — the astronomy in `jyotish.ts` against **Meeus worked examples**:
-  Julian day, Sun/Moon longitude, equinoxes, new and full moon.
-- `palm_test.ts` (20) — `normalisePalmReading`: ordering, `is_palm` rejection paths, unknown and
+- `chat_test.ts` (66) — `normaliseChatReply`: malformed and partial model replies, `ask_for`
+  fallback, verdict clamping, rashi keys. The prompt versions (v3's dasha and remedies, v2 as the
+  rollback), the user prompt's correction and known-rashi blocks, and `detectLanguageSwitch`.
+- `face_test.ts` (29) — `normaliseFaceReading`: display ordering, unknown and duplicate part
+  keys, server focus winning over the model's echo. The reading keeps the no-remedies rule.
+- `jyotish_test.ts` (34) — the astronomy in `jyotish.ts` against **Meeus worked examples**:
+  Julian day, Sun/Moon longitude, equinoxes, new and full moon. Then 17 October 1999, a day the
+  Moon changed sign: no guessed rashi without the hour, a stated rashi settling it, and the
+  Vimshottari dasha.
+- `palm_test.ts` (21) — `normalisePalmReading`: ordering, `is_palm` rejection paths, unknown and
   duplicate lines, incompleteness.
+- `birth_time_test.ts` (6) — `readClock`: AM/PM, raat/shaam/subah in both scripts, night past
+  midnight, and a bare "11:55" left unguessed.
 - `mixpanel_test.ts` (11) — server-side Mixpanel: token gating, `$ip` suppression, insert-id
   hashing and dedupe, profile writes.
 - `push_test.ts` (7) — `parsePushRegistration`: the two platforms, the length bound shared with

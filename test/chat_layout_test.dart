@@ -2,6 +2,9 @@ import 'package:astrolok/app/theme/app_theme.dart';
 import 'package:astrolok/data/models/astro_message.dart';
 import 'package:astrolok/data/providers.dart';
 import 'package:astrolok/data/repositories/chat_repository.dart';
+import 'package:astrolok/features/chat/chat_composer.dart';
+import 'package:astrolok/features/chat/chat_rating.dart';
+import 'package:astrolok/features/chat/chat_state.dart';
 import 'package:astrolok/features/chat/chat_view.dart';
 import 'package:astrolok/features/chat/chat_viewmodel.dart';
 import 'package:astrolok/features/profile/memory_view.dart';
@@ -421,6 +424,94 @@ void main() {
     });
   });
 
+  group('the rating card', () {
+    /// The composer on its own: the card's whole life is decided by the state handed to it, and
+    /// pumping the full screen would add a reveal animation this group has nothing to say about.
+    Future<void> pumpComposer(
+      WidgetTester tester,
+      ChatState state,
+      ValueChanged<int?> onRate,
+    ) async {
+      tester.view.physicalSize = small;
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildAppTheme(),
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: ChatComposer(
+                state: state,
+                onSend: (message, entry) {},
+                onDraftRestored: () {},
+                onRate: onRate,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    ChatState due({String? revealingId}) => ChatState(
+          loading: false,
+          threadId: 'thread-1',
+          ratingDue: true,
+          revealingId: revealingId,
+          messages: [
+            AstroMessage(
+              id: 'a',
+              role: ChatRole.astro,
+              createdAt: DateTime(2026, 9, 4),
+              text: 'An answer.',
+            ),
+          ],
+        );
+
+    testWidgets('asks with five faces on a small phone', (tester) async {
+      await pumpComposer(tester, due(), (_) {});
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('How is your chat with Astro so far?'), findsOneWidget);
+      for (final face in ChatRatingCard.faces) {
+        expect(find.text(face), findsOneWidget);
+      }
+    });
+
+    testWidgets('waits for the reply to finish arriving', (tester) async {
+      await pumpComposer(tester, due(revealingId: 'a'), (_) {});
+
+      expect(find.byType(ChatRatingCard), findsNothing);
+    });
+
+    testWidgets('a face answers with its score, then says thank you', (tester) async {
+      int? answered;
+      await pumpComposer(tester, due(), (rating) => answered = rating);
+
+      await tester.tap(find.text('🙂'));
+      await tester.pump();
+
+      expect(answered, 4);
+      expect(find.textContaining('Thank you'), findsOneWidget);
+
+      // Past the thank-you, so its timer is not left running when the test ends.
+      await tester.pump(const Duration(milliseconds: 1700));
+    });
+
+    testWidgets('the close button dismisses without a score or a thank-you', (tester) async {
+      var dismissed = false;
+      await pumpComposer(tester, due(), (rating) => dismissed = rating == null);
+
+      await tester.tap(find.byTooltip('Not now'));
+      await tester.pump();
+
+      expect(dismissed, isTrue);
+      expect(find.textContaining('Thank you'), findsNothing);
+    });
+  });
+
   group('what Astro remembers', () {
     testWidgets('lists the facts and offers a way out of each', (tester) async {
       await pumpAt(tester, small, const MemoryView(), overrides: [
@@ -508,4 +599,7 @@ class _StubChatRepository implements ChatRepository {
   @override
   Future<List<AstroFact>> forget({String? key}) async =>
       key == null ? const [] : facts.where((f) => f.key != key).toList();
+
+  @override
+  Future<void> rate({required String threadId, int? rating}) async {}
 }

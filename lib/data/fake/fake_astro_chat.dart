@@ -33,6 +33,13 @@ class FakeChatRepository implements ChatRepository {
   int _turn = 0;
   int _nextId = 0;
 
+  /// Once per account, like the server: answered or dismissed, the card is not raised again.
+  bool _rated = false;
+
+  /// Matches the default of `chat_rating_after_messages`, so the card shows up on a fresh
+  /// checkout at the same point it would in production.
+  static const _rateAfter = 5;
+
   @override
   Future<ChatReply> send(String message, {String? threadId}) async {
     await Future<void>.delayed(latency);
@@ -71,6 +78,7 @@ class FakeChatRepository implements ChatRepository {
       threadId: id,
       threadTitle: title,
       remaining: 40 - _turn,
+      askRating: !_rated && transcript.where((turn) => turn.isUser).length >= _rateAfter,
     );
   }
 
@@ -130,6 +138,12 @@ class FakeChatRepository implements ChatRepository {
       _facts.removeWhere((fact) => fact.key == key);
     }
     return List.unmodifiable(_facts);
+  }
+
+  @override
+  Future<void> rate({required String threadId, int? rating}) async {
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    _rated = true;
   }
 
   /// Newest conversation first, as the sidebar lists them.

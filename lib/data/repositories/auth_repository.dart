@@ -34,6 +34,12 @@ abstract interface class AuthRepository {
   /// phone is the part they would notice.
   Future<AppUser> saveChatLanguage(String? language);
 
+  /// Sets the hour of birth as `HH:MM`, or clears it with null.
+  ///
+  /// Returns the whole user because the server answers with the chart recomputed from it — which
+  /// is the point: the sign Profile shows and the sign the chat reads from are one computation.
+  Future<AppUser> saveBirthTime(String? time);
+
   Future<void> signOut();
 }
 

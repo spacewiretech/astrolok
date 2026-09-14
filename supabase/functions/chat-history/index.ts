@@ -1,15 +1,17 @@
-import { loadConfig } from "../_shared/config.ts";
+import { promptVersion } from "../_shared/astro_chat.ts";
+import { resolveLanguage } from "../_shared/chat_language.ts";
+import { configSetting, loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
 
 /**
  * Everything the chat screen and Profile need that does not cost a model call.
  *
- * Four jobs that would otherwise be four functions: the sidebar wants the list of conversations,
- * the transcript wants one of them, Profile wants the facts, and both screens want to be able to
- * remove something. They are together because they answer the same question from two screens, and
- * splitting them would mean four deploys, four quota-free endpoints to keep in step, and four
- * places to get the session check right.
+ * Five jobs that would otherwise be five functions: the sidebar wants the list of conversations,
+ * the transcript wants one of them, Profile wants the facts, both screens want to be able to
+ * remove something, and the chat wants somewhere to put a rating. They are together because they
+ * answer the same question from two screens, and splitting them would mean five deploys, five
+ * quota-free endpoints to keep in step, and five places to get the session check right.
  *
  * No model is called here, so there is no quota and nothing to meter. The user id always comes
  * from the session token, and every query is scoped to it — a thread id in the body is a request,
@@ -42,6 +44,89 @@ Deno.serve(async (req) => {
     body = await req.json();
   } catch {
     // No body, or not JSON. Both mean a plain read.
+  }
+
+  // ------------------------------------------------------------ rating the chat
+  //
+  // Answered once per account: `chat_feedback` is keyed on the user, and a second answer is
+  // ignored rather than refused, so a retried request never becomes an error on someone's screen.
+  // Everything recorded beside the score is resolved here, never taken from the request — the row
+  // exists to line a rating up against what actually produced the conversation.
+  const rate = (body.rate ?? null) as Record<string, unknown> | null;
+  if (rate && typeof rate === "object") {
+    const threadId = typeof rate.thread_id === "string" ? rate.thread_id.trim() : "";
+    const raw = rate.rating;
+    // Null is a dismissal, and is recorded: otherwise the card would return on every reply to
+    // someone who has already said "not now".
+    const rating = raw === null
+      ? null
+      : typeof raw === "number" && Number.isInteger(raw) && raw >= 1 && raw <= 5
+      ? raw
+      : undefined;
+
+    if (!threadId || rating === undefined) {
+      return fail("invalid_request", "That rating could not be read.", 400);
+    }
+
+    const config = await loadConfig(db);
+
+    const [{ data: thread }, { data: user }] = await Promise.all([
+      // Scoped to the user, so another account's thread id records no conversation at all.
+      db.from("chat_threads")
+        .select("id")
+        .eq("id", threadId)
+        .eq("user_id", userId)
+        .maybeSingle(),
+      db.from("users").select("language").eq("user_id", userId).maybeSingle(),
+    ]);
+
+    const ownThread = thread ? (thread.id as string) : null;
+    let turnCount: number | null = null;
+    let model: string | null = null;
+
+    if (ownThread) {
+      const [{ count }, { data: latest }] = await Promise.all([
+        db.from("chat_messages")
+          .select("id", { count: "exact", head: true })
+          .eq("thread_id", ownThread)
+          .eq("role", "user"),
+        db.from("chat_messages")
+          .select("model")
+          .eq("thread_id", ownThread)
+          .eq("role", "astro")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      turnCount = count ?? null;
+      model = typeof latest?.model === "string" ? latest.model : null;
+    }
+
+    const { error } = await db
+      .from("chat_feedback")
+      .upsert(
+        {
+          user_id: userId,
+          thread_id: ownThread,
+          rating,
+          turn_count: turnCount,
+          language: resolveLanguage(
+            typeof user?.language === "string" ? user.language : null,
+            config,
+          ),
+          prompt_version: promptVersion(configSetting(config, "chat_prompt_version")),
+          model,
+        },
+        { onConflict: "user_id", ignoreDuplicates: true },
+      );
+
+    if (error) {
+      console.error("chat-history: could not save the rating", error);
+      return fail("server_error", "Could not save your rating.", 500);
+    }
+
+    return json({ rated: true });
   }
 
   // ------------------------------------------------------------ forgetting

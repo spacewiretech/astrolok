@@ -99,6 +99,17 @@ class Fast2SmsAuthRepository implements AuthRepository {
     return user;
   }
 
+  @override
+  Future<AppUser> saveBirthTime(String? time) async {
+    final trimmed = time?.trim();
+    final user = _current().copyWith(
+      birthTime: trimmed,
+      clearBirthTime: trimmed == null || trimmed.isEmpty,
+    );
+    _session.user = user;
+    return user;
+  }
+
   AppUser _current() => _session.user ?? const AppUser(id: 'local-user', phone: '');
 
   @override

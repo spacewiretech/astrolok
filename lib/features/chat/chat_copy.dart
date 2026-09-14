@@ -21,6 +21,15 @@ abstract final class ChatCopy {
   /// an error: there is nothing to retry, so the field closes rather than inviting another try.
   static const exhausted = "You've asked Astro everything for today. Come back tomorrow.";
 
+  // ---------------------------------------------------------------- rating
+
+  static const ratingPrompt = 'How is your chat with Astro so far?';
+  static const ratingThanks = 'Thank you — this helps Astro read better for you.';
+  static const ratingDismiss = 'Not now';
+
+  /// Worst to best, read by a screen reader in place of each face.
+  static const ratingLabels = ['Very bad', 'Not good', 'Okay', 'Good', 'Loved it'];
+
   // ---------------------------------------------------------------- waiting
 
   /// Under the oṃ disc while the reply is in flight. In the sage's own register, because a

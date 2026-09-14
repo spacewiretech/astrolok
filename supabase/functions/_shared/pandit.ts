@@ -101,6 +101,18 @@ as "unclear" in the observation object and write around it rather than guessing.
 `.trim();
 
 /**
+ * What practical counsel may look like, as the readings have always had it: behaviour only.
+ *
+ * The one bullet of [BOUNDARIES] that is the caller's to replace, on the same principle as
+ * [ROMAN_ONLY] in the voice. It decides what *kind* of advice is offered rather than what may
+ * never be said, and the chat — which is asked "what can I do about it" in a way a photograph of
+ * a palm never is — carries a narrower remedies rule in its place. Palm and face pass nothing and
+ * keep this text byte for byte.
+ */
+export const TIPS_RULE = `- Every "tip" is a small, kind, practical nudge about behaviour. Never a warning, never a
+  purchase, never a remedy, gemstone, ritual, fast or charm.`;
+
+/**
  * The boundaries.
  *
  * Written as instructions about *how to write*, not as a disclaimer to append. A model told "add
@@ -112,7 +124,11 @@ as "unclear" in the observation object and write around it rather than guessing.
  * carries all of them, so the forbidden list is spelled out item by item rather than left to the
  * model's own sense of what counts as a comment on appearance.
  */
-export const BOUNDARIES = `
+export const BOUNDARIES = boundariesWith(TIPS_RULE);
+
+/** The block, with its counsel bullet left open. Every other line in it is fixed. */
+function boundariesWith(tips: string): string {
+  return `
 BOUNDARIES — these are absolute.
 
 - Never mention health, illness, diagnosis, recovery, fertility, pregnancy, or mental health.
@@ -128,11 +144,11 @@ BOUNDARIES — these are absolute.
   holds even as a compliment. Read the shape and set of a feature, never what it says about who
   someone is or where they come from.
 - Never compare the person to anyone else, to a celebrity, or to an ideal.
-- Every "tip" is a small, kind, practical nudge about behaviour. Never a warning, never a
-  purchase, never a remedy, gemstone, ritual, fast or charm.
+${tips}
 - Every "blessing" is a wish, never a promise and never a prediction. "May your patience keep
   finding you good company" — not "your patience will bring you good company".
 `.trim();
+}
 
 /** Shared style notes. Small, but they are what stop eight paragraphs reading as one. */
 export const STYLE = `
@@ -159,17 +175,20 @@ STYLE
  * Roman-letters rule in it is a *rendering* constraint, not a stylistic one — the PDF font
  * subset and the device TTS, neither of which the chat has. A feature that can honestly carry
  * another script says so by passing its own voice; palm and face pass nothing and keep the rule.
- * [BOUNDARIES] is deliberately not overridable, because it is the safety layer.
+ * [BOUNDARIES] is deliberately not overridable, because it is the safety layer — except for its
+ * one counsel bullet, [tips], which says what kind of advice may be offered rather than what may
+ * never be said. See [TIPS_RULE].
  */
 export function panditSystemPrompt(
-  { craft, lengths, grounding = GROUNDING, voice = PANDIT_VOICE }: {
+  { craft, lengths, grounding = GROUNDING, voice = PANDIT_VOICE, tips = TIPS_RULE }: {
     craft: string;
     lengths: string;
     grounding?: string;
     voice?: string;
+    tips?: string;
   },
 ): string {
-  return [voice, "", craft, "", grounding, "", BOUNDARIES, "", lengths, "", STYLE]
+  return [voice, "", craft, "", grounding, "", boundariesWith(tips), "", lengths, "", STYLE]
     .join("\n");
 }
 

@@ -112,6 +112,13 @@ class ProfileView extends ConsumerWidget {
                     const SizedBox(height: 22),
                     _PlanCard(user: user),
 
+                    // Absent without a date of birth: there is no chart to show, and an empty
+                    // card would read as a broken one.
+                    if (user?.chart != null) ...[
+                      const SizedBox(height: 14),
+                      _ChartCard(user: user!),
+                    ],
+
                     if (user?.billingState != null) ...[
                       const SizedBox(height: 14),
                       _BillingNotice(message: user!.billingState!.message),
@@ -388,6 +395,156 @@ class _PlanCard extends StatelessWidget {
             const SizedBox(height: 14),
             _RenewLink(),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+/// What the chart was computed as, and the one input that sharpens it.
+///
+/// Shown because a sign someone can see is a sign they can question. The account that prompted
+/// this was told two different rashis by the chat, and had nowhere to look to find out which one
+/// was right or why — the answer was a birth time the chart had not had yet.
+class _ChartCard extends ConsumerWidget {
+  const _ChartCard({required this.user});
+
+  /// Carries a chart; the caller checks.
+  final AppUser user;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final chart = user.chart!;
+    final dasha = chart.mahadasha == null
+        ? null
+        : [chart.mahadasha, chart.antardasha].whereType<String>().join(' · ');
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: AppShape.card,
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Your chart', style: AppText.section),
+          const SizedBox(height: 10),
+          _ChartRow(label: 'Rashi (Moon)', value: chart.moonLabel ?? '—'),
+          _ChartRow(
+            label: 'Nakshatra',
+            value: chart.nakshatra == null
+                ? 'Needs your birth time'
+                : '${chart.nakshatra}, pada ${chart.pada}',
+          ),
+          _ChartRow(label: 'Sun sign', value: chart.sunLabel ?? '—'),
+          if (dasha != null) _ChartRow(label: 'Mahadasha', value: dasha),
+          _ChartRow(label: 'Birth time', value: _formatClock(user.birthTime) ?? 'Not set'),
+          // Says why two signs are showing, rather than leaving it to look like a bug.
+          if (chart.moonUncertain) ...[
+            const SizedBox(height: 6),
+            Text(
+              'The Moon changed sign on the day you were born. Your birth time decides which one '
+              'is yours.',
+              style: AppText.meta,
+            ),
+          ],
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: () => _setBirthTime(context, ref),
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                user.birthTime == null ? 'Set birth time' : 'Change birth time',
+                style: AppText.title.copyWith(fontSize: 14, color: AppColors.goldDeep),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Saves through `update-profile`, which answers with the chart recomputed from the new hour.
+  Future<void> _setBirthTime(BuildContext context, WidgetRef ref) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _clock(user.birthTime) ?? const TimeOfDay(hour: 12, minute: 0),
+      helpText: 'Your time of birth',
+    );
+    if (picked == null) return;
+
+    final value = '${picked.hour.toString().padLeft(2, '0')}:'
+        '${picked.minute.toString().padLeft(2, '0')}';
+    if (value == user.birthTime) return;
+
+    analytics.track(Ev.elementTapped, {P.elementId: 'profile_birth_time'});
+
+    try {
+      // Installed whole, like the language picker's answer — and never `invalidate`, for the
+      // reason given in `_pickLanguage`.
+      final updated = await ref.read(authRepositoryProvider).saveBirthTime(value);
+      ref.read(entitlementProvider.notifier).set(updated);
+    } catch (error) {
+      if (context.mounted) {
+        showAppSnackBar(
+          context,
+          "Couldn't save your birth time. Please try again.",
+          error: true,
+          source: 'birth_time',
+        );
+      }
+    }
+  }
+
+  static TimeOfDay? _clock(String? raw) {
+    final parts = raw?.split(':');
+    if (parts == null || parts.length < 2) return null;
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null) return null;
+    return TimeOfDay(hour: hour, minute: minute);
+  }
+
+  /// "23:55" as "11:55 PM". A birth time is read by a person, not a clock.
+  static String? _formatClock(String? raw) {
+    final time = _clock(raw);
+    if (time == null) return null;
+    final hour = time.hourOfPeriod == 0 ? 12 : time.hourOfPeriod;
+    final period = time.period == DayPeriod.am ? 'AM' : 'PM';
+    return '$hour:${time.minute.toString().padLeft(2, '0')} $period';
+  }
+}
+
+class _ChartRow extends StatelessWidget {
+  const _ChartRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: AppText.meta),
+          const SizedBox(width: 16),
+          // Wraps rather than overflows: "Purva Bhadrapada, pada 4" is long on a small phone.
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.end,
+              style: AppText.title.copyWith(fontSize: 15),
+            ),
+          ),
         ],
       ),
     );

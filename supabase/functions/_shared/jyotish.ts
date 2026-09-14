@@ -316,12 +316,183 @@ export const NAKSHATRAS = [
 /** One nakshatra: 360 / 27. */
 const NAKSHATRA_SPAN = 360 / 27;
 
+/**
+ * The names a rashi actually goes by, as people type them.
+ *
+ * Sanskrit as this module spells it, the shorter Hindi forms ("Makar", "Kumbh"), Devanagari, and
+ * the English names — which in India are used as translations of the rashi, not as a separate
+ * Western system. Deliberately no alias that is also a common name or surname ("Singh", "Mina"):
+ * this runs over whatever the sage recorded, and a surname must not become somebody's sign.
+ */
+const RASHI_ALIASES: Record<typeof RASHIS[number], readonly string[]> = {
+  Mesha: ["mesha", "mesh", "मेष", "aries"],
+  Vrishabha: ["vrishabha", "vrishabh", "vrishab", "vrushabh", "brishabh", "वृषभ", "taurus"],
+  Mithuna: ["mithuna", "mithun", "मिथुन", "gemini"],
+  Karka: ["karka", "kark", "karkat", "karkata", "कर्क", "cancer"],
+  Simha: ["simha", "simh", "sinh", "सिंह", "leo"],
+  Kanya: ["kanya", "कन्या", "virgo"],
+  Tula: ["tula", "तुला", "libra"],
+  Vrischika: [
+    "vrischika",
+    "vrischik",
+    "vrishchika",
+    "vrishchik",
+    "vruschik",
+    "vrushchik",
+    "वृश्चिक",
+    "scorpio",
+  ],
+  Dhanu: ["dhanu", "dhanus", "dhanur", "धनु", "sagittarius"],
+  Makara: ["makara", "makar", "मकर", "capricorn"],
+  Kumbha: ["kumbha", "kumbh", "कुंभ", "कुम्भ", "aquarius"],
+  Meena: ["meena", "meen", "मीन", "pisces"],
+};
+
+/**
+ * The rashi a piece of text names, spelled as [RASHIS] spells it, or null.
+ *
+ * Whole words only, with Unicode-aware edges — `\b` knows nothing about Devanagari, whose vowel
+ * signs are marks rather than letters. When a sentence names more than one, the first one named
+ * wins.
+ */
+export function rashiFromName(raw: string | null | undefined): string | null {
+  const said = (raw ?? "").toLowerCase();
+  if (!said.trim()) return null;
+
+  let found: { rashi: string; at: number } | null = null;
+  for (const rashi of RASHIS) {
+    for (const alias of RASHI_ALIASES[rashi]) {
+      const match = new RegExp(`(?<![\\p{L}\\p{M}])${alias}(?![\\p{L}\\p{M}])`, "u").exec(said);
+      if (match && (found === null || match.index < found.at)) {
+        found = { rashi, at: match.index };
+      }
+    }
+  }
+
+  return found?.rashi ?? null;
+}
+
+// ---------------------------------------------------------------- the dasha
+
+/**
+ * The Vimshottari cycle: nine grahas in their fixed order, and the years each one's period runs.
+ *
+ * The nakshatra the Moon sat in at birth names whose period a life opens in — the nine lords
+ * repeat three times through the twenty-seven, starting with Ketu at Ashwini — and how far through
+ * that nakshatra the Moon had travelled is how much of the opening period was already spent.
+ */
+export const DASHA_LORDS: ReadonlyArray<readonly [string, number]> = [
+  ["Ketu", 7],
+  ["Shukra", 20],
+  ["Surya", 6],
+  ["Chandra", 10],
+  ["Mangal", 7],
+  ["Rahu", 18],
+  ["Guru", 16],
+  ["Shani", 19],
+  ["Budh", 17],
+];
+
+/** The whole cycle, in years. */
+export const DASHA_CYCLE_YEARS = 120;
+
+/** Julian years, the convention the common published dasha tables are computed in. */
+const DASHA_YEAR_DAYS = 365.25;
+
+export type DashaPhase = "early" | "middle" | "late";
+
+/**
+ * The periods running at a moment, and roughly where in each that moment falls.
+ *
+ * A third of the way rather than a date, on purpose. BOUNDARIES forbids naming the year something
+ * will happen, and a period's end date handed to a language model is a year waiting to be
+ * repeated to someone. "Late in Shani's Mahadasha" is the tradition's own way of saying the same
+ * thing without the calendar.
+ */
+export interface Dasha {
+  mahadasha: string;
+  mahaPhase: DashaPhase;
+  antardasha: string;
+  antarPhase: DashaPhase;
+}
+
+/**
+ * The Vimshottari Mahadasha and Antardasha at [asOfJd], for a Moon at [moonSidereal] at [birthJd].
+ *
+ * Only meaningful with a birth hour: the opening balance comes from the Moon's position inside
+ * its nakshatra, and a day's uncertainty is a whole nakshatra — so [computeChart] withholds this
+ * exactly when it withholds the nakshatra. Null for a moment before birth or unusable input.
+ */
+export function vimshottariDasha(
+  moonSidereal: number,
+  birthJd: number,
+  asOfJd: number,
+): Dasha | null {
+  if (![moonSidereal, birthJd, asOfJd].every(Number.isFinite) || asOfJd < birthJd) return null;
+
+  const longitude = wrap360(moonSidereal);
+  let lord = Math.floor(longitude / NAKSHATRA_SPAN) % 9;
+  const travelled = (longitude % NAKSHATRA_SPAN) / NAKSHATRA_SPAN;
+
+  // The opening period began before birth, by the share of it the Moon had already travelled.
+  let start = birthJd - travelled * DASHA_LORDS[lord][1] * DASHA_YEAR_DAYS;
+
+  // Two full cycles is 240 years, which no birth date this app accepts can reach.
+  for (let step = 0; step < 18; step++) {
+    const length = DASHA_LORDS[lord][1] * DASHA_YEAR_DAYS;
+
+    if (asOfJd < start + length) {
+      // The sub-periods open with the Mahadasha's own lord and follow the same order.
+      let subStart = start;
+      for (let k = 0; k < 9; k++) {
+        const sub = (lord + k) % 9;
+        const subLength = length * DASHA_LORDS[sub][1] / DASHA_CYCLE_YEARS;
+
+        // The last one takes whatever floating point leaves over, so the walk cannot fall off.
+        if (asOfJd < subStart + subLength || k === 8) {
+          return {
+            mahadasha: DASHA_LORDS[lord][0],
+            mahaPhase: phaseOf((asOfJd - start) / length),
+            antardasha: DASHA_LORDS[sub][0],
+            antarPhase: phaseOf((asOfJd - subStart) / subLength),
+          };
+        }
+        subStart += subLength;
+      }
+    }
+
+    start += length;
+    lord = (lord + 1) % 9;
+  }
+
+  return null;
+}
+
+function phaseOf(fraction: number): DashaPhase {
+  if (fraction < 1 / 3) return "early";
+  if (fraction < 2 / 3) return "middle";
+  return "late";
+}
+
 // ---------------------------------------------------------------- the chart
 
 export interface Chart {
-  /** The Moon's rashi — in jyotish, "your sign" means this, not the Sun's. */
-  moonRashi: string;
-  moonRashiEnglish: string;
+  /**
+   * The Moon's rashi — in jyotish, "your sign" means this, not the Sun's.
+   *
+   * Null when it cannot be named honestly: the birth hour is unknown and the Moon changed sign
+   * during the day they were born, so either of [moonRashiCandidates] could be theirs. A noon
+   * guess used to fill this in, and that is how one account was told Dhanu in one conversation
+   * and Makara in the next, once its birth hour arrived.
+   */
+  moonRashi: string | null;
+  moonRashiEnglish: string | null;
+
+  /** One sign when the Moon's rashi is settled; the two it moved between when it is not. */
+  moonRashiCandidates: string[];
+
+  /** True when the rashi they told the sage is what settled a day the Moon changed sign. */
+  moonRashiStated: boolean;
 
   /**
    * Null when the birth time is unknown.
@@ -335,12 +506,19 @@ export interface Chart {
   /** 1-4, or null for the same reason as [nakshatra]. */
   pada: number | null;
 
-  /** The Sun's rashi. Steady for a month, so it survives an unknown birth time. */
-  sunRashi: string;
-  sunRashiEnglish: string;
+  /**
+   * The Sun's rashi. Steady for a month, so it survives an unknown birth time — except on the one
+   * day a month it moves, when it is null for the same reason as [moonRashi].
+   */
+  sunRashi: string | null;
+  sunRashiEnglish: string | null;
+  sunRashiCandidates: string[];
 
   /** True when a birth time was supplied and the reading is at its full precision. */
   precise: boolean;
+
+  /** The periods running at [BirthDetails.asOf]. Null without a birth hour, or without `asOf`. */
+  dasha: Dasha | null;
 }
 
 export interface BirthDetails {
@@ -352,6 +530,29 @@ export interface BirthDetails {
 
   /** Hours east of UTC. Defaults to [IST_OFFSET_HOURS]; see the note there. */
   timezoneOffsetHours?: number;
+
+  /**
+   * A rashi they told the sage themselves, in any spelling [rashiFromName] reads.
+   *
+   * Only ever used to choose between the two signs of a day the Moon changed sign. It never
+   * overrules a sign the clock settles: the rashi a person knows is often their naam rashi, from
+   * the first letter of their name, and that is not the Moon's.
+   */
+  statedRashi?: string | null;
+
+  /**
+   * The moment to count the dasha to. Absent means no dasha — this module keeps no clock of its
+   * own, which is what keeps every result above reproducible in a test.
+   */
+  asOf?: Date | null;
+}
+
+/** The last instant of a local day, in hours. */
+const END_OF_DAY = 23 + 59 / 60 + 59 / 3600;
+
+/** Julian Day of a JavaScript instant: the Unix epoch is JD 2440587.5. */
+function julianDayOf(instant: Date): number {
+  return instant.getTime() / 86_400_000 + 2440587.5;
 }
 
 /**
@@ -360,10 +561,10 @@ export interface BirthDetails {
  * Null rather than a thrown error or a guessed date: a user who never finished onboarding still
  * gets to talk to the sage, just without a chart, and the prompt handles that case explicitly.
  *
- * With no birth time the Moon is computed for noon local — the middle of the day, so the worst
- * case is half a day of error rather than a whole one — and the nakshatra is withheld. The rashi
- * survives because the Moon needs about two and a quarter days to cross one, so noon is right far
- * more often than not.
+ * With no birth time the nakshatra is withheld, and a rashi is named only if the sign held for the
+ * whole day — both ends of the day are computed, and a sign that differs between them is a sign
+ * the clock cannot settle. The Moon needs about two and a quarter days to cross a rashi, so most
+ * days pass the check; the ones that do not are exactly the ones a noon guess used to get wrong.
  */
 export function computeChart(details: BirthDetails): Chart | null {
   const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(details.dob?.trim() ?? "");
@@ -376,33 +577,87 @@ export function computeChart(details: BirthDetails): Chart | null {
 
   const clock = parseClock(details.birthTime);
   const offset = details.timezoneOffsetHours ?? IST_OFFSET_HOURS;
-
-  // Noon local when the hour is unknown: the middle of the day bounds the error at ±12 hours
-  // rather than ±24.
-  const localHours = clock ?? 12;
-  const utcHours = localHours - offset;
-
-  const jd = julianDay(year, month, day, utcHours);
-
-  const moon = toSidereal(moonLongitude(jd), jd);
-  const sun = toSidereal(sunLongitude(jd), jd);
-
-  const moonRashi = RASHIS[Math.floor(moon / 30) % 12];
-  const sunRashi = RASHIS[Math.floor(sun / 30) % 12];
-
   const precise = clock !== null;
-  const nakshatraIndex = Math.floor(moon / NAKSHATRA_SPAN) % 27;
+
+  const at = (localHours: number) => {
+    const jd = julianDay(year, month, day, localHours - offset);
+    return {
+      jd,
+      moon: toSidereal(moonLongitude(jd), jd),
+      sun: toSidereal(sunLongitude(jd), jd),
+    };
+  };
+
+  // Noon when the hour is unknown only feeds what is withheld anyway; the signs come from below.
+  const birth = at(clock ?? 12);
+  const start = precise ? birth : at(0);
+  const end = precise ? birth : at(END_OF_DAY);
+
+  const signsBetween = (from: number, to: number): string[] => {
+    const first = rashiOf(from);
+    const last = rashiOf(to);
+    return first === last ? [first] : [first, last];
+  };
+
+  const moonRashiCandidates = signsBetween(start.moon, end.moon);
+  const sunRashiCandidates = signsBetween(start.sun, end.sun);
+
+  const stated = rashiFromName(details.statedRashi);
+  const moonRashiStated = moonRashiCandidates.length > 1 &&
+    stated !== null &&
+    moonRashiCandidates.includes(stated);
+
+  const moonRashi = moonRashiCandidates.length === 1
+    ? moonRashiCandidates[0]
+    : (moonRashiStated ? stated : null);
+  const sunRashi = sunRashiCandidates.length === 1 ? sunRashiCandidates[0] : null;
+
+  const nakshatraIndex = Math.floor(birth.moon / NAKSHATRA_SPAN) % 27;
 
   return {
     moonRashi,
-    moonRashiEnglish: RASHI_ENGLISH[moonRashi],
+    moonRashiEnglish: moonRashi ? RASHI_ENGLISH[moonRashi] : null,
+    moonRashiCandidates,
+    moonRashiStated,
     nakshatra: precise ? NAKSHATRAS[nakshatraIndex] : null,
     pada: precise
-      ? Math.floor((moon % NAKSHATRA_SPAN) / (NAKSHATRA_SPAN / 4)) + 1
+      ? Math.floor((birth.moon % NAKSHATRA_SPAN) / (NAKSHATRA_SPAN / 4)) + 1
       : null,
     sunRashi,
-    sunRashiEnglish: RASHI_ENGLISH[sunRashi],
+    sunRashiEnglish: sunRashi ? RASHI_ENGLISH[sunRashi] : null,
+    sunRashiCandidates,
     precise,
+    dasha: precise && details.asOf
+      ? vimshottariDasha(birth.moon, birth.jd, julianDayOf(details.asOf))
+      : null,
+  };
+}
+
+function rashiOf(siderealLongitude: number): string {
+  return RASHIS[Math.floor(siderealLongitude / 30) % 12];
+}
+
+/**
+ * The chart as it travels: to the app inside every user payload, and into `users.chart` as the
+ * snapshot `astro-chat` compares against. snake_case like every other field on the wire.
+ */
+export function chartToJson(chart: Chart | null): Record<string, unknown> | null {
+  if (!chart) return null;
+
+  return {
+    moon_rashi: chart.moonRashi,
+    moon_rashi_english: chart.moonRashiEnglish,
+    moon_rashi_candidates: chart.moonRashiCandidates,
+    nakshatra: chart.nakshatra,
+    pada: chart.pada,
+    sun_rashi: chart.sunRashi,
+    sun_rashi_english: chart.sunRashiEnglish,
+    sun_rashi_candidates: chart.sunRashiCandidates,
+    precise: chart.precise,
+    mahadasha: chart.dasha?.mahadasha ?? null,
+    maha_phase: chart.dasha?.mahaPhase ?? null,
+    antardasha: chart.dasha?.antardasha ?? null,
+    antar_phase: chart.dasha?.antarPhase ?? null,
   };
 }
 
@@ -426,14 +681,44 @@ function parseClock(raw: string | null | undefined): number | null {
  * best at using. Empty string when there is no chart, so the caller can concatenate without
  * checking.
  */
-export function describeChart(chart: Chart | null): string {
+export function describeChart(
+  chart: Chart | null,
+  { dasha = false }: { dasha?: boolean } = {},
+): string {
   if (!chart) return "";
 
-  const lines = [
-    `Moon (Chandra) in ${chart.moonRashi} (${chart.moonRashiEnglish}) — this is the person's ` +
-    `rashi, the sign that matters most in jyotish.`,
-    `Sun (Surya) in ${chart.sunRashi} (${chart.sunRashiEnglish}).`,
-  ];
+  const lines: string[] = [];
+
+  if (chart.moonRashi) {
+    lines.push(
+      `Moon (Chandra) in ${chart.moonRashi} (${chart.moonRashiEnglish}) — this is the person's ` +
+        `rashi, the sign that matters most in jyotish.`,
+    );
+    if (chart.moonRashiStated) {
+      lines.push(
+        `Chandra changed sign on the day they were born. ${chart.moonRashi} is the one of the ` +
+          `two they told you is theirs, and that settles it.`,
+      );
+    }
+  } else {
+    const [from, to] = chart.moonRashiCandidates;
+    lines.push(
+      `Moon (Chandra): UNCERTAIN. On the day they were born it moved from ${from} ` +
+        `(${RASHI_ENGLISH[from]}) into ${to} (${RASHI_ENGLISH[to]}), and without the hour of ` +
+        `birth there is no telling which is their rashi. Do not name either one as their rashi. ` +
+        `Ask for the hour of birth — it settles this.`,
+    );
+  }
+
+  if (chart.sunRashi) {
+    lines.push(`Sun (Surya) in ${chart.sunRashi} (${chart.sunRashiEnglish}).`);
+  } else {
+    const [from, to] = chart.sunRashiCandidates;
+    lines.push(
+      `Sun (Surya): moved from ${from} into ${to} on the day they were born. Without the hour, ` +
+        `do not name either.`,
+    );
+  }
 
   if (chart.nakshatra) {
     lines.push(`Nakshatra: ${chart.nakshatra}, pada ${chart.pada}.`);
@@ -442,6 +727,23 @@ export function describeChart(chart: Chart | null): string {
       "Nakshatra: UNKNOWN, because the birth time was never given. Do not name one. If the " +
         "moment is right, ask for the hour of birth — it is what a nakshatra needs.",
     );
+  }
+
+  // Opt-in, so a rollback to a prompt that was never told what a dasha is does not receive one.
+  if (dasha) {
+    if (chart.dasha) {
+      const d = chart.dasha;
+      lines.push(
+        `Vimshottari dasha running now: the Mahadasha of ${d.mahadasha} (${d.mahaPhase} in its ` +
+          `period), and within it the Antardasha of ${d.antardasha} (${d.antarPhase} in its ` +
+          `period). Never give the year a dasha began or will end.`,
+      );
+    } else {
+      lines.push(
+        "Dasha: UNKNOWN, because it is counted from the nakshatra, which needs the hour of " +
+          "birth. Do not name one.",
+      );
+    }
   }
 
   return lines.join("\n");

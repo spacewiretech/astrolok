@@ -242,6 +242,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
                 state: state,
                 onSend: (message, entry) => model.send(message, entry: entry),
                 onDraftRestored: model.pendingRestored,
+                onRate: model.rate,
               ),
             ],
           ),

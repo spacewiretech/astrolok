@@ -327,6 +327,13 @@ Deno.test("the boundaries the feature depends on are actually in the system prom
   }
 });
 
+Deno.test("a reading still forbids every remedy, whatever the chat now permits", () => {
+  // The counsel bullet became replaceable so the chat could carry a narrower rule. A face reading
+  // passes nothing and must keep the original, word for word.
+  assert(SYSTEM_PROMPT.includes("never a remedy, gemstone, ritual, fast or charm"));
+  assert(!SYSTEM_PROMPT.includes("A remedy is allowed"));
+});
+
 Deno.test("an English reading still asks for transliteration and not Devanagari", () => {
   // The no-language prompt is what shipped, and it keeps the original rule: a reading written
   // for a Latin-script language must stay in Roman letters so the PDF's real text path is used

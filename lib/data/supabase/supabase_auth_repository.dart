@@ -79,6 +79,26 @@ class SupabaseAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<AppUser> saveBirthTime(String? time) async {
+    final data = await _guard(
+      () async => _functions.call(
+        'update-profile',
+        // An explicit null clears it, the same convention as the language: a wrong hour has to be
+        // retractable, or the chart would be stuck on it.
+        body: {'birth_time': time?.trim()},
+        bearerToken: await _requireToken(),
+      ),
+    );
+
+    final user = _userFrom(data['user']);
+    if (user == null) {
+      throw const OtpSendException('Could not save your birth time. Please try again.');
+    }
+    await _sessions.cacheUser(user);
+    return user;
+  }
+
+  @override
   Future<AppUser> saveBirthDate(DateTime date) async {
     final data = await _guard(
       () async => _functions.call(

@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'birth_chart.dart';
+
 /// Mirrors the `public.payment_status` enum. The database is the authority on the spelling.
 enum PaymentType {
   /// Never authorised a mandate. The state every account is created in, and the only one still
@@ -85,6 +87,8 @@ class AppUser {
     this.billingState,
     this.trialAvailable,
     this.chatLanguage,
+    this.birthTime,
+    this.chart,
   });
 
   final String id;
@@ -94,7 +98,8 @@ class AppUser {
   final String name;
 
   /// Date of birth, collected on the step after the name. Date only — no time, no place — so
-  /// the time component is always midnight and must not be read as a birth time.
+  /// the time component is always midnight and must not be read as a birth time. That is
+  /// [birthTime].
   final DateTime? birthDate;
 
   final String? avatarUrl;
@@ -131,6 +136,16 @@ class AppUser {
   /// expressed a preference and nobody who has. The server resolves it per turn; Profile shows
   /// the resolved name.
   final String? chatLanguage;
+
+  /// The hour of birth as `HH:MM`, read as IST, or null when nobody has said.
+  ///
+  /// Told to Astro in conversation or set in Profile. It is what turns a rashi into a nakshatra,
+  /// and on the day the Moon changed sign it is what decides the rashi itself.
+  final String? birthTime;
+
+  /// What the server computed from [birthDate] and [birthTime]. Null without a date of birth, or
+  /// from a server that predates the field.
+  final BirthChart? chart;
 
   bool get hasName => name.trim().isNotEmpty;
 
@@ -230,6 +245,8 @@ class AppUser {
       chatLanguage: raw['language'] is String && (raw['language'] as String).isNotEmpty
           ? raw['language'] as String
           : null,
+      birthTime: parseBirthTime(raw['birth_time']),
+      chart: BirthChart.fromServer(raw['chart']),
     );
   }
 
@@ -250,6 +267,14 @@ class AppUser {
     // Rejects 31 February and friends: DateTime rolls those forward silently.
     if (parsed.year != year || parsed.month != month || parsed.day != day) return null;
     return parsed;
+  }
+
+  /// `birth_time` is a Postgres `time`, which supabase-js renders as `HH:MM:SS`. Kept as `HH:MM`,
+  /// which is what `update-profile` accepts back. Null for anything that is not a wall-clock time.
+  static String? parseBirthTime(Object? raw) {
+    if (raw is! String) return null;
+    final match = RegExp(r'^([01]\d|2[0-3]):([0-5]\d)').firstMatch(raw.trim());
+    return match == null ? null : '${match[1]}:${match[2]}';
   }
 
   /// The wire format `update-profile` expects.
@@ -274,6 +299,8 @@ class AppUser {
     BillingState? billingState,
     bool? trialAvailable,
     String? chatLanguage,
+    String? birthTime,
+    BirthChart? chart,
 
     /// Explicit, because null is a meaningful value here — it means the mandate recovered.
     bool clearBillingState = false,
@@ -281,6 +308,9 @@ class AppUser {
     /// Explicit for the same reason: null means "follow the configured default", which is a
     /// choice someone can make by picking the default back.
     bool clearChatLanguage = false,
+
+    /// Explicit because a wrong hour has to be retractable back to "not known".
+    bool clearBirthTime = false,
   }) {
     return AppUser(
       id: id,
@@ -295,6 +325,8 @@ class AppUser {
       billingState: clearBillingState ? null : (billingState ?? this.billingState),
       trialAvailable: trialAvailable ?? this.trialAvailable,
       chatLanguage: clearChatLanguage ? null : (chatLanguage ?? this.chatLanguage),
+      birthTime: clearBirthTime ? null : (birthTime ?? this.birthTime),
+      chart: chart ?? this.chart,
     );
   }
 }

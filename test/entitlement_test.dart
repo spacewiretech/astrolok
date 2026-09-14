@@ -335,6 +335,89 @@ void _pickerTests() {
     expect(container.read(languageProvider), 'Tamil');
     expect(find.text('Tamil'), findsOneWidget);
   });
+
+  /// The subscriber above, as the server would send them, with [chart] on the payload.
+  AppUser withChart(Map<String, dynamic>? chart) => AppUser.fromServer({
+        'user_id': 'u1',
+        'mobile_no': '9876543210',
+        'name': 'Asha',
+        'payment_type': 'active',
+        'current_period_end': '2027-01-04T00:00:00Z',
+        'entitled': true,
+        'chart': chart,
+      })!;
+
+  Future<void> pumpProfile(WidgetTester tester, AppUser user) async {
+    // A small phone, tall enough that the whole list is laid out without scrolling.
+    tester.view.physicalSize = const Size(360, 1200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final container = containerWith(_LanguageRepository(user));
+    await container.read(appConfigProvider.future);
+    container.read(entitlementProvider.notifier).set(user);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(theme: buildAppTheme(), home: const ProfileView()),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('the chart card shows both signs of an uncertain day, and why', (tester) async {
+    // 17 October 1999 without the hour: the day the chat once said Dhanu and then Makara.
+    await pumpProfile(
+      tester,
+      withChart({
+        'moon_rashi': null,
+        'moon_rashi_candidates': ['Dhanu', 'Makara'],
+        'sun_rashi': null,
+        'sun_rashi_candidates': ['Kanya', 'Tula'],
+        'precise': false,
+      }),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Your chart'), findsOneWidget);
+    expect(find.text('Dhanu or Makara'), findsOneWidget);
+    expect(find.text('Kanya or Tula'), findsOneWidget);
+    expect(find.text('Needs your birth time'), findsOneWidget);
+    expect(find.textContaining('The Moon changed sign'), findsOneWidget);
+    expect(find.text('Set birth time'), findsOneWidget);
+  });
+
+  testWidgets('a settled chart names its sign and dasha, and no explanation is needed', (tester) async {
+    await pumpProfile(
+      tester,
+      withChart({
+        'moon_rashi': 'Makara',
+        'moon_rashi_candidates': ['Makara'],
+        'nakshatra': 'Uttara Ashadha',
+        'pada': 2,
+        'sun_rashi': 'Tula',
+        'sun_rashi_candidates': ['Tula'],
+        'precise': true,
+        'mahadasha': 'Rahu',
+        'antardasha': 'Shani',
+      }),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Makara'), findsOneWidget);
+    expect(find.text('Uttara Ashadha, pada 2'), findsOneWidget);
+    expect(find.text('Rahu · Shani'), findsOneWidget);
+    expect(find.textContaining('The Moon changed sign'), findsNothing);
+  });
+
+  testWidgets('no date of birth means no chart card rather than an empty one', (tester) async {
+    await pumpProfile(tester, withChart(null));
+
+    expect(find.text('Your chart'), findsNothing);
+    // And the rest of Profile is untouched by its absence.
+    expect(find.text('Premium Active'), findsOneWidget);
+  });
 }
 
 /// Answers with a fixed map, the way [analyticsProvider]'s tests do.
@@ -390,6 +473,9 @@ class _LanguageRepository implements AuthRepository {
 
   @override
   Future<AppUser> saveBirthDate(DateTime date) => throw UnimplementedError();
+
+  @override
+  Future<AppUser> saveBirthTime(String? time) => throw UnimplementedError();
 
   @override
   Future<void> signOut() => throw UnimplementedError();

@@ -29,6 +29,11 @@ abstract interface class ChatRepository {
   /// Returns the memory as it stands afterwards, so the caller renders the server's answer
   /// rather than its own guess at it.
   Future<List<AstroFact>> forget({String? key});
+
+  /// Records how the conversation has felt, 1 to 5, or null when the card was dismissed.
+  ///
+  /// Asked once per account, which the server enforces: a second answer changes nothing.
+  Future<void> rate({required String threadId, int? rating});
 }
 
 /// What comes back from one turn.
@@ -38,7 +43,20 @@ class ChatReply {
     required this.threadId,
     this.threadTitle = '',
     this.remaining,
+    this.savedLanguage,
+    this.askRating = false,
   });
+
+  /// Set when this message moved the account's chat language and the server saved it — they wrote
+  /// in Devanagari, or asked for Hindi in words. Null when nothing changed.
+  ///
+  /// The app has to be told: Profile's picker and the read-aloud voice both follow the stored
+  /// language, and neither would otherwise hear about it until the next sign-in.
+  final String? savedLanguage;
+
+  /// True when the server wants this account asked to rate the chat. It says so on every reply
+  /// until they answer or dismiss, and never again after.
+  final bool askRating;
 
   final AstroMessage message;
 

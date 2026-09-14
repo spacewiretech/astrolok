@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/models/astro_message.dart';
 import '../../data/analytics/analytics.dart';
 import '../../data/analytics/analytics_events.dart';
+import '../../data/entitlement.dart';
 import '../../data/language.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/chat_repository.dart';
@@ -175,6 +176,21 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
           );
       if (_disposed) return;
 
+      // Before the state change below, so the language is in place by the time anything reads
+      // the new reply — the listen control above all.
+      final savedLanguage = reply.savedLanguage;
+      if (savedLanguage != null) _adoptLanguage(savedLanguage);
+
+      // An answer already given this run stands even if saving it failed; see
+      // [chatRatingDoneProvider].
+      final askRating = reply.askRating && !ref.read(chatRatingDoneProvider);
+      if (askRating && !state.ratingDue) {
+        analytics.track(Ev.chatRatingShown, {
+          P.threadId: reply.threadId,
+          P.turnIndex: turnIndex,
+        });
+      }
+
       state = state.copyWith(
         messages: [...state.messages, reply.message],
         threadId: reply.threadId,
@@ -183,6 +199,7 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
         sending: false,
         // The one message allowed to animate itself in.
         revealingId: reply.message.id,
+        ratingDue: askRating,
       );
       analytics.track(Ev.chatReplyReceived, {
         P.threadId: reply.threadId,
@@ -221,6 +238,48 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
     } catch (error) {
       debugPrint('[chat] send failed: $error');
       _rollBack(mine, ChatCopy.sendFailed);
+    }
+  }
+
+  /// Installs a chat language the server saved from this conversation.
+  ///
+  /// Through the entitlement store, the same door Profile's picker uses, so the picker and the
+  /// read-aloud voice both follow it at once — and into the session cache, or an offline relaunch
+  /// would put the old language back. Never `invalidate`: see the note in `profile_view.dart`.
+  void _adoptLanguage(String language) {
+    final user = ref.read(entitlementProvider);
+    if (user == null || user.chatLanguage == language) return;
+
+    final updated = user.copyWith(chatLanguage: language);
+    ref.read(entitlementProvider.notifier).set(updated);
+    ref.read(sessionStoreProvider).cacheUser(updated).catchError((Object error) {
+      debugPrint('[chat] could not cache the new language: $error');
+    });
+  }
+
+  /// Answers the rating card: 1 (worst) to 5 (best), or null for a dismissal.
+  ///
+  /// The card goes before the request does, and does not come back this run whatever the request
+  /// does. A rating is not worth an error on screen: a failure is logged and dropped, and at worst
+  /// the server asks again on some later reply.
+  Future<void> rate(int? rating) async {
+    final threadId = state.threadId;
+    if (!state.ratingDue || threadId == null) return;
+
+    ref.read(chatRatingDoneProvider.notifier).state = true;
+    state = state.copyWith(ratingDue: false);
+
+    analytics.track(rating == null ? Ev.chatRatingDismissed : Ev.chatRated, {
+      P.threadId: threadId,
+      P.rating: ?rating,
+      P.turnIndex: state.messages.where((m) => m.isUser).length,
+      P.chatLanguage: ref.read(languageProvider),
+    });
+
+    try {
+      await ref.read(chatRepositoryProvider).rate(threadId: threadId, rating: rating);
+    } catch (error) {
+      debugPrint('[chat] could not save the rating: $error');
     }
   }
 
@@ -274,6 +333,16 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
       await speech.stop();
       if (_disposed) return;
       state = state.copyWith(clearSpeaking: true);
+      return;
+    }
+
+    // The language may have moved since the screen opened — someone wrote in Devanagari and the
+    // server saved Hindi — and a Hindi reply handed to an English voice is read as silence. A
+    // no-op when nothing has changed.
+    final canSpeak = await speech.prepare(language: ref.read(languageProvider));
+    if (_disposed) return;
+    if (!canSpeak) {
+      state = state.copyWith(canSpeak: false);
       return;
     }
 
@@ -339,6 +408,14 @@ final chatViewModelProvider =
 /// does not have an id for yet. Same cross-screen-signal pattern as `palmRejectionProvider`.
 final selectedThreadProvider = StateProvider<String>((_) => ChatThread.draftId);
 
+/// Whether this account has answered the rating card during this run of the app.
+///
+/// Apart from [ChatState] because the card is once per account, not per conversation: an answer
+/// given in one conversation must not leave the card up in the next. Not auto-disposing, for the
+/// same reason as [selectedThreadProvider]. The server holds the real record; this only covers the
+/// run in which saving the answer failed, so the card is not raised again straight away.
+final chatRatingDoneProvider = StateProvider<bool>((_) => false);
+
 /// Drops the signed-in user's conversations, for sign-out to call.
 ///
 /// The sidebar list is kept alive for the whole app run — that is what makes the drawer open
@@ -347,5 +424,6 @@ final selectedThreadProvider = StateProvider<String>((_) => ChatThread.draftId);
 /// last person's conversations.
 void forgetConversations(WidgetRef ref) {
   ref.invalidate(chatThreadsProvider);
+  ref.invalidate(chatRatingDoneProvider);
   ref.read(selectedThreadProvider.notifier).state = ChatThread.draftId;
 }

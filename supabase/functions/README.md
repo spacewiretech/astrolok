@@ -23,8 +23,8 @@ they are invoked with the anon key, before any session exists — so each valida
 | `push-token` | POST `{token, platform}` | bearer | upserts `push_tokens` on the FCM token, bound to the caller's session so sign-out removes it by cascade |
 | `palm-reading` | POST `{image, mime_type, focus}` | bearer + entitled | Gemini palm read, quota-anchored row |
 | `face-reading` | POST `{image, mime_type, focus}` | bearer + entitled | the face mirror |
-| `astro-chat` | POST `{message, thread_id?}` | bearer + entitled | one metered, chart-aware chat turn |
-| `chat-history` | POST, multiplexed by body key | bearer | thread list, one transcript, user facts, and `delete_thread`/`rename`/`forget`. No model call |
+| `astro-chat` | POST `{message, thread_id?}` | bearer + entitled | one metered, chart-aware chat turn. Also returns `language`, `saved_language` (only when the message switched it) and `ask_rating` |
+| `chat-history` | POST, multiplexed by body key | bearer | thread list, one transcript, user facts, and `delete_thread`/`rename`/`forget`/`rate` (`{thread_id, rating: 1-5 \| null}`, once per account). No model call |
 | `subscription-start` | POST | bearer | creates the Cashfree mandate, returns the session payload |
 | `subscription-status` | POST/GET | bearer | reads the latest subscription, optionally re-syncs, returns entitlement. No method check |
 | `subscription-cancel` | POST | bearer | cancels the mandate, returns refreshed entitlement |

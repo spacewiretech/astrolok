@@ -5,10 +5,13 @@ import {
   CHAT_SCHEMA,
   chatSystemPrompt,
   normaliseChatReply,
+  promptVersion,
 } from "../_shared/astro_chat.ts";
 import {
   BUILT_IN_LANGUAGES,
+  detectLanguageSwitch,
   isSupported,
+  languageBlock,
   languageInstruction,
   resolveLanguage,
   supportedLanguages,
@@ -374,7 +377,8 @@ Deno.test("a language the dashboard invented still produces a usable instruction
 Deno.test("the person outranks the setting", () => {
   // Someone who types in English gets English back whatever they picked. Without this the
   // picker becomes a trap for anyone who switches language mid-conversation.
-  assert(SYSTEM_PROMPT.includes("answer in the language\nthey wrote in"));
+  assert(SYSTEM_PROMPT.includes("answer in the language they wrote in"));
+  assert(SYSTEM_PROMPT.includes("the person in front of you outranks the setting"));
 });
 
 Deno.test("only Hindi is allowed Devanagari, and only in the chat", () => {
@@ -419,10 +423,10 @@ Deno.test("v1 is still reachable, and is the text that shipped", () => {
 Deno.test("an unset or misspelled version is treated as current", () => {
   // `configSetting` hands over "" for a blank cell, and a dashboard is a text box. Neither may
   // silently strand every user on the old prompt.
-  for (const version of ["", "  ", "V2", "v3", "latest"]) {
+  for (const version of ["", "  ", "V3", "v4", "latest"]) {
     assert(
-      chatSystemPrompt({ version, language: "English" }).includes("EFFORT IS PART OF THE READING"),
-      `version "${version}" did not fall through to v2`,
+      chatSystemPrompt({ version, language: "English" }).includes("THE DASHA."),
+      `version "${version}" did not fall through to v3`,
     );
   }
 });
@@ -608,4 +612,195 @@ Deno.test("an empty memory says so, rather than leaving the sage to assume", () 
   });
 
   assert(prompt.includes("You know nothing about their life yet"));
+});
+
+Deno.test("a chart corrected since the sage last saw it is named, so the sage can say so", () => {
+  const prompt = buildUserPrompt("Meri shaadi kab hogi?", {
+    name: "Prashant",
+    chart: computeChart({ dob: "1999-10-17", birthTime: "23:55" }),
+    chartCorrection: { from: "Dhanu", to: "Makara" },
+    facts: [],
+    opening: false,
+  });
+
+  assert(prompt.includes("THE CHART HAS CHANGED"));
+  assert(prompt.includes("placed Chandra in Dhanu"));
+  assert(prompt.includes("read from Makara"));
+});
+
+Deno.test("a rashi they already know is reconciled with the chart, not argued with", () => {
+  const chart = computeChart({ dob: "1999-10-17", birthTime: "23:55" });
+
+  const agrees = buildUserPrompt("Hello.", { chart, statedRashi: "Makar", facts: [], opening: false });
+  assert(agrees.includes("agrees with the chart"));
+
+  const differs = buildUserPrompt("Hello.", { chart, statedRashi: "Dhanu", facts: [], opening: false });
+  assert(differs.includes("naam rashi"));
+  assert(differs.includes("read from Makara"));
+});
+
+Deno.test("a birth time without morning or night is asked about, not used", () => {
+  const prompt = buildUserPrompt("Hello.", {
+    chart: computeChart({ dob: "1999-10-17" }),
+    unsettledBirthTime: "11:55",
+    facts: [],
+    opening: false,
+  });
+
+  assert(prompt.includes('A BIRTH TIME OF "11:55" WITHOUT SAYING MORNING OR NIGHT'));
+  assert(prompt.includes('set "ask_for" to\n"birth_time"') || prompt.includes('"ask_for" to "birth_time"'));
+});
+
+Deno.test("the dasha reaches the user prompt only when asked for", () => {
+  const chart = computeChart({
+    dob: "1999-10-17",
+    birthTime: "23:55",
+    asOf: new Date("2026-09-14T00:00:00Z"),
+  });
+
+  assert(buildUserPrompt("Hello.", { chart, dasha: true, facts: [], opening: false }).includes("Mahadasha"));
+  assert(!buildUserPrompt("Hello.", { chart, facts: [], opening: false }).includes("Mahadasha"));
+});
+
+Deno.test("a rashi they state is remembered under one key, spelled one way", () => {
+  const normalised = normaliseChatReply(reply({
+    remember: [
+      { key: "moon_sign", value: "Makar rashi" },
+      { key: "naam_rashi", value: "मीन" },
+    ],
+  }))!;
+
+  assertEquals(normalised.remember, [
+    { key: "rashi", value: "Makara" },
+    { key: "naam_rashi", value: "Meena" },
+  ]);
+});
+
+Deno.test("a rashi nobody can read is kept as they said it", () => {
+  const normalised = normaliseChatReply(reply({
+    remember: [{ key: "rashi", value: "the one my grandmother told me" }],
+  }))!;
+
+  assertEquals(normalised.remember, [{ key: "rashi", value: "the one my grandmother told me" }]);
+});
+
+// ---------------------------------------------------------------- v3
+
+Deno.test("v3 reads the dasha, and v2 was never told what one is", () => {
+  const v3 = chatSystemPrompt({ version: "v3", language: "Hinglish" });
+  assert(v3.includes("THE DASHA."));
+  assert(v3.includes("The chart outranks anything said about it earlier"));
+  assert(v3.includes("THE RASHI THEY ALREADY KNOW"));
+
+  const v2 = chatSystemPrompt({ version: "v2", language: "Hinglish" });
+  assert(!v2.includes("THE DASHA."));
+  assert(v2.includes("you have the Moon and the Sun, and nothing else"));
+});
+
+Deno.test("v3 permits a narrow remedy, and still forbids the gemstone", () => {
+  const v3 = chatSystemPrompt({ language: "Hinglish" });
+
+  assert(v3.includes("A remedy is allowed within narrow limits"));
+  assert(v3.includes("Never a gemstone"));
+  assert(v3.includes("Never a fast without food or water"));
+  assert(!v3.includes("never a remedy, gemstone, ritual, fast or charm"));
+});
+
+Deno.test("rolling back to v2 withdraws the remedies with it", () => {
+  const v2 = chatSystemPrompt({ version: "v2", language: "Hinglish" });
+
+  assert(v2.includes("never a remedy, gemstone, ritual, fast or charm"));
+  assert(!v2.includes("A remedy is allowed"));
+});
+
+Deno.test("the version cell is read forgivingly, and lands on v3", () => {
+  for (const raw of [undefined, null, "", "  ", "V3", "v4", "latest"]) {
+    assertEquals(promptVersion(raw), "v3", `"${raw}" did not land on v3`);
+  }
+  assertEquals(promptVersion(" V2 "), "v2");
+  assertEquals(promptVersion("v1"), "v1");
+});
+
+// ---------------------------------------------------------------- noticing a switch
+
+const OFFERED = config({ chat_languages: "Hinglish,English,Hindi" });
+
+Deno.test("a message written in Devanagari moves the conversation into Hindi", () => {
+  // The exchange that prompted this: Devanagari in, Hinglish out, three turns running.
+  assertEquals(detectLanguageSwitch("मेरी शादी कब होगी?", OFFERED), {
+    language: "Hindi",
+    explicit: false,
+  });
+});
+
+Deno.test("asking for Hindi in words is heard, in either script", () => {
+  for (
+    const said of [
+      "Hindi me bat kre",
+      "hindi mein baat karo please",
+      "हिंदी में बताए",
+      "हिन्दी",
+      "Hindi please",
+    ]
+  ) {
+    assertEquals(
+      detectLanguageSwitch(said, OFFERED),
+      { language: "Hindi", explicit: true },
+      `"${said}" was not heard as a request`,
+    );
+  }
+});
+
+Deno.test("asking for English is heard too, and the later of two requests wins", () => {
+  assertEquals(detectLanguageSwitch("Please reply in English", OFFERED)?.language, "English");
+  assertEquals(
+    detectLanguageSwitch("hindi me bataya tha, ab english me baat karo", OFFERED)?.language,
+    "English",
+  );
+});
+
+Deno.test("Roman letters decide nothing, and one Devanagari word does not either", () => {
+  for (const said of ["When will I get a job?", "meri shaadi kab hogi", "meri shaadi kab hogi भाई"]) {
+    assertEquals(detectLanguageSwitch(said, OFFERED), null, `"${said}" switched the language`);
+  }
+});
+
+Deno.test("naming a language is not asking for it", () => {
+  for (
+    const said of [
+      "mera hindi me result kharab aaya, kya karu",
+      "Hindi me mat bolo",
+      "I teach English at a school in Pune",
+    ]
+  ) {
+    assertEquals(detectLanguageSwitch(said, OFFERED), null, `"${said}" switched the language`);
+  }
+});
+
+Deno.test("a language the dashboard does not offer is never switched to", () => {
+  const noHindi = config({ chat_languages: "Hinglish,English" });
+
+  assertEquals(detectLanguageSwitch("मेरी शादी कब होगी?", noHindi), null);
+  assertEquals(detectLanguageSwitch("Hindi me bat kre", noHindi), null);
+});
+
+Deno.test("a switch is spelled the way the dashboard spells it", () => {
+  const lower = config({ chat_languages: "hinglish,english,hindi" });
+  assertEquals(detectLanguageSwitch("हिंदी में बताए", lower)?.language, "hindi");
+});
+
+Deno.test("earlier replies in another language are not a precedent", () => {
+  const prompt = chatSystemPrompt({ language: "Hindi" });
+
+  assert(prompt.includes("That is not a precedent"));
+  assert(prompt.includes("Hindi typed in Roman letters is not a different language"));
+  assert(prompt.includes("If they ask you to write in another language, do it"));
+});
+
+Deno.test("a reading keeps the language block it shipped with", () => {
+  // Palm and face have no earlier replies to be misled by, and no keyboard.
+  const reading = languageBlock("Hindi");
+
+  assert(!reading.includes("precedent"));
+  assert(reading.includes("someone who types in English"));
 });

@@ -192,6 +192,13 @@ abstract final class Ev {
   static const chatThreadRenamed = 'Chat Thread Renamed';
   static const chatThreadDeleted = 'Chat Thread Deleted';
 
+  /// The five-face card was offered. At most once per account — the server stops asking once they
+  /// answer or dismiss — so the gap between this and the two below is a response rate, not a count
+  /// of how often anyone was nagged.
+  static const chatRatingShown = 'Chat Rating Shown';
+  static const chatRated = 'Chat Rated';
+  static const chatRatingDismissed = 'Chat Rating Dismissed';
+
   // ---------------------------------------------------------------- profile
 
   static const profileViewed = 'Profile Viewed';
@@ -471,6 +478,9 @@ abstract final class P {
   static const topic = 'topic';
   static const chars = 'chars';
   static const turnIndex = 'turn_index';
+
+  /// 1 (worst) to 5 (best), from the chat's rating card.
+  static const rating = 'rating';
   static const hasVerdict = 'has_verdict';
   static const optionCount = 'option_count';
   static const optionIndex = 'option_index';

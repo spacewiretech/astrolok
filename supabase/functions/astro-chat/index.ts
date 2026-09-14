@@ -3,8 +3,11 @@ import {
   CHAT_SCHEMA,
   chatSystemPrompt,
   normaliseChatReply,
+  PROMPT_V3,
+  promptVersion,
 } from "../_shared/astro_chat.ts";
-import { resolveLanguage } from "../_shared/chat_language.ts";
+import { readClock } from "../_shared/birth_time.ts";
+import { detectLanguageSwitch, resolveLanguage } from "../_shared/chat_language.ts";
 import { configSetting, loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
@@ -15,7 +18,7 @@ import {
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
 import { converse, GeminiError, geminiSettings, Turn } from "../_shared/gemini.ts";
-import { computeChart } from "../_shared/jyotish.ts";
+import { Chart, chartToJson, computeChart } from "../_shared/jyotish.ts";
 import { ageFrom, firstName } from "../_shared/person.ts";
 
 /**
@@ -43,6 +46,7 @@ const DEADLINE_MS = 30_000;
 const DEFAULT_PER_DAY = 40;
 const DEFAULT_HISTORY_TURNS = 20;
 const DEFAULT_FACTS_MAX = 50;
+const DEFAULT_RATE_AFTER = 5;
 
 function positiveInt(raw: string | undefined, fallback: number): number {
   const value = Number(raw ?? "");
@@ -95,6 +99,15 @@ function summarise(
   if (!headline && !trait) return null;
 
   return `Their ${kind} reading said: ${[headline, trait].filter((s) => s).join(" — ")}.`;
+}
+
+/** The value of the first of [keys] the memory holds, or null. */
+function factValue(facts: Array<{ key: string; value: string }>, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const fact = facts.find((entry) => entry.key === key);
+    if (fact?.value.trim()) return fact.value;
+  }
+  return null;
 }
 
 Deno.serve(async (req) => {
@@ -191,47 +204,86 @@ Deno.serve(async (req) => {
   // arrive carrying last week's question about love.
   const historyTurns = positiveInt(config.get("chat_history_turns"), DEFAULT_HISTORY_TURNS);
 
-  const [{ data: recent }, { data: factRows }, { data: palmRow }, { data: faceRow }] =
-    await Promise.all([
-      db.from("chat_messages")
-        .select("role, body")
-        .eq("thread_id", thread.id)
-        .order("created_at", { ascending: false })
-        .limit(historyTurns),
-      db.from("user_facts")
-        .select("key, value")
-        .eq("user_id", userId)
-        .order("updated_at", { ascending: false })
-        .limit(positiveInt(config.get("chat_facts_max"), DEFAULT_FACTS_MAX)),
-      db.from("palm_readings")
-        .select("headline, strongest_trait_title")
-        .eq("user_id", userId)
-        .eq("status", "ready")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      db.from("face_readings")
-        .select("headline, core_trait_title")
-        .eq("user_id", userId)
-        .eq("status", "ready")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ]);
+  const [
+    { data: recent },
+    { data: factRows },
+    { data: palmRow },
+    { data: faceRow },
+    snapshotRead,
+    feedbackRead,
+  ] = await Promise.all([
+    db.from("chat_messages")
+      .select("role, body")
+      .eq("thread_id", thread.id)
+      .order("created_at", { ascending: false })
+      .limit(historyTurns),
+    db.from("user_facts")
+      .select("key, value")
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .limit(positiveInt(config.get("chat_facts_max"), DEFAULT_FACTS_MAX)),
+    db.from("palm_readings")
+      .select("headline, strongest_trait_title")
+      .eq("user_id", userId)
+      .eq("status", "ready")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    db.from("face_readings")
+      .select("headline, core_trait_title")
+      .eq("user_id", userId)
+      .eq("status", "ready")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    // Both of these are allowed to fail. Each reads a column or table added after the chat
+    // shipped, and a project whose migration has not run yet must keep answering — it simply gets
+    // no correction note and no rating card.
+    db.from("users").select("chart").eq("user_id", userId).maybeSingle(),
+    db.from("chat_feedback").select("user_id").eq("user_id", userId).maybeSingle(),
+  ]);
+
+  const recentRows = (recent ?? []) as Array<{ role: string; body: Record<string, unknown> }>;
 
   // Newest-first from the query, oldest-first for the model.
-  const history: Turn[] = (recent ?? [])
+  const history: Turn[] = recentRows
     .slice()
     .reverse()
-    .map((row) => asTurn(row as { role: string; body: Record<string, unknown> }))
+    .map(asTurn)
     .filter((turn): turn is Turn => turn !== null);
 
   const facts = (factRows ?? []) as Array<{ key: string; value: string }>;
 
+  const version = promptVersion(configSetting(config, "chat_prompt_version"));
+
   const chart = computeChart({
     dob: user.dob ?? "",
     birthTime: user.birth_time ?? null,
+    // Only ever used to settle a day the Moon changed sign; see `BirthDetails.statedRashi`.
+    statedRashi: factValue(facts, "rashi"),
+    asOf: new Date(),
   });
+
+  const previousChart = snapshotRead.error
+    ? null
+    : ((snapshotRead.data?.chart ?? null) as Record<string, unknown> | null);
+  const chartCorrection = correctionBetween(previousChart, chart);
+
+  // A time they said without morning or night sits in the memory but never reached the chart.
+  // Saying so is what gets it asked about, rather than read as settled.
+  const statedTime = factValue(facts, "birth_time", "born_at");
+  const unsettledBirthTime = !user.birth_time && statedTime && readClock(statedTime).ambiguous
+    ? statedTime
+    : null;
+
+  // ------------------------------------------------------------ the language
+  //
+  // Decided here rather than left to the prompt, which is where it used to be decided and where
+  // it failed: someone set to Hinglish wrote in Devanagari, asked for Hindi in words, and got
+  // Hinglish back for three turns. See `detectLanguageSwitch`.
+  const settledLanguage = resolveLanguage(user.language, config);
+  const switched = detectLanguageSwitch(message, config);
+  const language = switched?.language ?? settledLanguage;
 
   // ------------------------------------------------------------ the turn
   //
@@ -254,24 +306,24 @@ Deno.serve(async (req) => {
     return fail("server_error", "Something went wrong. Please try again.", 500);
   }
 
-  // Both from `app_config`, so the answer's shape and its language are dashboard edits rather
-  // than deploys — `chat_prompt_version` is the rollback for the craft, and a language dropped
-  // from `chat_languages` degrades this user to the default instead of to nothing.
-  const language = resolveLanguage(user.language, config);
-
   try {
     const settings = geminiSettings(config);
     const result = await converse(settings, {
-      systemPrompt: chatSystemPrompt({
-        version: configSetting(config, "chat_prompt_version"),
-        language,
-      }),
+      // Both from `app_config`, so the answer's shape and its language are dashboard edits rather
+      // than deploys — `chat_prompt_version` is the rollback for the craft, and a language dropped
+      // from `chat_languages` degrades this user to the default instead of to nothing.
+      systemPrompt: chatSystemPrompt({ version, language }),
       schema: CHAT_SCHEMA,
       history,
       userPrompt: buildUserPrompt(message, {
         name: firstName(user.name),
         age: ageFrom(user.dob),
         chart,
+        // Only the v3 craft is told what a dasha is; a rollback must not be handed one.
+        dasha: version === PROMPT_V3,
+        statedRashi: factValue(facts, "rashi"),
+        chartCorrection,
+        unsettledBirthTime,
         birthPlace: user.birth_place,
         facts,
         palmSummary: summarise("palm", palmRow, "strongest_trait_title"),
@@ -287,7 +339,9 @@ Deno.serve(async (req) => {
     console.log(
       `astro-chat ${pending.id}: model=${result.model} latency=${result.latencyMs}ms ` +
         `thread=${thread.id} history=${history.length} facts=${facts.length} ` +
-        `chart=${chart ? "yes" : "no"} language=${language} ` +
+        `chart=${chart ? "yes" : "no"} version=${version} language=${language} ` +
+        `switch=${switched ? (switched.explicit ? "asked" : "script") : "-"} ` +
+        `corrected=${chartCorrection ? "yes" : "no"} ` +
         `sections=${reply?.sections.length ?? "-"} remembered=${reply?.remember.length ?? "-"}`,
     );
 
@@ -338,6 +392,26 @@ Deno.serve(async (req) => {
     // reads them. Astro asks for these in conversation; this is where the answer lands.
     await promoteBirthDetails(db, userId, user, reply.remember);
 
+    // What the sage was just given becomes what the next turn is compared against. After the
+    // reply rather than before it, so a turn that failed owes the correction again next time.
+    if (chart && !previousChart?.error && !sameChart(previousChart, chart)) {
+      await rememberChart(db, userId, chart);
+    }
+
+    // Saved only once the reply exists, so the setting never moves on a turn the person did not
+    // see answered in the new language.
+    const savedLanguage = switched && switched.language !== settledLanguage
+      ? await saveLanguage(db, userId, switched.language)
+      : null;
+
+    const askRating = await ratingDue(db, {
+      feedback: feedbackRead,
+      threadId: thread.id,
+      recent: recentRows,
+      historyTurns,
+      threshold: positiveInt(config.get("chat_rating_after_messages"), DEFAULT_RATE_AFTER),
+    });
+
     // Names the thread, refreshes its one-line preview and moves it to the top of the sidebar.
     // Like the facts above, never allowed to fail the request: a reply the user can read matters
     // more than a title.
@@ -357,6 +431,9 @@ Deno.serve(async (req) => {
       asked: { id: pending.id, created_at: pending.created_at },
       thread: { id: thread.id, title },
       remaining: Math.max(0, limit - (count ?? 0) - 1),
+      language,
+      ...(savedLanguage ? { saved_language: savedLanguage } : {}),
+      ask_rating: askRating,
     });
   } catch (error) {
     if (error instanceof GeminiError) {
@@ -535,7 +612,8 @@ async function rememberFacts(
  * the chart never saw.
  *
  * Only ever fills a blank. If a value is already on the row it stays: that one came through
- * validation, and this one came out of a sentence.
+ * validation, and this one came out of a sentence. Which is exactly why an ambiguous time is not
+ * promoted at all — see [readClock].
  */
 async function promoteBirthDetails(
   db: ReturnType<typeof serviceClient>,
@@ -547,8 +625,8 @@ async function promoteBirthDetails(
 
   if (!user.birth_time) {
     const stated = facts.find((f) => f.key === "birth_time" || f.key === "born_at");
-    const clock = parseClock(stated?.value);
-    if (clock) update.birth_time = clock;
+    const { time } = readClock(stated?.value);
+    if (time) update.birth_time = time;
   }
 
   if (!user.birth_place) {
@@ -564,24 +642,101 @@ async function promoteBirthDetails(
 }
 
 /**
- * A stated time to `HH:MM`, or null.
+ * The correction the sage owes, when the Moon's rashi has moved since it was last given a chart.
  *
- * Deliberately narrow. The sage is asked to record what it heard, and what it heard might be
- * "around sunrise" — which is not a time, and guessing one would put a wrong nakshatra in front
- * of the user with all the confidence of a computation.
+ * Only a sign that was named and is now a different sign. A chart that was UNCERTAIN before told
+ * the sage not to name one, so there is nothing said to take back.
  */
-function parseClock(raw: string | undefined): string | null {
-  const match = /(\d{1,2})[:.](\d{2})\s*(am|pm)?/i.exec(raw ?? "");
-  if (!match) return null;
+function correctionBetween(
+  previous: Record<string, unknown> | null,
+  chart: Chart | null,
+): { from: string; to: string } | null {
+  const from = typeof previous?.moon_rashi === "string" ? previous.moon_rashi : null;
+  const to = chart?.moonRashi ?? null;
+  return from && to && from !== to ? { from, to } : null;
+}
 
-  let hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  const meridiem = match[3]?.toLowerCase();
+/** The fields a snapshot is compared on. Not a JSON string compare: `jsonb` reorders keys. */
+const SNAPSHOT_FIELDS = [
+  "moon_rashi",
+  "sun_rashi",
+  "nakshatra",
+  "pada",
+  "precise",
+  "mahadasha",
+  "antardasha",
+] as const;
 
-  if (minutes > 59) return null;
-  if (meridiem === "pm" && hours < 12) hours += 12;
-  if (meridiem === "am" && hours === 12) hours = 0;
-  if (hours > 23) return null;
+function sameChart(previous: Record<string, unknown> | null, chart: Chart): boolean {
+  if (!previous) return false;
+  const next = chartToJson(chart)!;
+  return SNAPSHOT_FIELDS.every((field) => (previous[field] ?? null) === (next[field] ?? null));
+}
 
-  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+/** Writes the snapshot. Never allowed to fail the request. */
+async function rememberChart(
+  db: ReturnType<typeof serviceClient>,
+  userId: string,
+  chart: Chart,
+): Promise<void> {
+  const { error } = await db.from("users").update({ chart: chartToJson(chart) }).eq(
+    "user_id",
+    userId,
+  );
+  if (error) console.error("astro-chat: could not save the chart snapshot", error);
+}
+
+/**
+ * Stores a language this message switched to, and returns it — or null when the write failed,
+ * so the app is not told about a setting that did not stick.
+ *
+ * The same column Profile's picker writes, through the same spelling rule: `detectLanguageSwitch`
+ * only ever returns a name as the dashboard's list spells it.
+ */
+async function saveLanguage(
+  db: ReturnType<typeof serviceClient>,
+  userId: string,
+  language: string,
+): Promise<string | null> {
+  const { error } = await db.from("users").update({ language }).eq("user_id", userId);
+  if (error) {
+    console.error("astro-chat: could not save the language", error);
+    return null;
+  }
+  return language;
+}
+
+/**
+ * Whether to ask this account, now, to rate the chat.
+ *
+ * Once per account, and only in a conversation that has reached [threshold] questions. A failed
+ * lookup is a no: a card whose answer might not be saveable would come back on every reply.
+ *
+ * The history window already holds the conversation's recent turns, so the question count comes
+ * from there without another query whenever the whole conversation fits in it.
+ */
+async function ratingDue(
+  db: ReturnType<typeof serviceClient>,
+  { feedback, threadId, recent, historyTurns, threshold }: {
+    feedback: { data: unknown; error: unknown };
+    threadId: string;
+    recent: Array<{ role: string }>;
+    historyTurns: number;
+    threshold: number;
+  },
+): Promise<boolean> {
+  if (feedback.error || feedback.data) return false;
+
+  // Counted before this message was written, so this one is the +1.
+  const asked = recent.filter((row) => row.role === "user").length + 1;
+  if (asked >= threshold) return true;
+  if (recent.length < historyTurns) return false;
+
+  const { count, error } = await db
+    .from("chat_messages")
+    .select("id", { count: "exact", head: true })
+    .eq("thread_id", threadId)
+    .eq("role", "user");
+
+  return !error && (count ?? 0) >= threshold;
 }

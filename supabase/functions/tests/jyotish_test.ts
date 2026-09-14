@@ -2,15 +2,20 @@ import { assert, assertAlmostEquals, assertEquals } from "jsr:@std/assert@1";
 
 import {
   ayanamsa,
+  chartToJson,
   computeChart,
+  DASHA_CYCLE_YEARS,
+  DASHA_LORDS,
   describeChart,
   IST_OFFSET_HOURS,
   julianDay,
   moonLongitude,
   NAKSHATRAS,
+  rashiFromName,
   RASHIS,
   sunLongitude,
   toSidereal,
+  vimshottariDasha,
 } from "../_shared/jyotish.ts";
 
 /**
@@ -172,7 +177,7 @@ Deno.test("a full birth date and time yields a rashi, a nakshatra and a pada", (
   assert(NAKSHATRAS.includes(chart.nakshatra as typeof NAKSHATRAS[number]));
   assert(chart.pada !== null && chart.pada >= 1 && chart.pada <= 4);
   assertEquals(chart.precise, true);
-  assertEquals(chart.moonRashiEnglish.length > 0, true);
+  assertEquals((chart.moonRashiEnglish ?? "").length > 0, true);
 });
 
 Deno.test("a missing birth time withholds the nakshatra rather than guessing one", () => {
@@ -289,4 +294,171 @@ Deno.test("an unknown nakshatra tells the sage to ask rather than to invent", ()
 
 Deno.test("no chart describes as an empty string, so callers can concatenate blindly", () => {
   assertEquals(describeChart(null), "");
+});
+
+// ---------------------------------------------------------------- a day the Moon changed sign
+
+/**
+ * 17 October 1999, IST. Chandra moves from Dhanu into Makara that evening, and Surya from Kanya
+ * into Tula. The account behind this whole block was born at 11:55 that night and was told Dhanu —
+ * from a noon chart — before its birth hour was known, then Makara after.
+ */
+const CHANGEOVER_DAY = "1999-10-17";
+
+Deno.test("without the hour, a sign that changed that day is not named", () => {
+  const chart = computeChart({ dob: CHANGEOVER_DAY })!;
+
+  assertEquals(chart.moonRashi, null);
+  assertEquals(chart.moonRashiCandidates, ["Dhanu", "Makara"]);
+  assertEquals(chart.sunRashi, null);
+  assertEquals(chart.sunRashiCandidates, ["Kanya", "Tula"]);
+  assertEquals(chart.precise, false);
+});
+
+Deno.test("with the hour, the sign is named — and it is the one the noon guess got wrong", () => {
+  const night = computeChart({ dob: CHANGEOVER_DAY, birthTime: "23:55" })!;
+  assertEquals(night.moonRashi, "Makara");
+  assertEquals(night.sunRashi, "Tula");
+  assertEquals(night.moonRashiCandidates, ["Makara"]);
+
+  const morning = computeChart({ dob: CHANGEOVER_DAY, birthTime: "06:00" })!;
+  assertEquals(morning.moonRashi, "Dhanu");
+});
+
+Deno.test("a rashi they told the sage settles a day the Moon changed sign", () => {
+  for (const said of ["Makara", "makar", "मकर", "Makar rashi hai", "Capricorn"]) {
+    const chart = computeChart({ dob: CHANGEOVER_DAY, statedRashi: said })!;
+    assertEquals(chart.moonRashi, "Makara", `"${said}" did not settle it`);
+    assertEquals(chart.moonRashiStated, true);
+  }
+});
+
+Deno.test("a stated rashi never overrules a sign the clock settles", () => {
+  // The rashi a person knows is often their naam rashi. It may choose between two; it may not
+  // replace one.
+  const precise = computeChart({ dob: CHANGEOVER_DAY, birthTime: "23:55", statedRashi: "Dhanu" })!;
+  assertEquals(precise.moonRashi, "Makara");
+  assertEquals(precise.moonRashiStated, false);
+
+  // The Moon held Makara all day on this date.
+  const settledDay = computeChart({ dob: "1996-04-12", statedRashi: "Mesha" })!;
+  assertEquals(settledDay.moonRashi, "Makara");
+
+  // Neither of the two: nothing is settled.
+  const neither = computeChart({ dob: CHANGEOVER_DAY, statedRashi: "Kumbha" })!;
+  assertEquals(neither.moonRashi, null);
+});
+
+Deno.test("an uncertain rashi tells the sage not to choose", () => {
+  const described = describeChart(computeChart({ dob: CHANGEOVER_DAY }));
+
+  assert(described.includes("UNCERTAIN"));
+  assert(described.includes("Dhanu") && described.includes("Makara"));
+  assert(described.includes("Do not name either"));
+  assert(!described.includes("Moon (Chandra) in"), "an uncertain sign was named anyway");
+});
+
+Deno.test("rashi names are read however people type them, and never out of a surname", () => {
+  assertEquals(rashiFromName("Makar"), "Makara");
+  assertEquals(rashiFromName("वृश्चिक राशि"), "Vrischika");
+  assertEquals(rashiFromName("meri rashi kumbh hai"), "Kumbha");
+  assertEquals(rashiFromName("Leo"), "Simha");
+  assertEquals(rashiFromName("Prashant Singh"), null);
+  assertEquals(rashiFromName("Kanyakumari"), null);
+  assertEquals(rashiFromName(""), null);
+  assertEquals(rashiFromName(null), null);
+});
+
+Deno.test("the chart travels with its uncertainty intact", () => {
+  const json = chartToJson(computeChart({ dob: CHANGEOVER_DAY }))!;
+
+  assertEquals(json.moon_rashi, null);
+  assertEquals(json.moon_rashi_candidates, ["Dhanu", "Makara"]);
+  assertEquals(json.mahadasha, null);
+  assertEquals(chartToJson(null), null);
+});
+
+// ---------------------------------------------------------------- the dasha
+
+const JULIAN_YEAR = 365.25;
+
+/** J2000.0, as good a birth moment as any for the pure arithmetic below. */
+const BIRTH_JD = 2451545;
+
+Deno.test("the Vimshottari lords run in their fixed order, and make a 120-year cycle", () => {
+  assertEquals(
+    DASHA_LORDS.map(([lord]) => lord),
+    ["Ketu", "Shukra", "Surya", "Chandra", "Mangal", "Rahu", "Guru", "Shani", "Budh"],
+  );
+  assertEquals(DASHA_LORDS.reduce((sum, [, years]) => sum + years, 0), DASHA_CYCLE_YEARS);
+});
+
+Deno.test("a Moon at the very start of Ashwini opens in Ketu, with all seven years to run", () => {
+  const opening = vimshottariDasha(0.0001, BIRTH_JD, BIRTH_JD + 1)!;
+  assertEquals(opening.mahadasha, "Ketu");
+  assertEquals(opening.antardasha, "Ketu");
+  assertEquals(opening.mahaPhase, "early");
+
+  // Seven years on, Shukra's twenty begin, and its first sub-period is its own.
+  const later = vimshottariDasha(0.0001, BIRTH_JD, BIRTH_JD + 7 * JULIAN_YEAR + 30)!;
+  assertEquals(later.mahadasha, "Shukra");
+  assertEquals(later.antardasha, "Shukra");
+});
+
+Deno.test("the balance at birth is whatever is left of the nakshatra", () => {
+  // Halfway through Rohini, which is Chandra's: five of its ten years remain, so Mangal is next
+  // at five.
+  const halfwayThroughRohini = 3.5 * (360 / 27);
+
+  assertEquals(
+    vimshottariDasha(halfwayThroughRohini, BIRTH_JD, BIRTH_JD + 4.9 * JULIAN_YEAR)!.mahadasha,
+    "Chandra",
+  );
+  assertEquals(
+    vimshottariDasha(halfwayThroughRohini, BIRTH_JD, BIRTH_JD + 5.1 * JULIAN_YEAR)!.mahadasha,
+    "Mangal",
+  );
+});
+
+Deno.test("sub-periods open with the Mahadasha's own lord, each at its share of it", () => {
+  // Inside Ketu's seven years: Ketu for 7×7/120 ≈ 0.41, Shukra for 7×20/120 ≈ 1.17 (to ≈ 1.58),
+  // then Surya for 7×6/120 = 0.35 (to ≈ 1.93).
+  assertEquals(vimshottariDasha(0.0001, BIRTH_JD, BIRTH_JD + 0.3 * JULIAN_YEAR)!.antardasha, "Ketu");
+  assertEquals(
+    vimshottariDasha(0.0001, BIRTH_JD, BIRTH_JD + 0.5 * JULIAN_YEAR)!.antardasha,
+    "Shukra",
+  );
+  assertEquals(
+    vimshottariDasha(0.0001, BIRTH_JD, BIRTH_JD + 1.7 * JULIAN_YEAR)!.antardasha,
+    "Surya",
+  );
+});
+
+Deno.test("no dasha without the hour, without a moment to count to, or before birth", () => {
+  assertEquals(computeChart({ dob: "1996-04-12", asOf: new Date("2026-09-14") })!.dasha, null);
+  assertEquals(computeChart({ dob: "1996-04-12", birthTime: "07:30" })!.dasha, null);
+  assertEquals(vimshottariDasha(10, BIRTH_JD, BIRTH_JD - 1), null);
+});
+
+Deno.test("a chart with the hour carries the dasha, and describes it without a single year", () => {
+  const chart = computeChart({
+    dob: CHANGEOVER_DAY,
+    birthTime: "23:55",
+    asOf: new Date("2026-09-14T00:00:00Z"),
+  })!;
+
+  // Uttara Ashadha is Surya's, so this life opened in Surya's six years, then Chandra's ten,
+  // Mangal's seven — which puts late 2026, at almost twenty-seven, in Rahu's eighteen.
+  assertEquals(chart.nakshatra, "Uttara Ashadha");
+  assertEquals(chart.dasha?.mahadasha, "Rahu");
+
+  const described = describeChart(chart, { dasha: true });
+  assert(described.includes("Mahadasha of Rahu"));
+  assert(described.includes("Never give the year"));
+  assert(!/\b(19|20)\d{2}\b/.test(described), "a year leaked into the chart description");
+
+  assert(
+    !describeChart(chart).includes("Mahadasha"),
+    "the dasha reached a prompt that did not ask for it",
+  );
 });

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/assets.dart';
@@ -9,20 +11,22 @@ import '../../data/analytics/analytics_events.dart';
 import '../../data/models/astro_message.dart';
 import '../../widgets/safe_asset.dart';
 import 'chat_copy.dart';
+import 'chat_rating.dart';
 import 'chat_state.dart';
 
-/// Everything pinned below the transcript: the quick replies, whatever the sage asked for, and
-/// the field itself.
+/// Everything pinned below the transcript: the rating card, the quick replies, whatever the sage
+/// asked for, and the field itself.
 ///
-/// One widget rather than three, because they are one region as far as the user is concerned and
-/// they share a single rule — when a turn is in flight or the day's questions are gone, none of
-/// them accepts input.
+/// One widget rather than several, because they are one region as far as the user is concerned
+/// and they share a single rule — when a turn is in flight or the day's questions are gone, none
+/// of them accepts input.
 class ChatComposer extends StatefulWidget {
   const ChatComposer({
     super.key,
     required this.state,
     required this.onSend,
     required this.onDraftRestored,
+    required this.onRate,
   });
 
   final ChatState state;
@@ -35,6 +39,9 @@ class ChatComposer extends StatefulWidget {
   /// the next rebuild.
   final VoidCallback onDraftRestored;
 
+  /// The rating card was answered: 1 (worst) to 5 (best), or null for a dismissal.
+  final ValueChanged<int?> onRate;
+
   @override
   State<ChatComposer> createState() => _ChatComposerState();
 }
@@ -42,6 +49,14 @@ class ChatComposer extends StatefulWidget {
 class _ChatComposerState extends State<ChatComposer> {
   final _controller = TextEditingController();
   final _focus = FocusNode();
+
+  /// How long the thank-you stays before the card folds away.
+  static const _thanksFor = Duration(milliseconds: 1600);
+
+  /// True while the card is saying thank you. Held here rather than in [ChatState], because the
+  /// answer has already gone to the server by then and nothing else needs to know.
+  bool _thanked = false;
+  Timer? _thanks;
 
   @override
   void didUpdateWidget(ChatComposer old) {
@@ -58,6 +73,7 @@ class _ChatComposerState extends State<ChatComposer> {
 
   @override
   void dispose() {
+    _thanks?.cancel();
     _controller.dispose();
     _focus.dispose();
     super.dispose();
@@ -71,6 +87,18 @@ class _ChatComposerState extends State<ChatComposer> {
     widget.onSend(message, entry);
   }
 
+  void _rate(int? rating) {
+    widget.onRate(rating);
+    // A dismissal is not thanked for; the card simply goes.
+    if (rating == null) return;
+
+    setState(() => _thanked = true);
+    _thanks?.cancel();
+    _thanks = Timer(_thanksFor, () {
+      if (mounted) setState(() => _thanked = false);
+    });
+  }
+
   Future<void> _pickTime() async {
     final picked = await showTimePicker(
       context: context,
@@ -82,9 +110,14 @@ class _ChatComposerState extends State<ChatComposer> {
     // Sent as ordinary words rather than as a form value: it becomes a turn in the transcript,
     // and "07:30" sitting in a navy bubble would read as a machine talking. The server picks
     // the time back out of the sentence.
-    final hour = picked.hour.toString().padLeft(2, '0');
+    //
+    // With AM or PM, never as a bare "11:55". The server no longer guesses which half of the day
+    // an unmarked hour means — guessing morning is how someone born at 11:55 at night got the
+    // wrong chart — so an unmarked time would only be asked about all over again.
+    final hour = picked.hourOfPeriod == 0 ? 12 : picked.hourOfPeriod;
     final minute = picked.minute.toString().padLeft(2, '0');
-    _send('I was born at $hour:$minute.', 'birth_time');
+    final period = picked.period == DayPeriod.am ? 'AM' : 'PM';
+    _send('I was born at $hour:$minute $period.', 'birth_time');
   }
 
   @override
@@ -103,6 +136,19 @@ class _ChatComposerState extends State<ChatComposer> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Sized rather than switched, so the card folds away instead of the field jumping.
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.bottomCenter,
+            child: state.showRating || _thanked
+                ? Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: ChatRatingCard(thanked: _thanked, onRate: _rate),
+                  )
+                : const SizedBox(width: double.infinity),
+          ),
+
           if (state.askFor == AskFor.birthTime) ...[
             _TimeRequest(
               onPick: _pickTime,

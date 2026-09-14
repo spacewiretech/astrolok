@@ -1,5 +1,7 @@
 import 'package:astrolok/data/local/reading_store.dart';
+import 'package:astrolok/data/models/app_user.dart';
 import 'package:astrolok/data/models/astro_message.dart';
+import 'package:astrolok/data/models/birth_chart.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -409,6 +411,85 @@ void main() {
       await store.save(ChatThread(id: 'thread-1', messages: messages));
 
       expect((await store.load('thread-1'))!.messages, hasLength(60));
+    });
+  });
+
+  group('BirthChart', () {
+    test('parses a settled chart, dasha and all', () {
+      final chart = BirthChart.fromServer({
+        'moon_rashi': 'Makara',
+        'moon_rashi_candidates': ['Makara'],
+        'nakshatra': 'Uttara Ashadha',
+        'pada': 2,
+        'sun_rashi': 'Tula',
+        'sun_rashi_candidates': ['Tula'],
+        'precise': true,
+        'mahadasha': 'Rahu',
+        'antardasha': 'Shani',
+      })!;
+
+      expect(chart.moonLabel, 'Makara');
+      expect(chart.moonUncertain, isFalse);
+      expect(chart.pada, 2);
+      expect(chart.precise, isTrue);
+      expect(chart.mahadasha, 'Rahu');
+    });
+
+    test('a day the Moon changed sign reads as both signs, not as a guess', () {
+      final chart = BirthChart.fromServer({
+        'moon_rashi': null,
+        'moon_rashi_candidates': ['Dhanu', 'Makara'],
+        'sun_rashi': null,
+        'sun_rashi_candidates': ['Kanya', 'Tula'],
+        'precise': false,
+      })!;
+
+      expect(chart.moonUncertain, isTrue);
+      expect(chart.moonLabel, 'Dhanu or Makara');
+      expect(chart.sunLabel, 'Kanya or Tula');
+      expect(chart.nakshatra, isNull);
+    });
+
+    test('something with no sign in it is not a chart', () {
+      expect(BirthChart.fromServer(null), isNull);
+      expect(BirthChart.fromServer('Makara'), isNull);
+      expect(BirthChart.fromServer({'precise': true}), isNull);
+    });
+
+    test('round-trips through its own wire shape, so a cached user keeps it', () {
+      final chart = BirthChart.fromServer({
+        'moon_rashi_candidates': ['Dhanu', 'Makara'],
+        'sun_rashi': 'Kanya',
+      })!;
+
+      final again = BirthChart.fromServer(chart.toJson())!;
+      expect(again.moonLabel, 'Dhanu or Makara');
+      expect(again.sunLabel, 'Kanya');
+    });
+  });
+
+  group('AppUser birth details', () {
+    test('the hour arrives as Postgres renders it and is kept as HH:MM', () {
+      final user = AppUser.fromServer({
+        'user_id': 'u',
+        'birth_time': '23:55:00',
+        'chart': {'moon_rashi': 'Makara'},
+      })!;
+
+      expect(user.birthTime, '23:55');
+      expect(user.chart?.moonLabel, 'Makara');
+    });
+
+    test('a payload from before either field existed parses with neither', () {
+      final user = AppUser.fromServer({'user_id': 'u'})!;
+
+      expect(user.birthTime, isNull);
+      expect(user.chart, isNull);
+    });
+
+    test('a birth time can be taken back', () {
+      const user = AppUser(id: 'u', phone: '', birthTime: '23:55');
+      expect(user.copyWith(clearBirthTime: true).birthTime, isNull);
     });
   });
 }

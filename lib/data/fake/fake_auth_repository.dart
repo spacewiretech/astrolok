@@ -66,6 +66,20 @@ class FakeAuthRepository implements AuthRepository {
     return user;
   }
 
+  @override
+  Future<AppUser> saveBirthTime(String? time) async {
+    await FakeSession.latency();
+    final trimmed = time?.trim();
+    // No chart: there is no server here to compute one, and an invented sign is the one thing
+    // Profile must never show.
+    final user = _current().copyWith(
+      birthTime: trimmed,
+      clearBirthTime: trimmed == null || trimmed.isEmpty,
+    );
+    _session.user = user;
+    return user;
+  }
+
   AppUser _current() =>
       _session.user ?? const AppUser(id: 'local-user', phone: '');
 

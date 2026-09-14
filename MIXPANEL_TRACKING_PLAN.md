@@ -290,6 +290,9 @@ The single most instrumented flow in the app. **Every event in one checkout atte
 | `Chat Thread Switched` | Another conversation is opened from the drawer | `chat_view.dart` | `thread_id` |
 | `Chat Thread Renamed` | Rename confirmed **by the server** (the optimistic rename is undone on failure and not counted) | `chat_threads_viewmodel.dart` | `thread_id`, `chars` |
 | `Chat Thread Deleted` | Delete confirmed | `chat_threads_viewmodel.dart` | `thread_id`, `thread_count` (**what is left afterwards** — deleting your last conversation is a different signal from tidying one out of twelve) |
+| `Chat Rating Shown` | A reply asks for the five-face rating. **At most once per account** — the server stops asking once they answer or dismiss, so this against the two below is a response rate | `chat_viewmodel.dart` | `thread_id`, `turn_index` |
+| `Chat Rated` | A face is tapped on the rating card | `chat_viewmodel.dart` | `thread_id`, `rating` (1 worst – 5 best), `turn_index`, `chat_language` |
+| `Chat Rating Dismissed` | The rating card is closed without a score | `chat_viewmodel.dart` | `thread_id`, `turn_index`, `chat_language` |
 
 ### 8.4 Profile
 

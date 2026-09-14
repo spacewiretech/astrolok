@@ -31,6 +31,7 @@ class ChatState {
     this.revealingId,
     this.canSpeak = false,
     this.outcome,
+    this.ratingDue = false,
   });
 
   /// Oldest first, as a transcript reads. The view reverses it for layout.
@@ -81,6 +82,13 @@ class ChatState {
 
   final ChatOutcome? outcome;
 
+  /// The server asked for this account to rate the chat, and it has not yet answered.
+  ///
+  /// Only ever set by a reply — never by a transcript loaded from the cache or the server — so a
+  /// card that was ignored comes back with the next answer rather than every time a conversation
+  /// is reopened.
+  final bool ratingDue;
+
   /// True before the first turn — the opening screen with the four topic pills.
   bool get isEmpty => messages.isEmpty && !sending;
 
@@ -88,6 +96,12 @@ class ChatState {
   bool get exhausted => remaining != null && remaining! <= 0;
 
   bool get canSend => !sending && !exhausted;
+
+  /// Whether the rating card belongs on screen now.
+  ///
+  /// Held back while a reply is still animating in: the card is a question about the
+  /// conversation, and asking it over an answer that is still arriving competes with the answer.
+  bool get showRating => ratingDue && !sending && revealingId == null;
 
   /// Quick replies, taken only from the newest Astro turn.
   ///
@@ -120,6 +134,7 @@ class ChatState {
     String? revealingId,
     bool? canSpeak,
     ChatOutcome? outcome,
+    bool? ratingDue,
     bool clearError = false,
     bool clearPending = false,
     bool clearSpeaking = false,
@@ -144,6 +159,7 @@ class ChatState {
       revealingId: clearRevealing ? null : (revealingId ?? this.revealingId),
       canSpeak: canSpeak ?? this.canSpeak,
       outcome: clearOutcome ? null : (outcome ?? this.outcome),
+      ratingDue: ratingDue ?? this.ratingDue,
     );
   }
 }

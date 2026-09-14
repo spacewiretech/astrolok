@@ -266,6 +266,10 @@ Deno.test("a palm reading follows the user's language, and the boundaries follow
   assert(hindi.includes("THE LANGUAGE YOU WRITE IN"));
   assert(!hindi.includes("Never write in Devanagari"));
 
+  // The chat carries its own remedies rule now; the readings must not have picked it up.
+  assert(english.includes("never a remedy, gemstone, ritual, fast or charm"));
+  assert(hindi.includes("never a remedy, gemstone, ritual, fast or charm"));
+
   for (const forbidden of ["health", "diagnosis", "deterministic verbs", "gemstone", "caste"]) {
     assert(
       hindi.toLowerCase().includes(forbidden),

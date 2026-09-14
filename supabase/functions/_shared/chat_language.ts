@@ -125,12 +125,15 @@ export function languageInstruction(name: string): string {
  * Placed early, before the craft, because it governs every field rather than any one of them —
  * a model told the language last has already begun composing in another.
  *
- * The last paragraph is the rule that matters most in practice. People switch languages
+ * The last paragraphs are the rules that matter most in practice. People switch languages
  * mid-conversation without changing any setting, and a reply that comes back in the wrong one
  * reads as a bug rather than as an honoured preference.
+ *
+ * [conversation] is the chat. A reading has no earlier replies to be misled by, and no message
+ * typed on a keyboard, so palm and face keep the block exactly as it shipped.
  */
-export function languageBlock(name: string): string {
-  return `
+export function languageBlock(name: string, { conversation = false } = {}): string {
+  const head = `
 THE LANGUAGE YOU WRITE IN.
 
 Write every field of your reply in ${name} — the verdict, the title, the opening, every section
@@ -138,10 +141,174 @@ heading and body, and every option. Not a mixture of two languages, and never a 
 appended after. The person reads one language; give them that one.
 
 ${languageInstruction(name)}
+`.trim();
+
+  if (!conversation) {
+    return `${head}
 
 If their message is written in a different language from the one above, answer in the language
 they wrote in. The person in front of you outranks the setting: someone who types in English
 gets English back, whatever they chose in the app, and someone who types in Hinglish gets
-Hinglish.
-`.trim();
+Hinglish.`;
+  }
+
+  return `${head}
+
+${followingThePerson(name)}
+
+Earlier replies in this conversation may be in a different language. That is not a precedent to
+follow: this reply is written in the language set out here, whatever came before it.`;
+}
+
+/**
+ * The switching rule for a conversation.
+ *
+ * Written apart from the reading's version because of one real exchange. Someone whose setting
+ * was Hinglish typed "Hindi me bat kre" — in Roman letters — and "someone who types in Hinglish
+ * gets Hinglish" told the sage to ignore the very thing they had asked for, three turns running.
+ * An explicit request now comes first, and when the setting is Hindi, Hindi typed in Roman letters
+ * is named for what it is: how a phone keyboard makes people write it.
+ */
+function followingThePerson(name: string): string {
+  const request =
+    "If they ask you to write in another language, do it, from this reply on. If their " +
+    "message is written wholly in a different language from the one above, answer in the " +
+    "language they wrote in: the person in front of you outranks the setting.";
+
+  if (name.trim().toLowerCase() === "hindi") {
+    return `${request} Hindi typed in Roman letters is not a different language, though. It is ` +
+      "how most people type Hindi on a phone — a keyboard habit, not a request for Hinglish — " +
+      "and it still gets Devanagari back.";
+  }
+
+  return `${request} Someone who types in English gets English back, whatever they chose in the ` +
+    "app, and someone who types in Hinglish gets Hinglish.";
+}
+
+// ---------------------------------------------------------------- noticing a switch
+
+/**
+ * The script Hindi is written in. Marathi and Nepali share it, which is why a message in it only
+ * resolves to Hindi when Hindi is on the dashboard's list.
+ */
+const DEVANAGARI = /[ऀ-ॿ]/g;
+const LATIN = /[a-z]/gi;
+
+/** Below this, a stray word or an emoji-adjacent sign is not a message written in the script. */
+const MIN_SCRIPT_CHARS = 2;
+
+/** What each language is called, the ways somebody asking for it types the name. */
+const LANGUAGE_NAMES: Record<string, readonly string[]> = {
+  hindi: ["hindi", "हिंदी", "हिन्दी"],
+  english: ["english", "angrezi", "angreji", "अंग्रेज़ी", "अंग्रेजी", "इंग्लिश"],
+  hinglish: ["hinglish", "हिंग्लिश"],
+};
+
+/** "In", as it follows a language's name: "Hindi me", "हिंदी में". */
+const POSTPOSITION = "me|mein|mai|mei|main|men|में|मे|मैं";
+
+/** Words that may stand around the name in a message that is nothing but the request. */
+const FILLER = "sirf|only|keval|please|plz|pls|ji|सिर्फ़|सिर्फ|केवल|जी";
+
+/**
+ * Words that make "Hindi me" a request about this conversation rather than a mention of a subject.
+ * "Mera Hindi me result kharab aaya" names the language and asks for nothing.
+ */
+const SPEAKING = new RegExp(
+  "(?<![a-z])(?:bat|baat|bol|bata|btao|btaye|likh|reply|jawab|jwab|answer|samjha|talk|speak|" +
+    "write|respond|kaho|kahiye|chat)|बात|बोल|बता|लिख|जवाब|उत्तर|समझा|कहि|कहें|रिप्लाई",
+  "iu",
+);
+
+const POLITE = /(?<![a-z])(?:please|plz|pls)(?![a-z])/i;
+
+/** A request refused in the same breath is not one: "Hindi me mat bolo". */
+const NEGATION = /(?<![a-z])(?:mat|mt|nahi|nahin|nhi|dont|don't|not)(?![a-z])|(?<![\p{L}\p{M}])(?:मत|नहीं|नही)(?![\p{L}\p{M}])/iu;
+
+/** A request made in a message this short needs no verb around it: "Hindi me", "in English". */
+const SHORT_WORDS = 4;
+
+/** A pattern that matches only whole words, in any script. */
+function whole(alternatives: string): string {
+  return `(?<![\\p{L}\\p{M}])(?:${alternatives})(?![\\p{L}\\p{M}])`;
+}
+
+/** What one message says about the language the reply should be in. */
+export interface LanguageSwitch {
+  /** Spelled as the dashboard's list spells it. */
+  language: string;
+
+  /** True when they asked in words; false when the script they typed in decided it. */
+  explicit: boolean;
+}
+
+/**
+ * The language this message moves the conversation into, or null when it moves nothing.
+ *
+ * Decided in code, before the model is called, because leaving it to the prompt did not work. A
+ * user writing Devanagari to an account set to Hinglish got Hinglish back for three turns: the
+ * setting, and a conversation's worth of Roman-letter replies behind it, outweighed one sentence
+ * in the system prompt.
+ *
+ * Two signals, in order:
+ *
+ * - **An explicit request** — "Hindi me bat kre", "हिंदी में बताएं", "in English please", or a
+ *   message that is nothing but the name. "Hindi me" only counts inside a short message or next
+ *   to a verb of speaking, so a sentence about a Hindi exam does not change anyone's language.
+ * - **The script.** A message mostly in Devanagari is Hindi. Roman letters decide nothing, because
+ *   English and Hinglish share them — that case stays with the prompt.
+ *
+ * A language the dashboard does not offer is never returned, so a switch cannot name something
+ * `resolveLanguage` would refuse.
+ */
+export function detectLanguageSwitch(message: string, config: AppConfig): LanguageSwitch | null {
+  const text = message.trim().toLowerCase();
+  if (!text) return null;
+
+  const languages = supportedLanguages(config);
+  const spelled = (key: string) => languages.find((entry) => entry.toLowerCase() === key);
+
+  const asked = requestedLanguage(text);
+  const named = asked ? spelled(asked) : undefined;
+  if (named) return { language: named, explicit: true };
+
+  const devanagari = text.match(DEVANAGARI)?.length ?? 0;
+  const latin = text.match(LATIN)?.length ?? 0;
+  if (devanagari >= MIN_SCRIPT_CHARS && devanagari >= latin) {
+    const hindi = spelled("hindi");
+    if (hindi) return { language: hindi, explicit: false };
+  }
+
+  return null;
+}
+
+/** The key of the language [text] asks for, or null. When it names two, the later one wins. */
+function requestedLanguage(text: string): string | null {
+  if (NEGATION.test(text)) return null;
+
+  const short = text.split(/\s+/).filter((word) => word).length <= SHORT_WORDS;
+  const meant = short || SPEAKING.test(text) || POLITE.test(text);
+
+  let found: { key: string; at: number } | null = null;
+
+  for (const [key, names] of Object.entries(LANGUAGE_NAMES)) {
+    const name = whole(names.join("|"));
+
+    // Nothing but the name, give or take "please" and "sirf": "हिन्दी", "English please".
+    const bare = new RegExp(
+      `^(?:${whole(FILLER)}\\s*)*${name}(?:\\s*${whole(`${FILLER}|${POSTPOSITION}`)})*[\\s.!?।]*$`,
+      "u",
+    );
+    if (bare.test(text)) return key;
+
+    if (!meant) continue;
+
+    const phrase = new RegExp(`${name}\\s*${whole(POSTPOSITION)}|${whole("in")}\\s+${name}`, "u")
+      .exec(text);
+    if (phrase && (found === null || phrase.index > found.at)) {
+      found = { key, at: phrase.index };
+    }
+  }
+
+  return found?.key ?? null;
 }

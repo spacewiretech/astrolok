@@ -19,6 +19,8 @@ The Astro conversation: one route, many threads, with a sidebar for switching be
 - `chat_drawer.dart` — the thread sidebar, with rename/delete. Declares: `ChatDrawer`.
 - `chat_reveal.dart` — a staged typing animation over a non-streaming transport. Declares:
   `ChatReveal`, `RevealedPart`.
+- `chat_rating.dart` — the five-face rating card the composer raises, once per account. Declares:
+  `ChatRatingCard`.
 
 ## The transcript scrolls itself, in exactly two places
 
@@ -44,11 +46,18 @@ what keeps the computed offset correct and stops the text reflowing under the re
   closed, and an auto-disposing provider would refetch the list every time it is opened.
 - `chat_reveal.dart` exists because the transport is not streaming: the reply arrives whole and
   is revealed in stages, so it reads like typing without pretending to stream.
-- This feature breaks the four-file convention with three extra widget files and a second
-  viewmodel — the drawer and composer are large enough to own their own files.
+- This feature breaks the four-file convention with four extra widget files and a second
+  viewmodel — the drawer, composer and rating card are large enough to own their own files.
 - Backed by `astro-chat` (one metered turn) and `chat-history` (list, transcript, facts,
-  rename/delete/forget). Gemini is never called from the device.
+  rename/delete/forget/rate). Gemini is never called from the device.
 - **The reply's language is not decided here.** It is `users.language`, set from Profile, and
-  resolved server-side against `app_config.chat_languages`. A message written in another
-  language wins over the setting — see `_shared/chat_language.ts`.
+  resolved server-side against `app_config.chat_languages`. A message in Devanagari, or one that
+  asks for a language in words, switches it and the server saves the switch — see
+  `_shared/chat_language.ts`. `ChatReply.savedLanguage` is how this screen hears about it, and
+  `ChatViewModel` installs it through the entitlement store so Profile's picker and the listen
+  voice follow.
+- **The rating card is once per account, and the server decides when.** A reply carries
+  `ask_rating`; `chatRatingDoneProvider` only covers a run in which saving the answer failed. The
+  card lives in the composer rather than the transcript, for the scrolling reason in
+  `chat_rating.dart`.
 - Tests: `chat_layout_test.dart`, `chat_parse_test.dart`.

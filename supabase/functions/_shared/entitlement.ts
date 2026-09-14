@@ -11,6 +11,7 @@
  */
 
 import { AppConfig, configSetting } from "./config.ts";
+import { chartToJson, computeChart } from "./jyotish.ts";
 
 /**
  * `none` and `trial` are both unpaid-looking, and the difference between them is the whole point:
@@ -180,6 +181,12 @@ export function entitlementPayload(
     // indistinguishable from one who chose the default, and the two behave differently the day
     // the default changes.
     language: user.language ?? null,
+    // Computed on every read rather than stored, so it cannot drift from the date and hour it
+    // comes from — Profile shows the same arithmetic the chat reads from. The dasha is counted to
+    // `now`, which is why this function takes one.
+    chart: chartToJson(
+      computeChart({ dob: user.dob ?? "", birthTime: user.birth_time ?? null, asOf: now }),
+    ),
     payment_type: user.payment_type,
     trial_ends_at: user.trial_ends_at,
     current_period_end: user.current_period_end,

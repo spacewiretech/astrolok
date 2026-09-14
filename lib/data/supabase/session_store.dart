@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/app_user.dart';
+import '../models/birth_chart.dart';
 
 /// Holds the session token issued by `verify-otp`.
 ///
@@ -47,6 +48,9 @@ class SessionStore {
           'entitled': user.entitled,
           'trialAvailable': user.trialAvailable,
           'chatLanguage': user.chatLanguage,
+          'birthTime': user.birthTime,
+          // In the server's own shape, so it reads back through the same parser as a fresh one.
+          'chart': user.chart?.toJson(),
         }),
       );
 
@@ -85,6 +89,10 @@ class SessionStore {
         // the configured default". Another field that must not bump `_version`: signing an
         // offline user out over which language Astro greets them in would be a poor trade.
         chatLanguage: map['chatLanguage'] as String?,
+        // Both absent in an older cache, where null is the honest answer — not known here yet —
+        // and the next `me` fills them in. Neither is a reason to bump `_version` either.
+        birthTime: AppUser.parseBirthTime(map['birthTime']),
+        chart: BirthChart.fromServer(map['chart']),
       ).recomputeOffline();
     } catch (_) {
       // A cache written by an older build is not worth crashing over.

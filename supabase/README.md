@@ -112,20 +112,52 @@ request shape** (inline image + `responseSchema` + `thinkingBudget: 0`); `gemini
 every `*-flash-lite` answer 400. Verify end to end before changing `gemini_model` or
 `gemini_model_fallback`. Current pair: `gemini-3.8-flash` / `gemini-3.5-flash`, ~9-11s.
 
-## The chat's two dashboard levers
+## The chat's dashboard levers
 
-`chat_prompt_version` picks which Astro prompt is live — `v2` is current, `v1` is the text that
-shipped before answers were reworked to commit to a timing question and name the effort involved.
-Both live in `_shared/astro_chat.ts` and the duplication between them is deliberate: a rollback is
-only worth having if it is a snapshot nobody has been improving on the side. Flipping the row
-reverts the model within the 60-second config TTL, no redeploy. Anything unrecognised reads as
-`v2`, so a blank or misspelt cell cannot strand everyone on the old prompt.
+`chat_prompt_version` picks which Astro prompt is live — `v3` is current, `v2` is its rollback, and
+`v1` is the text that shipped before answers were reworked to commit to a timing question and name
+the effort involved. `v3` adds three things: the Vimshottari dasha (computed in `jyotish.ts` and
+handed over as early, middle or late in a period, never as dates), a rule for a rashi the person
+already knows, and a narrow remedies rule — at most one mantra, daan or light observance, and never
+a gemstone, a puja to book, anything to buy, or a fast without food or water. That rule replaces only
+the counsel bullet of `BOUNDARIES` (`TIPS_RULE`); palm and face keep the original word for word.
+All three versions live in `_shared/astro_chat.ts` and the duplication between them is deliberate:
+a rollback is only worth having if it is a snapshot nobody has been improving on the side. Flipping
+the row reverts the model within the 60-second config TTL, no redeploy. Anything unrecognised reads
+as `v3`, so a blank or misspelt cell cannot strand everyone on an old prompt.
+
+`chat_rating_after_messages` (`5`, private) is how many questions a conversation needs before the
+five-face rating card is offered. It is asked once per account — `chat_feedback` is keyed on the
+user, and a dismissal is recorded too — with the language, prompt version and model stored beside
+the score, so a rating can be read against the prompt that earned it.
 
 `chat_languages` is a comma-separated list — `Hinglish,English,Hindi` — and `chat_language_default`
 names which of them a user who has never chosen gets. Both public: the Profile picker draws from
 them. Adding a language is one edit to one cell, because `_shared/chat_language.ts` has a written
 instruction for the three known ones and a generic template for anything else. Blanking
 `chat_languages` hides the picker and is the off switch for the whole feature.
+
+A message can move the setting too. `detectLanguageSwitch` runs before the model is called: a
+message mostly in Devanagari, or one that asks in words ("Hindi me bat kre", "in English please"),
+decides the reply's language and, once the reply exists, is saved to `users.language` exactly as if
+it had been picked in Profile. The response carries `saved_language` so the app moves the picker and
+the read-aloud voice with it. Roman letters alone decide nothing, since English and Hinglish share
+them — that case stays with the prompt. It used to be left to the prompt entirely, and someone
+writing Devanagari to an account set to Hinglish got Hinglish back three turns running.
+
+## The chart the chat reads
+
+`computeChart` names a rashi only if it held all day or the birth hour is known. Without the hour it
+computes both ends of the day, and on a day the Moon changed sign it returns both candidates and no
+sign — the prompt then says UNCERTAIN and Profile shows "Dhanu or Makara". It used to fall back to
+noon, which is how one account was told Dhanu in one conversation and Makara in the next: born
+17 October 1999 at 11:55 PM, when the Moon had crossed into Makara that evening.
+
+`users.chart` holds the chart the sage was last given. When the Moon's rashi differs from it — the
+hour arrived — the next prompt says so, and the sage is told to acknowledge the refinement once
+rather than silently contradict a reply still in the transcript. A birth time said without morning
+or night ("11:55") is no longer promoted to `users.birth_time` as a morning; the sage asks instead,
+and the composer's picker now sends AM or PM.
 
 An edit reaches the **prompt** within 60 seconds (`loadConfig`'s TTL) and the **app** the next
 time the user lands on Home, which re-reads config when its cache is over a minute old. Anything

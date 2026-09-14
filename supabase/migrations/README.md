@@ -55,6 +55,14 @@ and run in lexical order.
 - `20260914000002_trial_reading_limit.sql` — `trial_palm_readings` and `trial_face_readings`
   (both `1`, public), the per-trial reading allowance. No schema change: the count comes from the
   reading tables and `users.trial_started_at`.
+- `20260915000001_chat_chart.sql` — `users.chart` (jsonb, nullable): the chart `astro-chat` last
+  gave the sage, compared on every turn so a rashi that moved when the birth hour arrived is
+  corrected out loud. A snapshot, never a source — the live chart is recomputed from `dob` and
+  `birth_time`. Also moves `chat_prompt_version` from `v2` to `v3`; a project on `v1` stays put.
+- `20260915000002_chat_feedback.sql` — `chat_feedback`, one row per user (the primary key is what
+  makes the rating once per account; `rating` null is a dismissal), RLS on with zero policies,
+  and `chat_rating_after_messages` (`5`, private). **Not in `purge_expired`**: one row per user,
+  gone with the account.
 
 ## Notes
 
