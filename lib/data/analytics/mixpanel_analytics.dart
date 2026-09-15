@@ -216,6 +216,8 @@ class MixpanelAnalytics implements Analytics {
       // On every event, not just the profile: the onboarding gate routes on this, so "did the
       // user have a birth date at the moment they did X" is a question about most funnels here.
       P.hasBirthDate: user.hasBirthDate,
+      // Which price the account was put on, on every event, so any funnel splits by it.
+      P.planVariant: user.plan?.variant,
     });
   }
 
@@ -245,6 +247,7 @@ class MixpanelAnalytics implements Analytics {
       if (user.currentPeriodEnd != null)
         'current_period_end': user.currentPeriodEnd!.toUtc().toIso8601String(),
       if (user.billingState != null) P.billingState: user.billingState!.name,
+      if (user.plan != null) P.planVariant: user.plan!.variant,
       'last_seen': DateTime.now().toUtc().toIso8601String(),
     };
   }

@@ -137,5 +137,47 @@ void main() {
       await tester.pump();
       expect(latest, '482');
     });
+
+    testWidgets('a code filled from the SMS completes like a typed one', (tester) async {
+      // The whole point of reading the SMS: the boxes fill and the code submits itself, with no
+      // keyboard suggestion to tap.
+      final controller = OtpFieldController();
+      var latest = '';
+      var completions = 0;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: OtpField(
+            length: 6,
+            controller: controller,
+            onChanged: (v) => latest = v,
+            onCompleted: (_) => completions++,
+          ),
+        ),
+      ));
+
+      controller.fill('482915');
+      await tester.pump();
+
+      expect(latest, '482915');
+      expect(completions, 1);
+      for (final digit in ['4', '8', '2', '9', '1', '5']) {
+        expect(find.text(digit), findsOneWidget);
+      }
+    });
+
+    testWidgets('a filled code is cleaned the way typed input is', (tester) async {
+      final controller = OtpFieldController();
+      var latest = '';
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: OtpField(length: 6, controller: controller, onChanged: (v) => latest = v),
+        ),
+      ));
+
+      controller.fill('48-29 15 77');
+      await tester.pump();
+
+      expect(latest, '482915');
+    });
   });
 }

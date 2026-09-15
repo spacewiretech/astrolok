@@ -1,6 +1,7 @@
 import { loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
+import { configureFacebookCapi } from "../_shared/facebook_capi.ts";
 import { configureMixpanel, trackServer } from "../_shared/mixpanel.ts";
 import {
   claimReferral,
@@ -65,6 +66,7 @@ Deno.serve(async (req) => {
   const config = await loadConfig(db);
   const settings = referralSettings(config);
   configureMixpanel(config, "referral-claim");
+  configureFacebookCapi(config, "referral-claim");
 
   if (!settings.enabled) return json({ status: "disabled" });
 

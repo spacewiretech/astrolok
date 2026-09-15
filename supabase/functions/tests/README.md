@@ -7,8 +7,14 @@ signature check. No network, no database.
 
 ## Files
 
-- `payments_test.ts` (62 tests) — entitlement boundaries (trial / grace / active / none) and
+- `payments_test.ts` (64 tests) — entitlement boundaries (trial / grace / active / none) and
   webhook signature verification. **The silent-and-expensive logic**, and the largest file here.
+- `pricing_test.ts` (6) — the ₹499 / ₹299 price split: which plan an account resolves to, the
+  fallback to ₹499 while the ₹299 plan has no Cashfree id, and that the split needs both its switch
+  and a plan. The other half, a ₹299 authorisation buying a month, is in `payments_test.ts`.
+- `chat_feedback_test.ts` (5) — the written answer beside the chat rating: non-text and blank
+  input store nothing, whitespace is tidied, and the 500-character cap matches the column without
+  splitting an emoji.
 - `chat_test.ts` (66) — `normaliseChatReply`: malformed and partial model replies, `ask_for`
   fallback, verdict clamping, rashi keys. The prompt versions (v3's dasha and remedies, v2 as the
   rollback), the user prompt's correction and known-rashi blocks, and `detectLanguageSwitch`.
@@ -24,6 +30,9 @@ signature check. No network, no database.
   midnight, and a bare "11:55" left unguessed.
 - `mixpanel_test.ts` (11) — server-side Mixpanel: token gating, `$ip` suppression, insert-id
   hashing and dedupe, profile writes.
+- `facebook_capi_test.ts` (9) — server-side Meta conversions: the three independent ways reporting
+  stays off, phone/account-id normalisation and hashing, the seven-day event window, the device
+  marker, the test-event code, and that an unreachable Meta never reaches the caller.
 - `push_test.ts` (7) — `parsePushRegistration`: the two platforms, the length bound shared with
   the `push_tokens` CHECK, whitespace inside a token, and bodies that are not objects.
 - `trial_reading_limit_test.ts` (7) — the per-trial reading allowance: limit parsing and its
@@ -41,7 +50,7 @@ signature check. No network, no database.
   ```
 
   The root README quotes `deno test functions/tests/payments_test.ts` for the payments file
-  alone. 233 tests in total.
+  alone. 294 tests in total.
 - Everything under test is deliberately pure, which is why the normalisers in `_shared/` take
   and return plain data rather than touching the DB themselves.
 - `mixpanel_test.ts` guards a specific past failure: the server `$insert_id` must key on the

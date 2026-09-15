@@ -1,5 +1,6 @@
 import { cashfreeSettings } from "../_shared/cashfree.ts";
 import { loadConfig } from "../_shared/config.ts";
+import { configureFacebookCapi } from "../_shared/facebook_capi.ts";
 import { configureMixpanel } from "../_shared/mixpanel.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
@@ -10,6 +11,7 @@ import {
   isEntitled,
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
+import { planFor } from "../_shared/pricing.ts";
 import { latestSubscription, syncSubscription } from "../_shared/subscription_sync.ts";
 
 /**
@@ -35,6 +37,7 @@ Deno.serve(async (req) => {
 
   const config = await loadConfig(db);
   configureMixpanel(config, "subscription-status");
+  configureFacebookCapi(config, "subscription-status");
   const graceHours = graceHoursFrom(config);
 
   const subscription = await latestSubscription(db, userId);
@@ -85,9 +88,10 @@ Deno.serve(async (req) => {
   }
 
   const fresh = subscription ? await latestSubscription(db, userId) : null;
+  const row = asUserRow(userRow);
 
   return json({
-    user: entitlementPayload(asUserRow(userRow), graceHours),
+    user: entitlementPayload(row, graceHours, planFor(config, row.plan_variant)),
     subscription: fresh
       ? {
         subscription_id: fresh.subscription_id,

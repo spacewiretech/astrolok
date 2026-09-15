@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,10 +10,12 @@ import '../../app/router.dart';
 import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
+import '../../data/analytics/analytics_events.dart';
 import '../../data/attribution/attribution_service.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/app_config_repository.dart';
 import '../../data/repositories/referral_repository.dart';
+import '../../data/sms/sms_code_reader.dart';
 import '../../widgets/astral_background.dart';
 import '../../widgets/otp_field.dart';
 import '../../widgets/phone_field.dart';
@@ -88,10 +92,85 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
 
   @override
   void dispose() {
+    // Only when a listen ever started, which is also the only way [_smsReader] was ever read —
+    // reading it for the first time here would go through `ref` after the widget is gone.
+    if (_smsListen > 0) unawaited(_smsReader.cancel());
     _phone.dispose();
     _name.dispose();
     _pager.dispose();
     super.dispose();
+  }
+
+  // ---------------------------------------------------------------- SMS autofill
+
+  /// Android's SMS reader, or a stand-in that never finds a code. Read on first use rather than in
+  /// [initState], where the router is still building this widget.
+  late final SmsCodeReader _smsReader = ref.read(smsCodeReaderProvider);
+
+  /// Bumped by every new listen and every cancel. A result that arrives for an older value belongs
+  /// to a code that is no longer the one on screen — a resend, or a different number — and filling
+  /// it would auto-submit a stale code.
+  int _smsListen = 0;
+
+  /// How the code in the boxes got there, when it was read from the SMS rather than typed.
+  String? _smsEntryMethod;
+
+  /// Sends the code with a listener already running. Both Android APIs only see messages that
+  /// arrive after listening starts, and a fast SMS can beat the OTP sheet onto the screen.
+  Future<void> _sendOtp() async {
+    _cancelSms();
+    unawaited(_listenForSms());
+    final sent = await ref.read(onboardingViewModelProvider.notifier).sendOtp();
+    if (!sent) _cancelSms();
+  }
+
+  /// The same around a resend. The first listener may already have been used or declined, and the
+  /// new message needs one of its own.
+  Future<void> _resendOtp() async {
+    _cancelSms();
+    unawaited(_listenForSms());
+    final sent = await ref.read(onboardingViewModelProvider.notifier).resendOtp();
+    if (!sent) _cancelSms();
+  }
+
+  Future<void> _listenForSms() async {
+    final reader = _smsReader;
+    if (!reader.available) return;
+
+    final listen = ++_smsListen;
+    final config = ref.read(appConfigProvider).valueOrNull ?? shippedAppConfig;
+    final retriever = config.configFlag(smsRetrieverEnabledKey);
+
+    final sms = await reader.waitForCode(retriever: retriever);
+    // Replaced or cancelled while it waited: this is not the code the sheet is asking for.
+    if (!mounted || listen != _smsListen) return;
+
+    final state = ref.read(onboardingViewModelProvider);
+    // A code already typed in full, or one already being verified, is left alone. Overwriting it
+    // mid-request would submit twice.
+    final usable = sms != null &&
+        state.step == OnboardingStep.otp &&
+        !state.busy &&
+        state.code.length < OnboardingState.otpLength;
+
+    ref.read(analyticsProvider).track(Ev.otpAutofillResult, {
+      P.method: retriever
+          ? SmartAuthSmsCodeReader.retrieverMethod
+          : SmartAuthSmsCodeReader.consentMethod,
+      P.result: usable ? 'filled' : 'none',
+    });
+
+    if (!usable) return;
+    _smsEntryMethod = sms.method;
+    // Fires the field's onCompleted exactly as typing the last digit does, which verifies it.
+    _otp.fill(sms.code);
+  }
+
+  void _cancelSms() {
+    if (_smsListen == 0) return;
+    _smsListen++;
+    _smsEntryMethod = null;
+    unawaited(_smsReader.cancel());
   }
 
   @override
@@ -192,19 +271,17 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
   }
 
   Widget _phoneSheet(OnboardingState state) {
-    final model = ref.read(onboardingViewModelProvider.notifier);
-
     return _Sheet(
       title: 'Enter your mobile number',
       subtitle: "We'll send you a code for secure access.",
       error: state.error,
       children: [
-        PhoneField(controller: _phone, onSubmitted: (_) => model.sendOtp()),
+        PhoneField(controller: _phone, onSubmitted: (_) => _sendOtp()),
         const SizedBox(height: 20),
         PrimaryButton(
           label: 'continue',
           busy: state.busy,
-          onPressed: state.canSendOtp ? model.sendOtp : null,
+          onPressed: state.canSendOtp ? _sendOtp : null,
         ),
         const SizedBox(height: 16),
         _termsFooter,
@@ -225,8 +302,13 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
           controller: _otp,
           onChanged: model.setCode,
           // Auto-submitting on the last digit is what makes an autofilled code feel instant;
-          // a wrong one still lands on the error path below.
-          onCompleted: (_) => _verify(entryMethod: 'auto_complete'),
+          // a wrong one still lands on the error path below. The entry method says whether the
+          // digits came from the SMS reader or from the keyboard.
+          onCompleted: (_) {
+            final entryMethod = _smsEntryMethod ?? 'auto_complete';
+            _smsEntryMethod = null;
+            _verify(entryMethod: entryMethod);
+          },
         ),
         const SizedBox(height: 20),
         PrimaryButton(
@@ -235,7 +317,7 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
           onPressed: state.canVerify ? _verify : null,
         ),
         const SizedBox(height: 12),
-        _ResendRow(state: state),
+        _ResendRow(state: state, onResend: _resendOtp),
       ],
     );
   }
@@ -283,6 +365,13 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
         .read(onboardingViewModelProvider.notifier)
         .verifyOtp(entryMethod: entryMethod);
     if (!mounted) return;
+
+    // Verified, whether that moves to the name sheet or off this screen: nothing is waiting for a
+    // code any more, and a listener left running would still put Android's consent sheet up.
+    if (next != null || ref.read(onboardingViewModelProvider).step != OnboardingStep.otp) {
+      _cancelSms();
+    }
+
     // Null means the flow stayed here — a rejected code, or the name sheet taking over.
     if (next == null) {
       _otp.clear();
@@ -337,13 +426,17 @@ class _Sheet extends StatelessWidget {
 }
 
 /// "Didn't get the code? Resend", its countdown, and the exhausted case.
-class _ResendRow extends ConsumerWidget {
-  const _ResendRow({required this.state});
+///
+/// The resend goes through [onResend] rather than straight to the view model, because the screen
+/// restarts the SMS listener around it: a new message needs a listener of its own.
+class _ResendRow extends StatelessWidget {
+  const _ResendRow({required this.state, required this.onResend});
 
   final OnboardingState state;
+  final VoidCallback onResend;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     if (state.resendExhausted) {
       return Text(
         'No more codes can be sent right now. Please try again later.',
@@ -368,7 +461,7 @@ class _ResendRow extends ConsumerWidget {
           onTap: state.canResend
               ? () {
                   HapticFeedback.selectionClick();
-                  ref.read(onboardingViewModelProvider.notifier).resendOtp();
+                  onResend();
                 }
               : null,
           child: Text(

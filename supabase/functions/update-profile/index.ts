@@ -8,6 +8,7 @@ import {
   graceHoursFrom,
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
+import { planFor } from "../_shared/pricing.ts";
 
 /**
  * Sets the name and the date of birth collected in the steps after OTP.
@@ -146,5 +147,8 @@ Deno.serve(async (req) => {
     return fail("server_error", "Could not save your details. Please try again.", 500);
   }
 
-  return json({ user: entitlementPayload(asUserRow(user), graceHoursFrom(config)) });
+  const row = asUserRow(user);
+  return json({
+    user: entitlementPayload(row, graceHoursFrom(config), planFor(config, row.plan_variant)),
+  });
 });

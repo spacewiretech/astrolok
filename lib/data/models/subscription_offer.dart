@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'app_user.dart';
+
 /// What the paywall offers: a small authorisation opens a short trial, then the plan price
 /// recurs monthly.
 ///
@@ -12,6 +14,8 @@ class SubscriptionOffer {
     required this.planPrice,
     required this.trialDays,
     this.strikePrice,
+    this.planVariant,
+    this.planAmount,
   });
 
   /// Formatted with the currency symbol, e.g. `₹3`.
@@ -23,6 +27,13 @@ class SubscriptionOffer {
 
   final int trialDays;
 
+  /// Which side of the price split [planPrice] is — `plan_499` or `plan_299` — or null when the
+  /// account's plan is not known and the configured price stands in.
+  final String? planVariant;
+
+  /// [planPrice] as a number, from the same server answer. Null alongside [planVariant].
+  final double? planAmount;
+
   /// The mandate consent line. UPI Autopay requires the recurring amount and cadence to be
   /// stated before authorisation, so this is a compliance requirement, not marketing copy.
   ///
@@ -31,6 +42,22 @@ class SubscriptionOffer {
   /// the part that takes their money.
   String get consent =>
       '$trialPrice today. $planPrice/month will be auto-debited';
+
+  /// This offer at [plan], the account's own monthly price, when the server sent one.
+  ///
+  /// The strikethrough and the consent line move with it, so the struck-through price, the amount
+  /// the mandate text promises and what `subscription-start` authorises are one number.
+  SubscriptionOffer forPlan(UserPlan? plan) {
+    if (plan == null) return this;
+    return SubscriptionOffer(
+      trialPrice: trialPrice,
+      planPrice: plan.priceLabel,
+      trialDays: trialDays,
+      strikePrice: strikePrice == null ? null : plan.priceLabel,
+      planVariant: plan.variant,
+      planAmount: plan.amount,
+    );
+  }
 }
 
 /// The result of asking the server to open a mandate.

@@ -32,8 +32,11 @@ abstract interface class ChatRepository {
 
   /// Records how the conversation has felt, 1 to 5, or null when the card was dismissed.
   ///
+  /// [comment] is what the user wrote beside the score, or null when they wrote nothing. It goes in
+  /// the same request, so the score and the words are one answer.
+  ///
   /// Asked once per account, which the server enforces: a second answer changes nothing.
-  Future<void> rate({required String threadId, int? rating});
+  Future<void> rate({required String threadId, int? rating, String? comment});
 }
 
 /// What comes back from one turn.

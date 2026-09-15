@@ -7,6 +7,7 @@ import {
   graceHoursFrom,
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
+import { planFor } from "../_shared/pricing.ts";
 
 /**
  * Resolves a stored session token back to its user, so a relaunch can restore the session
@@ -43,5 +44,8 @@ Deno.serve(async (req) => {
   }
 
   const config = await loadConfig(db);
-  return json({ user: entitlementPayload(asUserRow(user), graceHoursFrom(config)) });
+  const row = asUserRow(user);
+  return json({
+    user: entitlementPayload(row, graceHoursFrom(config), planFor(config, row.plan_variant)),
+  });
 });

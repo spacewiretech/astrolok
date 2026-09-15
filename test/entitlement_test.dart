@@ -156,6 +156,32 @@ void main() {
       expect(parsed.isTrialAvailable, isTrue);
       expect(parsed.hasEverSubscribed, isFalse);
     });
+
+    test("parses the account's own plan, and drops one it cannot price", () {
+      final parsed = AppUser.fromServer({
+        'user_id': 'abc',
+        'plan': {'variant': 'plan_299', 'price_label': '₹299', 'amount': 299},
+      });
+      expect(parsed!.plan?.variant, 'plan_299');
+      expect(parsed.plan?.priceLabel, '₹299');
+      expect(parsed.plan?.amount, 299);
+
+      // Null rather than a blank price on the consent line: the paywall then shows the configured
+      // price, which is what a payload from before the split means.
+      for (final broken in [
+        null,
+        'plan_299',
+        {'variant': 'plan_299', 'amount': 299},
+        {'variant': 'plan_299', 'price_label': ' ', 'amount': 299},
+        {'variant': 'plan_299', 'price_label': '₹299', 'amount': 0},
+      ]) {
+        expect(
+          AppUser.fromServer({'user_id': 'abc', 'plan': broken})!.plan,
+          isNull,
+          reason: '$broken',
+        );
+      }
+    });
   });
 
   group('trial availability', () {

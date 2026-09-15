@@ -80,6 +80,11 @@ abstract final class Ev {
   static const otpVerified = 'OTP Verified';
   static const otpVerificationFailed = 'OTP Verification Failed';
   static const otpAttemptsExhausted = 'OTP Attempts Exhausted';
+
+  /// How an attempt to read the code from the SMS ended. Without it, a user who declined the
+  /// Android consent sheet leaves no trace: they simply type the code, and look like a user whose
+  /// autofill never offered.
+  static const otpAutofillResult = 'OTP Autofill Result';
   static const nameEntryStarted = 'Name Entry Started';
   static const nameSubmitted = 'Name Submitted';
   static const nameSaveFailed = 'Name Save Failed';
@@ -338,6 +343,7 @@ abstract final class P {
   static const trigger = 'trigger';
   static const outcome = 'outcome';
   static const result = 'result';
+  static const method = 'method';
   static const attempt = 'attempt';
   static const position = 'position';
 
@@ -436,6 +442,14 @@ abstract final class P {
   static const flow = 'flow';
   static const trialPrice = 'trial_price';
   static const planPrice = 'plan_price';
+
+  /// `plan_499` or `plan_299`: which side of the price split the account is on. Also a super
+  /// property and a profile property, so every funnel can be broken down by it.
+  static const planVariant = 'plan_variant';
+
+  /// The account's monthly price as a number, on the checkout events. What the ad sinks value a
+  /// plan purchase at, so a ₹299 purchase is not reported at the configured ₹499.
+  static const planAmount = 'plan_amount';
   static const trialDays = 'trial_days';
   static const trialAvailable = 'trial_available';
   static const upiAppCount = 'upi_app_count';
@@ -481,6 +495,11 @@ abstract final class P {
 
   /// 1 (worst) to 5 (best), from the chat's rating card.
   static const rating = 'rating';
+  static const hasComment = 'has_comment';
+
+  /// Length of the written answer on the chat rating card. The words themselves never leave
+  /// Supabase.
+  static const commentChars = 'comment_chars';
   static const hasVerdict = 'has_verdict';
   static const optionCount = 'option_count';
   static const optionIndex = 'option_index';

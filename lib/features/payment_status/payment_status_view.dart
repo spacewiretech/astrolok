@@ -86,6 +86,10 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView> {
             // path that does not pass through `Payment Completed`, so without this property the
             // Facebook sink would have to guess what the conversion was worth.
             P.offerType: user!.inTrial ? 'trial' : 'plan',
+            // What a plan conversion was worth to this account. Without it the ad sinks value it at
+            // the configured ₹499, whichever side of the price split the account is on.
+            P.planVariant: user.plan?.variant,
+            P.planAmount: user.plan?.amount,
           });
           context.go(Routes.home);
           return;

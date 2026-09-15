@@ -1,4 +1,5 @@
 import { promptVersion } from "../_shared/astro_chat.ts";
+import { normaliseFeedbackComment } from "../_shared/chat_feedback.ts";
 import { resolveLanguage } from "../_shared/chat_language.ts";
 import { configSetting, loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
@@ -117,6 +118,9 @@ Deno.serve(async (req) => {
           ),
           prompt_version: promptVersion(configSetting(config, "chat_prompt_version")),
           model,
+          // What they wrote beside the score, tidied and capped. A dismissal says nothing, whatever
+          // arrives with it, and an unreadable comment costs the comment, never the rating.
+          comment: rating === null ? null : normaliseFeedbackComment(rate.comment),
         },
         { onConflict: "user_id", ignoreDuplicates: true },
       );

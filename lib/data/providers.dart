@@ -35,6 +35,7 @@ import 'repositories/palm_repository.dart';
 import 'repositories/push_repository.dart';
 import 'repositories/referral_repository.dart';
 import 'repositories/subscription_repository.dart';
+import 'sms/sms_code_reader.dart';
 import 'supabase/edge_functions.dart';
 import 'supabase/session_store.dart';
 import 'supabase/supabase_app_config_repository.dart';
@@ -265,6 +266,17 @@ final subscriptionRepositoryProvider = Provider<SubscriptionRepository>((ref) {
 final cashfreeCheckoutProvider = Provider<CashfreeCheckout>((ref) {
   if (supabaseReady) return SdkCashfreeCheckout();
   return const FakeCashfreeCheckout();
+});
+
+/// Reads the OTP out of the SMS on Android, or a stand-in that never finds one.
+///
+/// Real whenever a real SMS goes out, through Supabase or the direct Fast2SMS client. The stand-in
+/// is what keeps every test that pumps the onboarding sheet off the plugin's platform channel.
+final smsCodeReaderProvider = Provider<SmsCodeReader>((ref) {
+  if (supabaseReady || Env.isConfigured) {
+    return const SmartAuthSmsCodeReader(length: Fast2SmsClient.otpLength);
+  }
+  return const NoopSmsCodeReader();
 });
 
 /// Which UPI app the paywall opens on. Cosmetic, so it is not in the secure store.

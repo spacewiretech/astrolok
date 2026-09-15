@@ -10,6 +10,7 @@
  */
 
 import { AppConfig, configSetting } from "./config.ts";
+import { PricingPlan, pricingPlans } from "./pricing.ts";
 
 const TIMEOUT_MS = 15_000;
 
@@ -40,9 +41,14 @@ export interface CashfreeSettings {
   baseUrl: string;
   apiVersion: string;
   env: string;
-  planId: string;
   trialAmount: number;
+  /** The ₹499 plan's monthly amount: every account not on the other side of the price split. */
   recurringAmount: number;
+  /**
+   * Every plan a mandate can be opened on — ₹499, and ₹299 once its Cashfree plan id is filled in.
+   * Which one a given account pays is `planFor` in `pricing.ts`, never a choice made here.
+   */
+  plans: PricingPlan[];
   trialDays: number;
   graceHours: number;
 }
@@ -74,6 +80,7 @@ export function cashfreeSettings(config: AppConfig): CashfreeSettings {
   }
 
   const env = (configSetting(config, "cashfree_env") || "production").toLowerCase();
+  const { standard, alternate } = pricingPlans(config);
 
   return {
     appId,
@@ -83,9 +90,9 @@ export function cashfreeSettings(config: AppConfig): CashfreeSettings {
       ? "https://sandbox.cashfree.com/pg"
       : "https://api.cashfree.com/pg",
     apiVersion: configSetting(config, "cashfree_api_version") || "2025-01-01",
-    planId: configSetting(config, "cashfree_plan_id"),
     trialAmount: numberFrom(config, "cashfree_trial_amount", 3),
-    recurringAmount: numberFrom(config, "cashfree_recurring_amount", 249),
+    recurringAmount: standard.recurringAmount,
+    plans: alternate ? [standard, alternate] : [standard],
     // Astrolok sells a one-day trial, so the default matches. Cashfree requires
     // subscription_first_charge_time to sit at least 24 hours out for a UPI Autopay mandate,
     // which is exactly where trialDays = 1 lands it — verify a real mandate in sandbox before
@@ -234,6 +241,13 @@ export interface CreateSubscriptionInput {
    */
   authorizationAmount: number;
 
+  /**
+   * The Cashfree plan the mandate recurs on: the account's own side of the price split, from
+   * `planFor`. Required for the same reason as [authorizationAmount] — a default here would put
+   * every account on one price, whatever it had been shown.
+   */
+  planId: string;
+
   firstChargeTime: Date;
   sessionExpiry: Date;
   returnUrl: string;
@@ -256,7 +270,7 @@ export function createSubscription(
       },
       // Only the id. The amount and interval live in the Cashfree dashboard, so there is no
       // path by which a request body can change what a subscriber is billed.
-      plan_details: { plan_id: settings.planId },
+      plan_details: { plan_id: input.planId },
       authorization_details: {
         authorization_amount: input.authorizationAmount,
         // False is what turns the authorisation into a kept charge. Left true, Cashfree refunds

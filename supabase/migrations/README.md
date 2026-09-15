@@ -63,6 +63,28 @@ and run in lexical order.
   makes the rating once per account; `rating` null is a dismissal), RLS on with zero policies,
   and `chat_rating_after_messages` (`5`, private). **Not in `purge_expired`**: one row per user,
   gone with the account.
+- `20260915000003_facebook_capi.sql` — `facebook_dataset_id`, `facebook_capi_access_token`,
+  `facebook_capi_enabled` (ships **false**), `facebook_graph_api_version`,
+  `facebook_capi_test_event_code`. All private. No schema change — these let the server report the
+  recurring debit to Meta, which the client provably cannot. **Not the app secret**, which
+  `20260908000003` forbids here and which this integration does not use: the modern app-event path
+  authenticates against a Dataset, not the app.
+- `20260915000004_pricing_plans.sql` — the ₹499 / ₹299 price split. `users.plan_variant` and
+  `subscriptions.plan_variant` (`plan_499` / `plan_299`, existing rows backfilled to `plan_499`),
+  `plan_assignment_counter` (one row, the running user total) and `assign_plan_variant`, which
+  `verify-otp` calls once per new account: odd total → ₹499, even → ₹299. Config
+  `cashfree_plan_id_299`, `cashfree_plan_name_299`, `cashfree_recurring_amount_299`,
+  `plan_price_label_299`, `cashfree_plan_name` and `pricing_split_enabled` (ships **false**), all
+  private. **`users.plan_variant` is nullable on purpose**: `verify-otp` upserts, and a column
+  default would be evaluated on every login rather than once.
+- `20260916000001_otp_autofill.sql` — `sms_retriever_enabled` (public, ships **false**). Chooses
+  how the Android OTP sheet reads the code: false is the one-tap SMS User Consent sheet, which
+  works with any SMS; true is the zero-tap SMS Retriever, which only fires for an SMS ending with
+  the Play App Signing hash. That text is the Fast2SMS template, so turn this on only after the
+  template carries the hash. No schema change.
+- `20260916000002_chat_feedback_comment.sql` — `chat_feedback.comment` (text, nullable, at most 500
+  characters): the optional written answer submitted with the chat rating. It sits on the same row
+  as the score, so there is still one answer per account. No backfill.
 
 ## Notes
 

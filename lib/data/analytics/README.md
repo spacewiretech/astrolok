@@ -53,3 +53,8 @@ ambient properties attached to every event and the iOS tracking-consent prompt.
   `ensureTrackingConsent()`, so the two system dialogs never contend.
 - Server-side events the client can never observe (renewals, holds, chargebacks) are sent by
   `supabase/functions/_shared/mixpanel.ts` instead.
+- **The renewal also reaches Facebook, but from the server.** `FacebookAnalytics` reports one
+  `Purchase` per device — the ₹3 — and then latches `_purchaseReportedKey` forever, so the monthly
+  debit is not something this sink is capable of sending. It is reported by
+  `supabase/functions/_shared/facebook_capi.ts`, which fires only on a `RECURRING` charge
+  precisely so it cannot double-count the full-price authorisation this sink already sends.

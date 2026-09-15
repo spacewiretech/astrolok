@@ -26,6 +26,12 @@ abstract final class ChatCopy {
   static const ratingPrompt = 'How is your chat with Astro so far?';
   static const ratingThanks = 'Thank you — this helps Astro read better for you.';
   static const ratingDismiss = 'Not now';
+  static const ratingSubmit = 'Submit';
+
+  /// Placeholder in the text box under the faces. It says "optional" in the box itself, because an
+  /// unlabelled field reads as required, and a required essay is how a two-second rating is
+  /// abandoned.
+  static const feedbackHint = 'Your thoughts (optional)';
 
   /// Worst to best, read by a screen reader in place of each face.
   static const ratingLabels = ['Very bad', 'Not good', 'Okay', 'Good', 'Loved it'];

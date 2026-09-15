@@ -711,6 +711,30 @@ Deno.test("a recurring debit always buys a month, and UNKNOWN never does", () =>
   assertFalse(buysAMonth("AUTH", null, settings), "no amount, no month");
 });
 
+Deno.test("a ₹299 plan's full-price authorisation buys a month too", () => {
+  // New signups are split between ₹499 and ₹299. A returning ₹299 subscriber pays ₹299 as the
+  // authorisation, and measuring that against the ₹499 plan took their money and left them looking
+  // at the paywall.
+  const split = {
+    ...settings,
+    recurringAmount: 499,
+    plans: [
+      { variant: "plan_499", planId: "p499", planName: "", recurringAmount: 499, priceLabel: "₹499" },
+      { variant: "plan_299", planId: "p299", planName: "", recurringAmount: 299, priceLabel: "₹299" },
+    ],
+  } as CashfreeSettings;
+
+  assert(buysAMonth("AUTH", 299, split));
+  assert(buysAMonth("AUTH", 499, split));
+  assertFalse(buysAMonth("AUTH", 298, split), "below every plan still buys nothing");
+  assertFalse(buysAMonth("AUTH", 3, split), "the trial fee never buys a month");
+});
+
+Deno.test("the trial fee never buys a month, even with an unreadable plan price", () => {
+  // A blank `cashfree_recurring_amount` reads as 0, and `amount >= 0` alone would credit the ₹3.
+  assertFalse(buysAMonth("AUTH", 3, { ...settings, recurringAmount: 0 }));
+});
+
 Deno.test("a transition gets a name a report can group by", () => {
   assertEquals(transitionName("INITIALIZED", "ACTIVE"), "activated");
   assertEquals(transitionName("ON_HOLD", "ACTIVE"), "recovered");

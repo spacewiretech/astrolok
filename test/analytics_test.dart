@@ -254,6 +254,21 @@ void main() {
       expect(profile[P.hasBirthDate], false);
       expect(profile.containsKey(P.birthYear), isFalse);
     });
+
+    test('carries which side of the price split the account is on', () {
+      final profile = MixpanelAnalytics.peoplePropertiesFor(
+        const AppUser(
+          id: 'u1',
+          phone: '9931145610',
+          plan: UserPlan(variant: 'plan_299', priceLabel: '₹299', amount: 299),
+        ),
+      );
+
+      expect(profile[P.planVariant], 'plan_299');
+      // A payload from before the split has no plan, and saying nothing is more honest than
+      // claiming the default.
+      expect(MixpanelAnalytics.peoplePropertiesFor(_user()).containsKey(P.planVariant), isFalse);
+    });
   });
 
   group('slugify', () {

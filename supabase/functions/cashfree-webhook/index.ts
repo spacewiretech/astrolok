@@ -12,6 +12,7 @@ import {
 import { loadConfig } from "../_shared/config.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { serviceClient } from "../_shared/db.ts";
+import { configureFacebookCapi } from "../_shared/facebook_capi.ts";
 import { configureMixpanel, trackServer } from "../_shared/mixpanel.ts";
 import {
   asSubscriptionRow,
@@ -94,6 +95,7 @@ Deno.serve(async (req) => {
   const db = serviceClient();
   const config = await loadConfig(db);
   configureMixpanel(config, "cashfree-webhook");
+  configureFacebookCapi(config, "cashfree-webhook");
 
   // Parsed before the secret is looked up, so that a delivery arriving at a misconfigured
   // deployment can still be identified and counted. This reads the body without having verified

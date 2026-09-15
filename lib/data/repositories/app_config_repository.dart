@@ -78,6 +78,14 @@ const chatLanguageDefaultKey = 'chat_language_default';
 /// six-hour cache.
 const referralEnabledKey = 'referral_enabled';
 
+/// Whether the OTP sheet reads the code with Android's zero-tap SMS Retriever instead of the
+/// one-tap SMS User Consent sheet.
+///
+/// Retriever only fires for an SMS that ends with this app's signing hash, and that text is the
+/// Fast2SMS template, not something code can append to. So this stays false until the template
+/// carries the hash; while false, the consent sheet works with the SMS exactly as it is.
+const smsRetrieverEnabledKey = 'sms_retriever_enabled';
+
 /// Values the app falls back to when config has never been fetched and there is no network.
 ///
 /// A cold start must never block on the network, so these have to be good enough to run on.
@@ -145,6 +153,9 @@ const defaultAppConfig = <String, String>{
   // *build* a share link, never to read one, and `referral-code` refuses to hand out a link it
   // cannot build. Shipping a copy here would only create a second place for it to be wrong.
   referralEnabledKey: 'true',
+  // Off until the Fast2SMS template ends with the app's signing hash — see [smsRetrieverEnabledKey].
+  // Defaulting it on would leave a cold start with no cached config autofilling nothing at all.
+  smsRetrieverEnabledKey: 'false',
 };
 
 /// Typed reads over the raw key/value map, so a bad or missing value can never crash a screen.

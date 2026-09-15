@@ -181,6 +181,32 @@ void main() {
       expect(callsNamed('logPurchase').single.arguments['amount'], 499.0);
     });
 
+    test("a plan purchase is valued at the account's own price, not the configured one", () async {
+      final facebook = await started();
+
+      // New signups are split between ₹499 and ₹299, and `app_config` only knows ₹499. Reporting
+      // a ₹299 purchase at ₹499 teaches the optimiser a payer is worth more than they pay.
+      facebook.track(
+        Ev.paymentCompleted,
+        {P.outcome: 'success', P.offerType: 'plan', P.planAmount: 299.0},
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(callsNamed('logPurchase').single.arguments['amount'], 299.0);
+    });
+
+    test('a trial is still valued at the trial fee whatever the plan costs', () async {
+      final facebook = await started();
+
+      facebook.track(
+        Ev.paymentCompleted,
+        {P.outcome: 'success', P.offerType: 'trial', P.planAmount: 299.0},
+      );
+      await Future<void>.delayed(Duration.zero);
+
+      expect(callsNamed('logPurchase').single.arguments['amount'], 3.0);
+    });
+
     test('an unknown offer type is priced as the trial rather than the plan', () async {
       final facebook = await started();
 

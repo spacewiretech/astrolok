@@ -101,6 +101,21 @@ class _OtpFieldState extends State<OtpField> {
     widget.onChanged('');
   }
 
+  /// A whole code set from outside, typically the SMS read on the user's behalf.
+  ///
+  /// Filtered the way the keyboard's formatters filter typing, then handed to [_onChanged]
+  /// directly: setting the controller does not fire `TextField.onChanged`, so without this call a
+  /// filled code would sit in the boxes and never submit.
+  void _fill(String code) {
+    final digits = code.replaceAll(RegExp(r'\D'), '');
+    final value = digits.length > widget.length ? digits.substring(0, widget.length) : digits;
+    _text.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
+    _onChanged(value);
+  }
+
   @override
   Widget build(BuildContext context) {
     final code = _code;
@@ -164,7 +179,8 @@ class _OtpFieldState extends State<OtpField> {
   }
 }
 
-/// Lets a parent clear the boxes after the provider rejects a code.
+/// Lets a parent clear the boxes after the provider rejects a code, or fill them with a code read
+/// from the SMS.
 class OtpFieldController {
   _OtpFieldState? _state;
 
@@ -175,6 +191,11 @@ class OtpFieldController {
   }
 
   void clear() => _state?._reset();
+
+  /// Puts a whole code in as if it had been typed. [OtpField.onChanged] and
+  /// [OtpField.onCompleted] fire exactly as they would for the keyboard, so a filled code
+  /// auto-submits too.
+  void fill(String code) => _state?._fill(code);
 }
 
 /// One square: a border and a digit. Holds no input of its own.

@@ -425,41 +425,57 @@ void main() {
   });
 
   group('the rating card', () {
+    const hint = 'Your thoughts (optional)';
+
     /// The composer on its own: the card's whole life is decided by the state handed to it, and
     /// pumping the full screen would add a reveal animation this group has nothing to say about.
+    ///
+    /// [screen] stands in the header and the transcript above it, which is what decides whether
+    /// the card still fits once a keyboard takes half the phone.
     Future<void> pumpComposer(
       WidgetTester tester,
       ChatState state,
-      ValueChanged<int?> onRate,
-    ) async {
+      void Function(int? rating, String? comment) onRate, {
+      bool screen = false,
+    }) async {
       tester.view.physicalSize = small;
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
+
+      final composer = ChatComposer(
+        state: state,
+        onSend: (message, entry) {},
+        onDraftRestored: () {},
+        onRate: onRate,
+      );
 
       await tester.pumpWidget(
         MaterialApp(
           theme: buildAppTheme(),
           home: Scaffold(
-            body: Align(
-              alignment: Alignment.bottomCenter,
-              child: ChatComposer(
-                state: state,
-                onSend: (message, entry) {},
-                onDraftRestored: () {},
-                onRate: onRate,
-              ),
-            ),
+            body: screen
+                ? Column(
+                    children: [
+                      // The header.
+                      const SizedBox(height: 56),
+                      // The transcript, which gives up its room first.
+                      const Expanded(child: SizedBox.expand()),
+                      composer,
+                    ],
+                  )
+                : Align(alignment: Alignment.bottomCenter, child: composer),
           ),
         ),
       );
       await tester.pump();
     }
 
-    ChatState due({String? revealingId}) => ChatState(
+    ChatState due({String? revealingId, bool sending = false}) => ChatState(
           loading: false,
           threadId: 'thread-1',
           ratingDue: true,
           revealingId: revealingId,
+          sending: sending,
           messages: [
             AstroMessage(
               id: 'a',
@@ -470,45 +486,102 @@ void main() {
           ],
         );
 
-    testWidgets('asks with five faces on a small phone', (tester) async {
-      await pumpComposer(tester, due(), (_) {});
+    VoidCallback? submit(WidgetTester tester) =>
+        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed;
+
+    testWidgets('asks with five faces and a place to write on a small phone', (tester) async {
+      await pumpComposer(tester, due(), (_, _) {});
 
       expect(tester.takeException(), isNull);
       expect(find.text('How is your chat with Astro so far?'), findsOneWidget);
       for (final face in ChatRatingCard.faces) {
         expect(find.text(face), findsOneWidget);
       }
+      expect(find.widgetWithText(TextField, hint), findsOneWidget);
     });
 
     testWidgets('waits for the reply to finish arriving', (tester) async {
-      await pumpComposer(tester, due(revealingId: 'a'), (_) {});
+      await pumpComposer(tester, due(revealingId: 'a'), (_, _) {});
 
       expect(find.byType(ChatRatingCard), findsNothing);
     });
 
-    testWidgets('a face answers with its score, then says thank you', (tester) async {
-      int? answered;
-      await pumpComposer(tester, due(), (rating) => answered = rating);
+    testWidgets('a face only chooses: nothing is sent until Submit', (tester) async {
+      var calls = 0;
+      await pumpComposer(tester, due(), (_, _) => calls++);
+
+      // A written answer with no score is not a rating, so Submit waits for a face.
+      expect(submit(tester), isNull);
 
       await tester.tap(find.text('🙂'));
       await tester.pump();
 
-      expect(answered, 4);
+      expect(calls, 0);
+      expect(find.textContaining('Thank you'), findsNothing);
+      expect(submit(tester), isNotNull);
+    });
+
+    testWidgets('Submit sends the face and what was written, then says thank you', (tester) async {
+      int? rating;
+      String? comment;
+      await pumpComposer(tester, due(), (r, c) {
+        rating = r;
+        comment = c;
+      });
+
+      await tester.tap(find.text('🙂'));
+      await tester.enterText(find.widgetWithText(TextField, hint), 'Very accurate about my career');
+      await tester.tap(find.text('Submit'));
+      await tester.pump();
+
+      expect(rating, 4);
+      expect(comment, 'Very accurate about my career');
       expect(find.textContaining('Thank you'), findsOneWidget);
 
       // Past the thank-you, so its timer is not left running when the test ends.
       await tester.pump(const Duration(milliseconds: 1700));
     });
 
-    testWidgets('the close button dismisses without a score or a thank-you', (tester) async {
-      var dismissed = false;
-      await pumpComposer(tester, due(), (rating) => dismissed = rating == null);
+    testWidgets('the close button dismisses without a score, a comment or a thank-you',
+        (tester) async {
+      int? rating = -1;
+      String? comment = 'unset';
+      await pumpComposer(tester, due(), (r, c) {
+        rating = r;
+        comment = c;
+      });
 
+      await tester.enterText(find.widgetWithText(TextField, hint), 'half a thought');
       await tester.tap(find.byTooltip('Not now'));
       await tester.pump();
 
-      expect(dismissed, isTrue);
+      expect(rating, isNull);
+      expect(comment, isNull);
       expect(find.textContaining('Thank you'), findsNothing);
+    });
+
+    testWidgets('a half-written answer survives the card stepping aside for a turn', (tester) async {
+      await pumpComposer(tester, due(), (_, _) {});
+
+      await tester.tap(find.text('😍'));
+      await tester.enterText(find.widgetWithText(TextField, hint), 'Loved the remedies');
+      await tester.pump();
+
+      // A question sent mid-thought takes the card off screen while the turn is in flight.
+      await pumpComposer(tester, due(sending: true), (_, _) {});
+      expect(find.byType(ChatRatingCard), findsNothing);
+
+      await pumpComposer(tester, due(), (_, _) {});
+      expect(find.text('Loved the remedies'), findsOneWidget);
+      expect(submit(tester), isNotNull, reason: 'the picked face should still be picked');
+    });
+
+    testWidgets('fits a small phone with the keyboard up', (tester) async {
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await pumpComposer(tester, due(), (_, _) {}, screen: true);
+
+      expect(tester.takeException(), isNull);
+      expect(find.byType(ChatRatingCard), findsOneWidget);
     });
   });
 
@@ -601,5 +674,5 @@ class _StubChatRepository implements ChatRepository {
       key == null ? const [] : facts.where((f) => f.key != key).toList();
 
   @override
-  Future<void> rate({required String threadId, int? rating}) async {}
+  Future<void> rate({required String threadId, int? rating, String? comment}) async {}
 }

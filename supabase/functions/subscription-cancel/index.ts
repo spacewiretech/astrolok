@@ -1,5 +1,6 @@
 import { cancelSubscription, CashfreeError, cashfreeSettings } from "../_shared/cashfree.ts";
 import { loadConfig } from "../_shared/config.ts";
+import { configureFacebookCapi } from "../_shared/facebook_capi.ts";
 import { configureMixpanel } from "../_shared/mixpanel.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
@@ -9,8 +10,10 @@ import {
   graceHoursFrom,
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
+import { planFor } from "../_shared/pricing.ts";
 import {
   latestSubscription,
+  planProps,
   syncSubscription,
   trackCancellation,
 } from "../_shared/subscription_sync.ts";
@@ -35,6 +38,7 @@ Deno.serve(async (req) => {
 
   const config = await loadConfig(db);
   configureMixpanel(config, "subscription-cancel");
+  configureFacebookCapi(config, "subscription-cancel");
   const graceHours = graceHoursFrom(config);
 
   let settings;
@@ -86,6 +90,7 @@ Deno.serve(async (req) => {
       wasInTrial: prior?.payment_type === "trial",
       entitledUntil: prior?.current_period_end ?? null,
       startedAt: prior?.subscription_started_at ?? subscription.authorized_at,
+      plan: planProps(settings, subscription),
     });
   }
 
@@ -107,5 +112,6 @@ Deno.serve(async (req) => {
     return fail("server_error", "Something went wrong. Please try again.", 500);
   }
 
-  return json({ user: entitlementPayload(asUserRow(userRow), graceHours) });
+  const row = asUserRow(userRow);
+  return json({ user: entitlementPayload(row, graceHours, planFor(config, row.plan_variant)) });
 });

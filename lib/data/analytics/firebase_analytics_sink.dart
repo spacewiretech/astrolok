@@ -108,7 +108,7 @@ class FirebaseAnalyticsSink implements Analytics {
         _send(
           'begin_checkout',
           () => _ga.logBeginCheckout(
-            value: _amountFor(properties[P.offerType]),
+            value: _amountFor(properties),
             currency: _currency,
           ),
         );
@@ -146,7 +146,7 @@ class FirebaseAnalyticsSink implements Analytics {
 
       try {
         await _ga.logPurchase(
-          value: _amountFor(properties[P.offerType]),
+          value: _amountFor(properties),
           currency: _currency,
           // Ties the purchase to the checkout attempt that produced it, which is also what GA4
           // de-duplicates purchases on.
@@ -172,7 +172,14 @@ class FirebaseAnalyticsSink implements Analytics {
 
   /// Anything other than an explicit `plan` is priced as the trial. Under-reporting costs a few
   /// rupees of attributed revenue; over-reporting teaches an optimiser to buy the wrong people.
-  double _amountFor(Object? offerType) => offerType == 'plan' ? _planAmount : _trialAmount;
+  ///
+  /// A plan purchase is valued at the account's own [P.planAmount] when it carries one, for the
+  /// same reason as `FacebookAnalytics._amountFor`: `app_config` only knows the ₹499 price.
+  double _amountFor(Map<String, Object?> properties) {
+    if (properties[P.offerType] != 'plan') return _trialAmount;
+    final planAmount = properties[P.planAmount];
+    return planAmount is num && planAmount > 0 ? planAmount.toDouble() : _planAmount;
+  }
 
   /// Binds Analytics and Crashlytics to the account id — never the phone number or the name.
   ///

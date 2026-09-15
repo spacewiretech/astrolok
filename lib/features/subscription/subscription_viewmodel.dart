@@ -155,12 +155,16 @@ class SubscriptionViewModel extends Notifier<SubscriptionState> {
       final apps = results[2] as List<UpiApp>;
       final remembered = results[3] as String?;
 
-      final offer = results[0] as SubscriptionOffer;
+      final user = results[1] as AppUser?;
+      // Priced at the account's own plan. New signups are split between two monthly prices and
+      // the configured label only knows one of them, so the offer takes the user's — the same
+      // answer `subscription-start` authorises against.
+      final offer = (results[0] as SubscriptionOffer).forPlan(user?.plan);
       final selected = _resolveSelection(apps, remembered);
 
       state = state.copyWith(
         offer: offer,
-        user: results[1] as AppUser?,
+        user: user,
         upiApps: apps,
         selectedAppId: selected,
         loading: false,
@@ -169,6 +173,7 @@ class SubscriptionViewModel extends Notifier<SubscriptionState> {
       _analytics.track(Ev.paywallOfferLoaded, {
         P.trialPrice: offer.trialPrice,
         P.planPrice: offer.planPrice,
+        P.planVariant: offer.planVariant,
         P.trialDays: offer.trialDays,
         // Whether this user is being shown the ₹3 trial or the plain monthly price. The two
         // convert nothing like each other, so a single paywall conversion rate is meaningless
@@ -269,6 +274,10 @@ class SubscriptionViewModel extends Notifier<SubscriptionState> {
       P.offerType: _offerType,
       // The label, not a number — see [_finish] on why the client books no revenue.
       P.amount: state.trialAvailable ? offer?.trialPrice : offer?.planPrice,
+      // Which price this account is on, and that price as a number. The ad sinks value a plan
+      // purchase at `plan_amount`, because `app_config` only knows one of the two prices.
+      P.planVariant: offer?.planVariant,
+      P.planAmount: offer?.planAmount,
       // `intent` opens the UPI app directly; `checkout` falls back to Cashfree's screen. The
       // second converts far worse, and without this they are one number.
       P.flow: state.selectedApp != null ? 'intent' : 'checkout',
@@ -430,6 +439,10 @@ class SubscriptionViewModel extends Notifier<SubscriptionState> {
       // The value captured at the tap, deliberately — see [_offerType]. The poll above has
       // already moved `state.user` past the purchase by the time this runs.
       P.offerType: _offerType,
+      // The same two `Subscribe Tapped` carries, so both ends of the funnel split by price. Read
+      // from the offer, which — unlike the user — the poll never replaces.
+      P.planVariant: state.offer?.planVariant,
+      P.planAmount: state.offer?.planAmount,
       P.totalSeconds: _attemptStartedAt == null
           ? null
           : DateTime.now().difference(_attemptStartedAt!).inSeconds,

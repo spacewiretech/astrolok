@@ -39,8 +39,9 @@ class ChatComposer extends StatefulWidget {
   /// the next rebuild.
   final VoidCallback onDraftRestored;
 
-  /// The rating card was answered: 1 (worst) to 5 (best), or null for a dismissal.
-  final ValueChanged<int?> onRate;
+  /// The rating card was answered: a score of 1 (worst) to 5 (best) with whatever was written
+  /// beside it, or null and null for a dismissal.
+  final void Function(int? rating, String? comment) onRate;
 
   @override
   State<ChatComposer> createState() => _ChatComposerState();
@@ -57,6 +58,14 @@ class _ChatComposerState extends State<ChatComposer> {
   /// answer has already gone to the server by then and nothing else needs to know.
   bool _thanked = false;
   Timer? _thanks;
+
+  /// The face picked on the rating card and the words written beside it, before Submit.
+  ///
+  /// Held here rather than in the card, which is taken off screen whenever a turn is in flight: a
+  /// user who sends another question halfway through writing must find their comment waiting when
+  /// the card comes back.
+  int? _picked;
+  final _feedback = TextEditingController();
 
   @override
   void didUpdateWidget(ChatComposer old) {
@@ -75,6 +84,7 @@ class _ChatComposerState extends State<ChatComposer> {
   void dispose() {
     _thanks?.cancel();
     _controller.dispose();
+    _feedback.dispose();
     _focus.dispose();
     super.dispose();
   }
@@ -87,16 +97,27 @@ class _ChatComposerState extends State<ChatComposer> {
     widget.onSend(message, entry);
   }
 
-  void _rate(int? rating) {
-    widget.onRate(rating);
-    // A dismissal is not thanked for; the card simply goes.
-    if (rating == null) return;
+  void _submitRating() {
+    final picked = _picked;
+    if (picked == null) return;
 
-    setState(() => _thanked = true);
+    widget.onRate(picked, _feedback.text);
+    _feedback.clear();
+    setState(() {
+      _picked = null;
+      _thanked = true;
+    });
     _thanks?.cancel();
     _thanks = Timer(_thanksFor, () {
       if (mounted) setState(() => _thanked = false);
     });
+  }
+
+  /// "Not now". Not thanked for: the card simply goes, and anything half-written goes with it.
+  void _dismissRating() {
+    widget.onRate(null, null);
+    _feedback.clear();
+    setState(() => _picked = null);
   }
 
   Future<void> _pickTime() async {
@@ -144,7 +165,14 @@ class _ChatComposerState extends State<ChatComposer> {
             child: state.showRating || _thanked
                 ? Padding(
                     padding: const EdgeInsets.only(bottom: 10),
-                    child: ChatRatingCard(thanked: _thanked, onRate: _rate),
+                    child: ChatRatingCard(
+                      thanked: _thanked,
+                      picked: _picked,
+                      feedback: _feedback,
+                      onPick: (rating) => setState(() => _picked = rating),
+                      onSubmit: _submitRating,
+                      onDismiss: _dismissRating,
+                    ),
                   )
                 : const SizedBox(width: double.infinity),
           ),

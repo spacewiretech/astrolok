@@ -36,7 +36,12 @@ from here. This is where the credentials, the billing state machine and the mode
   against Cashfree (the authority) and writes `subscriptions` + `users`. Exports:
   `syncSubscription`, `userUpdatesFor`, `recordPayment`, `reconcilePayments`,
   `refreshPaymentTotals`, `recordRefund`, `recordDispute`, `trackCancellation`,
-  `latestSubscription`, `staleSweepCutoff`, `isResumable`, `paymentKind`, `buysAMonth`.
+  `latestSubscription`, `staleSweepCutoff`, `isResumable`, `paymentKind`, `buysAMonth`, `planProps`.
+- `pricing.ts` — the ₹499 / ₹299 price split. Which plan an account pays (`planFor`, the one answer
+  both the paywall payload and `subscription-start` read), whether new signups alternate
+  (`splitEnabled`), and the once-per-account assignment at signup (`assignPlanVariant`). Exports:
+  `PlanVariant`, `DEFAULT_VARIANT`, `PricingPlan`, `PricingPlans`, `pricingPlans`, `planFor`,
+  `splitEnabled`, `planPayload`, `assignPlanVariant`.
 
 **The readings**
 - `gemini.ts` — the model transport (image reads + multi-turn chat) and the shared status/focus
@@ -56,6 +61,9 @@ from here. This is where the credentials, the billing state machine and the mode
   `buildUserPrompt`, `normaliseChatReply`. The prompt is a **function**, not a constant: it
   varies by `chat_prompt_version` (the rollback) and by the language of the turn. The craft
   exists twice on purpose — see the file header before factoring the two together.
+- `chat_feedback.ts` — the written answer beside the chat rating. Exports:
+  `MAX_FEEDBACK_COMMENT_CHARS` (500 code points, matching the column) and
+  `normaliseFeedbackComment`, which tidies whitespace, drops blanks and never splits an emoji.
 - `chat_language.ts` — which language Astro answers in. Exports: `LANGUAGES_KEY`,
   `DEFAULT_LANGUAGE_KEY`, `BUILT_IN_LANGUAGES`, `supportedLanguages`, `isSupported`,
   `resolveLanguage`, `languageInstruction`, `languageBlock`. The list is `app_config`, so adding
@@ -68,6 +76,11 @@ from here. This is where the credentials, the billing state machine and the mode
 **Analytics**
 - `mixpanel.ts` — server-side events the client can never observe (renewals, holds,
   chargebacks). Exports: `configureMixpanel`, `mixpanelConfigured`, `trackServer`, `setProfile`.
+- `facebook_capi.ts` — Meta Conversions API, and deliberately one event wide: the recurring debit
+  reported as a `Purchase`, which the device can never see. Not a second analytics sink — Meta's
+  catalogue is an ad-targeting surface, so the same rule `facebook_analytics.dart` follows on the
+  client holds here. Exports: `configureFacebookCapi`, `facebookCapiConfigured`,
+  `reportRenewalPurchase`.
 
 **Trial allowance**
 - `trial_reading_limit.ts` — one palm and one face reading per trial, checked by both reading

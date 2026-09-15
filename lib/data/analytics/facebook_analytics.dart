@@ -166,7 +166,7 @@ class FacebookAnalytics implements Analytics {
           // one who subscribed months ago. Not awaited: this runs on the tap.
           unawaited(_rememberCheckout(properties[P.offerType]));
           _events.logInitiatedCheckout(
-            totalPrice: _amountFor(properties[P.offerType]),
+            totalPrice: _amountFor(properties),
             currency: _currency,
             contentId: 'astrolok_subscription',
             numItems: 1,
@@ -236,7 +236,7 @@ class FacebookAnalytics implements Analytics {
         return;
       }
 
-      final amount = _amountFor(properties[P.offerType]);
+      final amount = _amountFor(properties);
       final orderId = properties[P.paymentAttemptId]?.toString() ??
           'astrolok_${DateTime.now().millisecondsSinceEpoch}';
 
@@ -326,7 +326,16 @@ class FacebookAnalytics implements Analytics {
   /// somehow arrives without an `offer_type` under-reports rather than inflating ROAS — and an
   /// optimiser fed an inflated value learns to buy the wrong people, which is far more expensive
   /// to undo than a conversion booked a few rupees light.
-  double _amountFor(Object? offerType) => offerType == 'plan' ? _planAmount : _trialAmount;
+  ///
+  /// A plan purchase carries the account's own monthly price as [P.planAmount], and it wins over
+  /// the configured one: new signups are split between two prices and `app_config` only knows
+  /// ₹499. Without it — the resume reconciliation, which has only the offer type on disk — the
+  /// configured amount stands in.
+  double _amountFor(Map<String, Object?> properties) {
+    if (properties[P.offerType] != 'plan') return _trialAmount;
+    final planAmount = properties[P.planAmount];
+    return planAmount is num && planAmount > 0 ? planAmount.toDouble() : _planAmount;
+  }
 
   /// Hands Facebook what it needs to match this user to the person who saw the ad.
   ///

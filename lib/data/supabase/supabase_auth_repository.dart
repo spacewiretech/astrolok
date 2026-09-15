@@ -27,7 +27,14 @@ class SupabaseAuthRepository implements AuthRepository {
   @override
   Future<AppUser> verifyOtp({required String phone, required String code}) async {
     final data = await _guard(
-      () => _functions.call('verify-otp', body: {'mobile': phone, 'otp': code}),
+      () => _functions.call('verify-otp', body: {
+        'mobile': phone,
+        'otp': code,
+        // This build prices the paywall from the user payload, which is what makes it safe for the
+        // server to put a new account on either side of the price split. Without the flag it keeps
+        // them on the configured price, the one an older build would show.
+        'plan_variants': true,
+      }),
     );
 
     final token = data['token'] as String?;

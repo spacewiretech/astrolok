@@ -1,5 +1,6 @@
 import { cashfreeSettings } from "../_shared/cashfree.ts";
 import { configSetting, loadConfig } from "../_shared/config.ts";
+import { configureFacebookCapi } from "../_shared/facebook_capi.ts";
 import { configureMixpanel } from "../_shared/mixpanel.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { serviceClient } from "../_shared/db.ts";
@@ -48,6 +49,7 @@ Deno.serve(async (req) => {
   const db = serviceClient();
   const config = await loadConfig(db);
   configureMixpanel(config, "subscription-reconcile");
+  configureFacebookCapi(config, "subscription-reconcile");
 
   // Fail closed: with no secret configured this endpoint would be an open invitation to make
   // us hammer Cashfree on demand.

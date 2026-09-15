@@ -141,7 +141,7 @@ class FakeChatRepository implements ChatRepository {
   }
 
   @override
-  Future<void> rate({required String threadId, int? rating}) async {
+  Future<void> rate({required String threadId, int? rating, String? comment}) async {
     await Future<void>.delayed(const Duration(milliseconds: 120));
     _rated = true;
   }

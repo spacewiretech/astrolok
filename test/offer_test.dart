@@ -1,5 +1,6 @@
 import 'package:astrolok/data/fake/fake_session.dart';
 import 'package:astrolok/data/fake/fake_subscription_repository.dart';
+import 'package:astrolok/data/models/app_user.dart';
 import 'package:astrolok/data/models/subscription_offer.dart';
 import 'package:astrolok/data/repositories/app_config_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -94,6 +95,36 @@ void main() {
 
       const many = SubscriptionOffer(trialPrice: '₹3', planPrice: '₹249', trialDays: 3);
       expect(many.consent, contains('after 3 days.'));
+    });
+
+    test('an account on the ₹299 plan is quoted ₹299 everywhere the price appears', () {
+      const offer = SubscriptionOffer(
+        trialPrice: '₹3',
+        planPrice: '₹499',
+        strikePrice: '₹499',
+        trialDays: 1,
+      );
+
+      final priced = offer.forPlan(
+        const UserPlan(variant: 'plan_299', priceLabel: '₹299', amount: 299),
+      );
+
+      // The consent line is a UPI Autopay requirement: it has to state what the mandate will
+      // actually take, not the configured price.
+      expect(priced.consent, contains('₹299/month'));
+      expect(priced.consent, isNot(contains('₹499')));
+      expect(priced.planPrice, '₹299');
+      expect(priced.strikePrice, '₹299');
+      expect(priced.trialPrice, '₹3');
+      expect(priced.planVariant, 'plan_299');
+      expect(priced.planAmount, 299);
+    });
+
+    test('with no plan from the server the configured price stands', () {
+      const offer = SubscriptionOffer(trialPrice: '₹3', planPrice: '₹499', trialDays: 1);
+
+      expect(offer.forPlan(null), same(offer));
+      expect(offer.forPlan(null).planVariant, isNull);
     });
   });
 }

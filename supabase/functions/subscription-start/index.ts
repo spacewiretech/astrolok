@@ -8,6 +8,7 @@ import {
   snapshotOf,
 } from "../_shared/cashfree.ts";
 import { loadConfig } from "../_shared/config.ts";
+import { configureFacebookCapi } from "../_shared/facebook_capi.ts";
 import { configureMixpanel } from "../_shared/mixpanel.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
@@ -19,9 +20,11 @@ import {
   trialAvailable,
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
+import { planFor } from "../_shared/pricing.ts";
 import {
   isResumable,
   latestSubscription,
+  planProps,
   syncSubscription,
   trackCancellation,
 } from "../_shared/subscription_sync.ts";
@@ -30,11 +33,14 @@ import {
  * Opens a Cashfree UPI Autopay mandate, on one of two offers.
  *
  *  * An account that has never authorised a mandate — `payment_type = 'none'` — gets the trial:
- *    ₹3 now, then ₹499/month starting after the trial days.
- *  * Anyone else has already spent their trial, so they pay ₹499 now and ₹499/month from a month
- *    out. The full price is taken as the *authorisation* amount because Cashfree will not
+ *    ₹3 now, then the plan price monthly, starting after the trial days.
+ *  * Anyone else has already spent their trial, so they pay the plan price now and monthly from a
+ *    month out. The full price is taken as the *authorisation* amount because Cashfree will not
  *    schedule a first debit less than 24 hours ahead — charging it up front is the only way to
  *    take money at mandate time at all.
+ *
+ * The plan price is the account's own side of the ₹499 / ₹299 split: `planFor` in
+ * `_shared/pricing.ts`, the same answer the paywall was priced from.
  *
  * Which of the two applies is decided here from the user's own row, never from the request. This
  * used to be a display-only distinction the paywall made on its own, which meant a returning
@@ -71,6 +77,7 @@ Deno.serve(async (req) => {
 
   const config = await loadConfig(db);
   configureMixpanel(config, "subscription-start");
+  configureFacebookCapi(config, "subscription-start");
   const graceHours = graceHoursFrom(config);
 
   let settings;
@@ -101,7 +108,7 @@ Deno.serve(async (req) => {
   if (isEntitled(user, graceHours)) {
     return json({
       status: "entitled",
-      user: entitlementPayload(user, graceHours),
+      user: entitlementPayload(user, graceHours, planFor(config, user.plan_variant)),
     });
   }
 
@@ -141,7 +148,11 @@ Deno.serve(async (req) => {
       if (isEntitled(synced.user, graceHours)) {
         return json({
           status: "entitled",
-          user: entitlementPayload(synced.user, graceHours),
+          user: entitlementPayload(
+            synced.user,
+            graceHours,
+            planFor(config, synced.user.plan_variant),
+          ),
         });
       }
       // Not entitled, but the row may still have moved: this is where a `none` account that
@@ -160,19 +171,28 @@ Deno.serve(async (req) => {
   }
 
   // The one decision that says what this user is about to be charged, taken from the freshest
-  // view of their row that exists.
+  // view of their row that exists. The plan is the account's own side of the price split — the
+  // same `planFor` answer the paywall was priced from, so the consent line and the mandate agree.
   const offerTrial = trialAvailable(user);
-  const authorizationAmount = offerTrial ? settings.trialAmount : settings.recurringAmount;
+  const plan = planFor(config, user.plan_variant);
+  const authorizationAmount = offerTrial ? settings.trialAmount : plan.recurringAmount;
 
-  // Fails closed rather than authorising ₹0. A blank or unreadable `cashfree_recurring_amount`
-  // used to cost nothing here — it only named a future debit, and Cashfree's own plan was the
-  // authority on that. It now decides an amount charged immediately, so a misconfigured row
-  // would hand a returning subscriber a free month.
+  // Fails closed rather than authorising ₹0. A blank or unreadable recurring amount used to cost
+  // nothing here — it only named a future debit, and Cashfree's own plan was the authority on
+  // that. It now decides an amount charged immediately, so a misconfigured row would hand a
+  // returning subscriber a free month.
   if (!offerTrial && !(authorizationAmount > 0)) {
     console.error(
-      "cashfree_recurring_amount is not a positive number; refusing to authorise a " +
-        "returning subscriber for nothing",
+      `the recurring amount for ${plan.variant} is not a positive number; refusing to ` +
+        "authorise a returning subscriber for nothing",
     );
+    return fail("payment_failed", "Payments are temporarily unavailable.", 503);
+  }
+
+  // Refused here rather than at Cashfree, which would only reject it after a local row had been
+  // written for a mandate that can never open.
+  if (!plan.planId) {
+    console.error(`no Cashfree plan id is configured for ${plan.variant}`);
     return fail("payment_failed", "Payments are temporarily unavailable.", 503);
   }
 
@@ -230,6 +250,7 @@ Deno.serve(async (req) => {
       cfStatus: "CANCELLED",
       fromStatus: existing.status,
       reason: "replaced_by_new_mandate",
+      plan: planProps(settings, existing),
     });
   }
 
@@ -254,10 +275,11 @@ Deno.serve(async (req) => {
     .insert({
       user_id: userId,
       subscription_id: subscriptionId,
-      plan_id: settings.planId,
+      plan_id: plan.planId,
+      plan_variant: plan.variant,
       status: "INITIALIZED",
       authorization_amount: authorizationAmount,
-      recurring_amount: settings.recurringAmount,
+      recurring_amount: plan.recurringAmount,
       first_charge_time: firstChargeTime.toISOString(),
       session_expiry: sessionExpiry.toISOString(),
     })
@@ -277,6 +299,7 @@ Deno.serve(async (req) => {
       customerPhone: user.mobile_no,
       customerEmail: syntheticEmail(user.mobile_no),
       authorizationAmount,
+      planId: plan.planId,
       firstChargeTime,
       sessionExpiry,
       // The SDK returns control through its own callback; this only matters for the web
@@ -335,7 +358,8 @@ Deno.serve(async (req) => {
     authorization_amount: authorizationAmount,
     // Display only. The recurring amount that is actually charged lives in the Cashfree plan.
     trial_amount: settings.trialAmount,
-    recurring_amount: settings.recurringAmount,
+    recurring_amount: plan.recurringAmount,
     trial_days: settings.trialDays,
+    plan_variant: plan.variant,
   });
 });

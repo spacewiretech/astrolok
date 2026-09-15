@@ -257,14 +257,18 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
     });
   }
 
-  /// Answers the rating card: 1 (worst) to 5 (best), or null for a dismissal.
+  /// Answers the rating card: 1 (worst) to 5 (best) with an optional written [comment], or null
+  /// for a dismissal, which never carries one.
   ///
   /// The card goes before the request does, and does not come back this run whatever the request
   /// does. A rating is not worth an error on screen: a failure is logged and dropped, and at worst
   /// the server asks again on some later reply.
-  Future<void> rate(int? rating) async {
+  Future<void> rate(int? rating, {String? comment}) async {
     final threadId = state.threadId;
     if (!state.ratingDue || threadId == null) return;
+
+    final trimmed = comment?.trim() ?? '';
+    final written = rating == null || trimmed.isEmpty ? null : trimmed;
 
     ref.read(chatRatingDoneProvider.notifier).state = true;
     state = state.copyWith(ratingDue: false);
@@ -272,12 +276,18 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
     analytics.track(rating == null ? Ev.chatRatingDismissed : Ev.chatRated, {
       P.threadId: threadId,
       P.rating: ?rating,
+      // Whether anything was written, and how much — never the words. Free text stays out of
+      // Mixpanel the same way chat messages do; the comment itself is read in `chat_feedback`.
+      if (rating != null) P.hasComment: written != null,
+      P.commentChars: ?written?.length,
       P.turnIndex: state.messages.where((m) => m.isUser).length,
       P.chatLanguage: ref.read(languageProvider),
     });
 
     try {
-      await ref.read(chatRepositoryProvider).rate(threadId: threadId, rating: rating);
+      await ref
+          .read(chatRepositoryProvider)
+          .rate(threadId: threadId, rating: rating, comment: written);
     } catch (error) {
       debugPrint('[chat] could not save the rating: $error');
     }

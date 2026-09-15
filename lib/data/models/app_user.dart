@@ -72,6 +72,45 @@ enum BillingState {
       };
 }
 
+/// The monthly price this account pays — its own, never the other plan's.
+///
+/// New signups are split between two prices, and the server sends each account only the one it is
+/// on. Null from a server or a cache that predates the split, where the paywall's configured price
+/// is the right answer: only a build that reads this field can be put on the other price.
+@immutable
+class UserPlan {
+  const UserPlan({required this.variant, required this.priceLabel, required this.amount});
+
+  /// `plan_499` or `plan_299`. What every analytics breakdown of the split groups by.
+  final String variant;
+
+  /// Formatted with the currency symbol, e.g. `₹299`.
+  final String priceLabel;
+
+  /// The monthly amount as a number, for the ad networks' conversion values.
+  final double amount;
+
+  /// Null rather than a half-filled plan, so a malformed payload falls back to the configured price
+  /// instead of putting a blank one on the consent line.
+  static UserPlan? fromServer(Object? raw) {
+    if (raw is! Map) return null;
+    final variant = raw['variant'];
+    final label = raw['price_label'];
+    final amount = raw['amount'];
+    if (variant is! String || variant.isEmpty) return null;
+    if (label is! String || label.trim().isEmpty) return null;
+    if (amount is! num || amount <= 0) return null;
+    return UserPlan(variant: variant, priceLabel: label.trim(), amount: amount.toDouble());
+  }
+
+  /// In the server's own shape, so the cached copy reads back through [fromServer].
+  Map<String, Object> toJson() => {
+        'variant': variant,
+        'price_label': priceLabel,
+        'amount': amount,
+      };
+}
+
 @immutable
 class AppUser {
   const AppUser({
@@ -89,6 +128,7 @@ class AppUser {
     this.chatLanguage,
     this.birthTime,
     this.chart,
+    this.plan,
   });
 
   final String id;
@@ -146,6 +186,10 @@ class AppUser {
   /// What the server computed from [birthDate] and [birthTime]. Null without a date of birth, or
   /// from a server that predates the field.
   final BirthChart? chart;
+
+  /// This account's monthly price, from the server. Null from a server or a cache that predates the
+  /// price split — see [UserPlan].
+  final UserPlan? plan;
 
   bool get hasName => name.trim().isNotEmpty;
 
@@ -247,6 +291,7 @@ class AppUser {
           : null,
       birthTime: parseBirthTime(raw['birth_time']),
       chart: BirthChart.fromServer(raw['chart']),
+      plan: UserPlan.fromServer(raw['plan']),
     );
   }
 
@@ -301,6 +346,7 @@ class AppUser {
     String? chatLanguage,
     String? birthTime,
     BirthChart? chart,
+    UserPlan? plan,
 
     /// Explicit, because null is a meaningful value here — it means the mandate recovered.
     bool clearBillingState = false,
@@ -327,6 +373,7 @@ class AppUser {
       chatLanguage: clearChatLanguage ? null : (chatLanguage ?? this.chatLanguage),
       birthTime: clearBirthTime ? null : (birthTime ?? this.birthTime),
       chart: chart ?? this.chart,
+      plan: plan ?? this.plan,
     );
   }
 }

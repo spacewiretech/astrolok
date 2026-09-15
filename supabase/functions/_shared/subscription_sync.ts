@@ -30,7 +30,9 @@ import {
   WebhookRefund,
 } from "./cashfree.ts";
 import { asUserRow, USER_COLUMNS, UserRow } from "./entitlement.ts";
+import { facebookCapiConfigured, reportRenewalPurchase } from "./facebook_capi.ts";
 import { incrementProfile, setProfile, trackServer } from "./mixpanel.ts";
+import { DEFAULT_VARIANT, PricingPlan } from "./pricing.ts";
 import { qualifyReferral } from "./referral.ts";
 
 export interface SubscriptionRow {
@@ -45,15 +47,45 @@ export interface SubscriptionRow {
   authorized_at: string | null;
   next_schedule_date: string | null;
   current_period_end?: string | null;
+  /** Which side of the price split this mandate was opened on. Null only on a row this predates. */
+  plan_variant?: string | null;
 }
 
 export const SUBSCRIPTION_COLUMNS =
   "id, user_id, subscription_id, cf_subscription_id, plan_id, status, session_id, " +
-  "session_expiry, authorized_at, next_schedule_date";
+  "session_expiry, authorized_at, next_schedule_date, plan_variant";
 
 /** See [asUserRow] — supabase-js cannot infer a row type from a non-literal select string. */
 export function asSubscriptionRow(row: unknown): SubscriptionRow {
   return row as SubscriptionRow;
+}
+
+/**
+ * The configured plan a mandate was opened against, matched on its Cashfree plan id.
+ *
+ * Undefined for a mandate on a plan id that is no longer configured — an old ₹249 mandate, say —
+ * which is why every caller falls back rather than assumes.
+ */
+function planOf(
+  settings: CashfreeSettings,
+  row: Pick<SubscriptionRow, "plan_id">,
+): PricingPlan | undefined {
+  return (settings.plans ?? []).find((plan) => plan.planId === row.plan_id);
+}
+
+/**
+ * The plan properties every subscription event carries, so revenue, renewals and churn can each be
+ * broken down by which side of the price split the account is on.
+ */
+export function planProps(
+  settings: CashfreeSettings,
+  row: Pick<SubscriptionRow, "plan_id" | "plan_variant">,
+): Record<string, unknown> {
+  return {
+    plan_variant: row.plan_variant ?? DEFAULT_VARIANT,
+    plan_id: row.plan_id,
+    plan_name: planOf(settings, row)?.planName || null,
+  };
 }
 
 /** Postgres unique-violation. Surfaces when two mandates race to become the live one. */
@@ -228,6 +260,8 @@ export interface CancellationFacts {
   recurringAmount?: number | null;
   /** For `days_subscribed`, computed here so no report has to do date arithmetic. */
   startedAt?: string | null;
+  /** From [planProps]: which side of the price split the mandate that ended was on. */
+  plan?: Record<string, unknown> | null;
 }
 
 /**
@@ -263,6 +297,7 @@ export async function trackCancellation(facts: CancellationFacts): Promise<void>
       entitled_until: facts.entitledUntil ?? null,
       recurring_amount: facts.recurringAmount ?? null,
       days_subscribed: daysSubscribed,
+      ...(facts.plan ?? {}),
     },
   });
 }
@@ -309,7 +344,20 @@ export function buysAMonth(
 ): boolean {
   if (kind === "UNKNOWN") return false;
   if (kind === "RECURRING") return true;
-  return amount !== null && amount >= settings.recurringAmount;
+  // Measured against the cheapest plan, not the ₹499 one: new signups are split between ₹499 and
+  // ₹299, and a returning ₹299 subscriber's ₹299 authorisation is their month. The trial-fee check
+  // stands on its own, so a blank plan amount reading as 0 can never turn the ₹3 into a month.
+  return amount !== null &&
+    amount > settings.trialAmount &&
+    amount >= cheapestPlanAmount(settings);
+}
+
+/** The lowest monthly price any configured plan charges, or the ₹499 plan's when none says. */
+function cheapestPlanAmount(settings: CashfreeSettings): number {
+  const amounts = (settings.plans ?? [])
+    .map((plan) => plan.recurringAmount)
+    .filter((amount) => amount > 0);
+  return amounts.length > 0 ? Math.min(...amounts) : settings.recurringAmount;
 }
 
 /**
@@ -381,6 +429,9 @@ export async function recordPayment(
       // is distinguishable from a genuine first-time renewal even before Mixpanel dedupes.
       already_credited: alreadyCredited,
       trigger: eventType ?? "reconcile",
+      // Which side of the price split the charge belongs to, so revenue, conversion and renewal
+      // can each be compared between ₹499 and ₹299.
+      ...planProps(settings, subscription),
     },
   });
 
@@ -446,6 +497,66 @@ export async function recordPayment(
     has_ever_subscribed: true,
     last_payment_at: payment.paymentTime,
     last_payment_status: payment.status,
+    plan_variant: subscription.plan_variant ?? DEFAULT_VARIANT,
+  });
+
+  // The ad network's half of the same news. Everything above has already established that this is
+  // a real charge, newly credited — which is exactly the condition a conversion may be reported
+  // under, so the guards are shared rather than repeated.
+  //
+  // `RECURRING` only, and that restriction is load-bearing. This line is also reached by a
+  // returning subscriber's full-price *authorisation*, and the app already reports that one from
+  // `FacebookAnalytics` as it happens. Reporting it again here would double-count it: the client
+  // sends its own `fb_order_id` and Meta cannot match that against a server-side `event_id`.
+  if (kind === "RECURRING") {
+    await reportRenewal(db, subscription, asUserRow(user), payment, settings, paidAt);
+  }
+}
+
+/**
+ * Tells Meta about a renewal, and looks up the one thing the payment path does not already hold.
+ *
+ * Split out so `recordPayment` keeps reading as the money path it is. The `push_tokens` read is
+ * deliberately behind [facebookCapiConfigured] — a deployment with no dataset configured should
+ * not pay for a query whose only consumer is switched off.
+ */
+async function reportRenewal(
+  db: SupabaseClient,
+  subscription: SubscriptionRow,
+  user: UserRow,
+  payment: WebhookPayment,
+  settings: CashfreeSettings,
+  paidAt: string | null,
+): Promise<void> {
+  if (!facebookCapiConfigured()) return;
+
+  // Meta's device array needs to say Android or iOS, and no column on `users` records which one.
+  // The most recent push token is the closest thing the schema has to an answer; a user who never
+  // granted notifications has none, and `reportRenewalPurchase` falls back to Android — which is
+  // where the overwhelming bulk of this audience is.
+  const { data: device } = await db
+    .from("push_tokens")
+    .select("platform")
+    .eq("user_id", subscription.user_id)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  await reportRenewalPurchase({
+    userId: subscription.user_id,
+    // The strongest identifier this system has for Meta. `users` is already loaded by the caller,
+    // so this costs nothing — and without it the event falls back to `external_id` alone, which
+    // matches materially worse.
+    mobileNo: user.mobile_no,
+    cfPaymentId: payment.cfPaymentId,
+    // Cashfree confirming what it took, not the price label the paywall displays. The fallback is
+    // the price of the plan this mandate is on, only reached on a payload whose amount would not
+    // parse — so a ₹299 renewal is never reported to Meta at ₹499.
+    amount: payment.amount ?? planOf(settings, subscription)?.recurringAmount ??
+      settings.recurringAmount,
+    currency: payment.currency,
+    paidAt,
+    platform: (device?.platform as string | null) ?? null,
   });
 }
 
@@ -730,6 +841,7 @@ export async function syncSubscription(
         recurring_amount: snapshot.recurringAmount,
         next_billing_at: snapshot.nextScheduleDate,
         authorized_at: snapshot.authorizedAt,
+        ...planProps(settings, row),
       },
     });
 
@@ -748,11 +860,13 @@ export async function syncSubscription(
         entitledUntil: user.current_period_end,
         recurringAmount: snapshot.recurringAmount,
         startedAt: user.subscription_started_at ?? snapshot.authorizedAt,
+        plan: planProps(settings, row),
       });
     }
 
     await setProfile(row.user_id, {
       subscription_status: snapshot.status,
+      plan_variant: row.plan_variant ?? DEFAULT_VARIANT,
       billing_state: updates.billing_state ?? null,
       next_billing_at: snapshot.nextScheduleDate,
       ...(updates.payment_type ? { payment_type: updates.payment_type } : {}),
@@ -844,6 +958,7 @@ async function resolveDuplicateActive(
       cfStatus: "CANCELLED",
       fromStatus: row.status,
       reason: "duplicate_mandate",
+      plan: planProps(settings, row),
     });
   }
 

@@ -105,10 +105,10 @@ class SupabaseChatRepository implements ChatRepository {
   }
 
   @override
-  Future<void> rate({required String threadId, int? rating}) async {
+  Future<void> rate({required String threadId, int? rating, String? comment}) async {
     await _call('chat-history', {
       // An explicit null is a dismissal, which the server records so the card is not raised again.
-      'rate': {'thread_id': threadId, 'rating': rating},
+      'rate': {'thread_id': threadId, 'rating': rating, 'comment': comment},
     }, null);
   }
 

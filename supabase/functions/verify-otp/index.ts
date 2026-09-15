@@ -12,6 +12,7 @@ import {
   graceHoursFrom,
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
+import { assignPlanVariant, planFor, splitEnabled } from "../_shared/pricing.ts";
 import { DEV_OTP, devOtpEnabled, warnDevOtp } from "../_shared/dev_otp.ts";
 import {
   consumeReviewVerifyQuota,
@@ -35,8 +36,11 @@ Deno.serve(async (req) => {
 
   let mobile: unknown;
   let otp: unknown;
+  // Sent by builds whose paywall prices itself from the user payload — the only builds whose new
+  // accounts can be put on the ₹299 side of the price split. See the assignment below.
+  let planVariants: unknown;
   try {
-    ({ mobile, otp } = await req.json());
+    ({ mobile, otp, plan_variants: planVariants } = await req.json());
   } catch {
     return fail("invalid_request", "Malformed request.", 400);
   }
@@ -118,6 +122,20 @@ Deno.serve(async (req) => {
 
   const row = asUserRow(user);
 
+  // A brand new account has no plan yet, and this is where it gets one — once, before anything has
+  // shown it a price. A returning account already has one, so sign-in costs it no extra query.
+  //
+  // The split only applies to a build that says it prices the paywall from this payload. An older
+  // build reads the ₹499 label from config, so splitting its signups would promise ₹499 on the
+  // consent line and open a ₹299 mandate.
+  if (!row.plan_variant) {
+    row.plan_variant = await assignPlanVariant(
+      db,
+      row.user_id,
+      splitEnabled(config) && planVariants === true,
+    );
+  }
+
   const token = newSessionToken();
   const { error: sessionError } = await db.from("user_sessions").insert({
     token_hash: await hashToken(token),
@@ -134,7 +152,7 @@ Deno.serve(async (req) => {
   // A brand new row is `trial` with a null trial_ends_at, which entitlementPayload reports as
   // entitled: false — so a fresh signup lands on the paywall, not in the app.
   return json({
-    user: entitlementPayload(row, graceHoursFrom(config)),
+    user: entitlementPayload(row, graceHoursFrom(config), planFor(config, row.plan_variant)),
     token,
   });
 });

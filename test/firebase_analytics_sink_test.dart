@@ -192,6 +192,14 @@ void main() {
       expect(checkout.args['value'], 499.0);
       expect(checkout.args['currency'], 'INR');
     });
+
+    test("a plan checkout is valued at the account's own price when it carries one", () async {
+      // New signups are split between ₹499 and ₹299, and `app_config` only knows ₹499.
+      sink().track(Ev.subscribeTapped, {P.offerType: 'plan', P.planAmount: 299.0});
+      await pumpEventQueue();
+
+      expect(named('logBeginCheckout').single.args['value'], 299.0);
+    });
   });
 
   group('purchases', () {

@@ -1,6 +1,7 @@
 import { loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
+import { configureFacebookCapi } from "../_shared/facebook_capi.ts";
 import { configureMixpanel, setProfile, trackServer } from "../_shared/mixpanel.ts";
 import { normaliseReferralCode, resolveAcquisition } from "../_shared/referral.ts";
 
@@ -44,6 +45,7 @@ Deno.serve(async (req) => {
 
   const config = await loadConfig(db);
   configureMixpanel(config, "attribution-report");
+  configureFacebookCapi(config, "attribution-report");
 
   const params = body.params && typeof body.params === "object"
     ? body.params as Record<string, string>

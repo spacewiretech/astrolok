@@ -51,6 +51,9 @@ class SessionStore {
           'birthTime': user.birthTime,
           // In the server's own shape, so it reads back through the same parser as a fresh one.
           'chart': user.chart?.toJson(),
+          // Server shape too. The paywall prices itself from this, so an offline relaunch must not
+          // fall back to the configured price for an account on the other side of the split.
+          'plan': user.plan?.toJson(),
         }),
       );
 
@@ -93,6 +96,9 @@ class SessionStore {
         // and the next `me` fills them in. Neither is a reason to bump `_version` either.
         birthTime: AppUser.parseBirthTime(map['birthTime']),
         chart: BirthChart.fromServer(map['chart']),
+        // Absent in a cache written before the price split, where null — the configured price — is
+        // the right answer. Not a reason to bump `_version` either.
+        plan: UserPlan.fromServer(map['plan']),
       ).recomputeOffline();
     } catch (_) {
       // A cache written by an older build is not worth crashing over.

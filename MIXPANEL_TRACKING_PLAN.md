@@ -82,7 +82,7 @@ Gathered once at boot and merged into every event, so no call site has to pass t
 | `queued_lag_ms` | number | Present only when the event waited for the Mixpanel token |
 | `preferred_upi_app` | string | Set once a UPI app is chosen on the paywall — which app a user pays with predicts whether the mandate succeeds |
 
-**Identity super properties** (added on `identify`, **dropped on sign-out** so the next user of the handset does not inherit the last one's account): `is_signed_in`, `payment_type`, `entitled`, `in_trial`, `has_ever_subscribed`, `billing_state`, `has_birth_date`.
+**Identity super properties** (added on `identify`, **dropped on sign-out** so the next user of the handset does not inherit the last one's account): `is_signed_in`, `payment_type`, `entitled`, `in_trial`, `has_ever_subscribed`, `billing_state`, `has_birth_date`, `plan_variant` (`plan_499` / `plan_299` — which side of the price split the account is on, see §9.1; absent for a payload from before the split).
 
 **Deliberately absent:** device model, manufacturer, OS version, screen size, carrier, library version, and the city/region/country Mixpanel derives from the request IP. The native SDK already attaches all of these. Adding them here would not add a field — it would add a *second* field under a non-standard name, invisible to every built-in Mixpanel report.
 
@@ -165,7 +165,8 @@ All in `lib/features/onboarding/onboarding_viewmodel.dart` and `lib/features/bir
 | `OTP Entry Started` | First keystroke in the OTP field | — |
 | `OTP Resend Requested` | Resend accepted | `resends_used` |
 | `OTP Resend Blocked` | Resend refused. Separates "the SMS never arrived and they are out of resends" from "they tapped twice inside the cooldown" | `reason` (`exhausted` / `cooldown`), `seconds_remaining`, `resends_used` |
-| `OTP Submitted` | Verify attempt starts | `entry_method` (`button` / autofill), `attempts_used`, `resends_used` |
+| `OTP Autofill Result` | Android finished trying to read the code from the SMS (Android only) | `method` (`sms_consent` — one-tap Allow sheet / `sms_retriever` — zero tap, needs the app hash in the SMS), `result` (`filled` / `none` — declined, timed out, or no matching SMS) |
+| `OTP Submitted` | Verify attempt starts | `entry_method` (`button` / `auto_complete` — typed or Gboard suggestion / `sms_consent` / `sms_retriever`), `attempts_used`, `resends_used` |
 | `OTP Verified` | Code accepted | `entry_method`, `attempts_used`, `resends_used`, `is_new_user`, `has_name`, `has_birth_date`, `entitled`, `destination`, `seconds_to_verify` |
 | `OTP Verification Failed` | Code rejected, expired or the send failed | `reason` (`expired` / `send_failed` / …), `attempts_used`, `attempts_left`, `resends_used`, `error`, `seconds_to_verify` |
 | `OTP Attempts Exhausted` | The attempt budget runs out | `resends_used` |
@@ -192,7 +193,7 @@ The single most instrumented flow in the app. **Every event in one checkout atte
 | Event | Fires when | Where | Key properties |
 |-------|-----------|-------|----------------|
 | `Paywall Viewed` | The paywall paints (once per visit) — **the denominator of the purchase funnel** | `subscription_view.dart` | `trial_available`, `state` (`loaded` / `error`), `upi_app_count`, `payment_type` |
-| `Paywall Offer Loaded` | Offer, user and UPI app list all resolve | `subscription_viewmodel.dart` | `trial_price`, `plan_price`, `trial_days`, `trial_available`, `upi_app_count` (**zero here means the Cashfree checkout screen stands in for the one-tap intent — a materially worse flow**), `ms` |
+| `Paywall Offer Loaded` | Offer, user and UPI app list all resolve | `subscription_viewmodel.dart` | `trial_price`, `plan_price` (the account's own price — ₹499 or ₹299), `plan_variant`, `trial_days`, `trial_available`, `upi_app_count` (**zero here means the Cashfree checkout screen stands in for the one-tap intent — a materially worse flow**), `ms` |
 | `Paywall Offer Load Failed` | Any of the three fail | `subscription_viewmodel.dart` | `error`, `ms` |
 | `Promo Video Toggled` | Mute/unmute on the promo video | `subscription_view.dart` | `muted` |
 
@@ -210,7 +211,7 @@ The single most instrumented flow in the app. **Every event in one checkout atte
 
 | Event | Fires when | Where | Key properties |
 |-------|-----------|-------|----------------|
-| **`Subscribe Tapped`** | The subscribe button is pressed and accepted | `subscription_viewmodel.dart` | `payment_attempt_id`, `attempt_number`, `app_id`, `offer_type` (`trial` / `plan`), `amount`, `flow` (`intent` / `checkout`) |
+| **`Subscribe Tapped`** | The subscribe button is pressed and accepted | `subscription_viewmodel.dart` | `payment_attempt_id`, `attempt_number`, `app_id`, `offer_type` (`trial` / `plan`), `amount`, `plan_variant`, `plan_amount` (the account's monthly price as a number — what the Facebook and Google sinks value a `plan` purchase at), `flow` (`intent` / `checkout`) |
 | `Subscribe Tap Ignored` | The button was tapped while busy or loading. **A run of these means the button looks tappable while it is working** | `subscription_viewmodel.dart` | `reason` (`loading` / `busy`), `attempt_number` |
 | `Mandate Start Requested` | The create-subscription call goes out | `subscription_viewmodel.dart` | attempt properties |
 | `Mandate Start Succeeded` | Server returns a mandate session | `subscription_viewmodel.dart` | `subscription_id`, `environment` |
@@ -230,10 +231,10 @@ The single most instrumented flow in the app. **Every event in one checkout atte
 |-------|-----------|-------|----------------|
 | `Entitlement Poll Started` | The app starts asking the server whether money actually moved (8 attempts if the SDK verified, 3 if not) | `subscription_viewmodel.dart` | `max_attempts`, `sdk_verified` |
 | `Entitlement Poll Failed` | One poll round trip failed. **A dropped poll is not a failed payment** | `subscription_viewmodel.dart`, `payment_status_view.dart` | `attempt`, `error` |
-| **`Payment Completed`** | **The single exit from every checkout path** — success, failure and pending all report here with `outcome` as a property, so the funnel has one step to break down. Timed with Mixpanel's own stopwatch, so `$duration` survives the app being backgrounded for the whole UPI hand-off | `subscription_viewmodel.dart` | `outcome` (`success` / `failed` / `pending`), `sdk_verified`, `poll_attempts`, `reason`, `error`, `app_id`, `offer_type`, `total_seconds`, `$duration` |
+| **`Payment Completed`** | **The single exit from every checkout path** — success, failure and pending all report here with `outcome` as a property, so the funnel has one step to break down. Timed with Mixpanel's own stopwatch, so `$duration` survives the app being backgrounded for the whole UPI hand-off | `subscription_viewmodel.dart` | `outcome` (`success` / `failed` / `pending`), `sdk_verified`, `poll_attempts`, `reason`, `error`, `app_id`, `offer_type`, `plan_variant`, `plan_amount`, `total_seconds`, `$duration` |
 | `Payment Status Viewed` | The status screen opens. **The verdict the user was shown, which is not always the verdict that was true** | `payment_status_view.dart` | `outcome` |
 | `Payment Status Checked` | The status screen re-polls | `payment_status_view.dart` | `trigger` (`auto` / `manual`), `attempt` |
-| **`Payment Confirmed Late`** | The entitlement lands *after* the paywall gave up. **Counting these separately is what turns "our checkout is unreliable" into "our webhook is slow"** | `payment_status_view.dart` | `attempt`, `trigger`, `seconds_since_checkout`, `offer_type` |
+| **`Payment Confirmed Late`** | The entitlement lands *after* the paywall gave up. **Counting these separately is what turns "our checkout is unreliable" into "our webhook is slow"** | `payment_status_view.dart` | `attempt`, `trigger`, `seconds_since_checkout`, `offer_type`, `plan_variant`, `plan_amount` |
 | `Payment Status Exhausted` | The status screen runs out of patience on a payment that may still be real. **These users are the most likely to pay twice or ask for a refund** | `payment_status_view.dart` | `attempt`, `seconds_since_checkout` |
 | `Retry Payment Tapped` | "Try again" / "Back to plans" on the status screen | `payment_status_view.dart` | `outcome`, `source` |
 | `Entitlement Lapsed` | The gate throws a user out mid-use — signed out, or no longer entitled | `entitlement_gate.dart` | `reason` (`signed_out` / `not_entitled`), `screen`, `previous_payment_type`, `billing_state` |
@@ -291,7 +292,7 @@ The single most instrumented flow in the app. **Every event in one checkout atte
 | `Chat Thread Renamed` | Rename confirmed **by the server** (the optimistic rename is undone on failure and not counted) | `chat_threads_viewmodel.dart` | `thread_id`, `chars` |
 | `Chat Thread Deleted` | Delete confirmed | `chat_threads_viewmodel.dart` | `thread_id`, `thread_count` (**what is left afterwards** — deleting your last conversation is a different signal from tidying one out of twelve) |
 | `Chat Rating Shown` | A reply asks for the five-face rating. **At most once per account** — the server stops asking once they answer or dismiss, so this against the two below is a response rate | `chat_viewmodel.dart` | `thread_id`, `turn_index` |
-| `Chat Rated` | A face is tapped on the rating card | `chat_viewmodel.dart` | `thread_id`, `rating` (1 worst – 5 best), `turn_index`, `chat_language` |
+| `Chat Rated` | The rating card is submitted with a face picked, and an optional written comment | `chat_viewmodel.dart` | `thread_id`, `rating` (1 worst – 5 best), `has_comment`, `comment_chars` (length only — **the words are never sent to Mixpanel**; read them in `chat_feedback.comment`), `turn_index`, `chat_language` |
 | `Chat Rating Dismissed` | The rating card is closed without a score | `chat_viewmodel.dart` | `thread_id`, `turn_index`, `chat_language` |
 
 ### 8.4 Profile
@@ -317,12 +318,12 @@ Every server event carries `source: "server"`, `server_function` (which Edge Fun
 
 | Event | Fires when | Dedupe key (`$insert_id`) | Key properties |
 |-------|-----------|---------------------------|----------------|
-| **`Mandate Authorised`** | A successful **AUTH** charge — the first ₹3 trial fee, or a returning subscriber's full first month | `pay:{cf_payment_id}:{status}` | `amount`, `currency`, `kind`, `cf_payment_id`, `subscription_id`, `payment_status`, `already_credited`, `trigger` |
-| **`Subscription Renewed`** | A successful **RECURRING** monthly debit | `pay:{cf_payment_id}:{status}` | same as above |
+| **`Mandate Authorised`** | A successful **AUTH** charge — the first ₹3 trial fee, or a returning subscriber's full first month | `pay:{cf_payment_id}:{status}` | `amount`, `currency`, `kind`, `cf_payment_id`, `subscription_id`, `payment_status`, `already_credited`, `trigger`, `plan_variant`, `plan_id`, `plan_name` |
+| **`Subscription Renewed`** | A successful **RECURRING** monthly debit. **The one server event with a second sink** — it is also reported to Meta as a `Purchase`, see the note below | `pay:{cf_payment_id}:{status}` | same as above |
 | **`Subscription Payment Failed`** | A charge attempt is declined. **The single most actionable event this system produces — the moment a paying customer starts silently churning** | `pay:{cf_payment_id}:{status}` | `failure_reason`, `amount`, `kind`, `cf_event_type`, … |
 | `Subscription Payment Pending` | A charge is neither successful nor failed yet | `pay:{cf_payment_id}:{status}` | same |
-| `Subscription Status Changed` | Cashfree's mandate status differs from ours (e.g. `ACTIVE → ON_HOLD`) | `sub:{id}:{from}:{to}:{minute}` | `from_status`, `to_status`, `transition` (pre-computed name), `billing_state`, `payment_type`, `recurring_amount`, `next_billing_at`, `authorized_at` |
-| **`Subscription Cancelled`** | The mandate ends, from any of four places: Cashfree webhook, reconcile sweep, in-app cancel endpoint, or the stale/duplicate-mandate cleanup | `cancel:{subscription_id}` — no time bucket, because **a subscription is cancelled exactly once** | `cancelled_by` (`user_in_app` / `system` / …), `cf_status`, `from_status`, `reason` (`replaced_by_new_mandate` / `duplicate_mandate` / …), `was_in_trial`, `entitled_until`, `recurring_amount`, `days_subscribed` |
+| `Subscription Status Changed` | Cashfree's mandate status differs from ours (e.g. `ACTIVE → ON_HOLD`) | `sub:{id}:{from}:{to}:{minute}` | `from_status`, `to_status`, `transition` (pre-computed name), `billing_state`, `payment_type`, `recurring_amount`, `next_billing_at`, `authorized_at`, `plan_variant`, `plan_id`, `plan_name` |
+| **`Subscription Cancelled`** | The mandate ends, from any of four places: Cashfree webhook, reconcile sweep, in-app cancel endpoint, or the stale/duplicate-mandate cleanup | `cancel:{subscription_id}` — no time bucket, because **a subscription is cancelled exactly once** | `cancelled_by` (`user_in_app` / `system` / …), `cf_status`, `from_status`, `reason` (`replaced_by_new_mandate` / `duplicate_mandate` / …), `was_in_trial`, `entitled_until`, `recurring_amount`, `days_subscribed`, `plan_variant`, `plan_id`, `plan_name` |
 | `Refund Recorded` | Cashfree reports a refund | `refund:{cf_refund_id}:{status}` | `amount`, `currency`, `refund_status`, `refund_reason`, `attributed` (**false = we cannot tie it to a subscription, which usually means the charge it reverses was never recorded either**) |
 | `Dispute Recorded` | Cashfree reports a chargeback/dispute | `dispute:{cf_dispute_id}:{status}` | `amount`, `dispute_status`, `dispute_type`, `dispute_reason`, `respond_by`, `lost`, `attributed` |
 | `Webhook Retrying` | One notification crosses the retry-storm threshold — a webhook Cashfree cannot deliver successfully | `wh:{notification}:retry_storm` | `cf_event_type`, `deliveries`, `signature_ok`, `subscription_id` |
@@ -333,6 +334,27 @@ Every server event carries `source: "server"`, `server_function` (which Edge Fun
 > **⚠️ The distinction that matters most:** `Payment Completed` (app, `outcome = success`) is the app *believing* a payment landed. `Mandate Authorised` and `Subscription Renewed` (server) are Cashfree confirming money actually moved. **Use the server events for anything revenue-shaped.**
 
 > **Deduplication is load-bearing.** Cashfree redelivers webhooks freely and the reconcile sweep replays history hourly. Every `$insert_id` is keyed on the *occurrence* (the charge, the cancellation), never on the delivery attempt. Without it, one renewal would be counted every hour for a month. Ids longer than 36 characters are hashed, because Mixpanel silently ignores over-long ones.
+
+> **`Subscription Renewed` also goes to Meta.** `_shared/facebook_capi.ts` reports the same charge to the Conversions API as a `Purchase`, valued at what Cashfree actually took, so the ad optimiser can learn to buy ₹499 payers rather than ₹3 trial-starters. Three things about it are worth knowing when reading the numbers. It fires on **`RECURRING` only** — the ₹3 and a returning subscriber's full-price first month are reported by the app itself, and sending them twice would inflate ROAS. Its `event_id` is `pay:{cf_payment_id}`, keyed on the charge for the same reason `$insert_id` is. And it is **off unless configured** (`facebook_capi_enabled`, plus a dataset id and access token), so a project with those rows blank behaves exactly as it did before. Meta's copy of the number will run below Mixpanel's, because not every renewal matches to a person — see `FACEBOOK_ADS_TRACKING_GUIDE.md` §10.
+
+### 9.1 The ₹499 / ₹299 price split
+
+New signups are split between two monthly prices: ₹3 trial → ₹499/month, or ₹3 trial → ₹299/month. `verify-otp` assigns the plan once, when the account is created, from the running user total: odd total → the next account gets ₹499, even → ₹299. Every account that existed before the split stays on ₹499, and an account only ever sees its own price.
+
+`plan_variant` (`plan_499` / `plan_299`) is on:
+
+- **every app event** once the user is identified (identity super property), and on the People profile
+- `Paywall Offer Loaded`, `Subscribe Tapped`, `Payment Completed` and `Payment Confirmed Late`, with `plan_amount` on the last three
+- **every server subscription event** (`Mandate Authorised`, `Subscription Renewed`, `Subscription Payment Failed` / `Pending`, `Subscription Status Changed`, `Subscription Cancelled`), together with `plan_id` and `plan_name`, the Cashfree plan
+
+| Question | Report |
+|----------|--------|
+| Is the split really 50/50? | `Signup Completed`, broken down by `plan_variant` |
+| Which price converts more trials? | Funnel `Paywall Viewed` → `Subscribe Tapped` → `Mandate Authorised`, broken down by `plan_variant` |
+| Which price keeps paying? | Retention `Mandate Authorised` → `Subscription Renewed`, plus `Subscription Cancelled` and `Subscription Payment Failed`, each broken down by `plan_variant` |
+| Which earns more? | Sum of `amount` on `Mandate Authorised` + `Subscription Renewed`, broken down by `plan_variant` |
+
+> **Compare only accounts created after `pricing_split_enabled` was turned on.** Before that, and for any signup from an app build older than the split, every account is assigned `plan_499`. Those accounts count toward the ₹499 side without ever having been part of the test.
 
 ---
 
@@ -439,6 +461,7 @@ These names exist as constants in `analytics_events.dart` but **nothing currentl
 | `entitled`, `in_trial`, `has_ever_subscribed` | App + server | |
 | `has_birth_date`, `birth_year` | App | The **year only** — enough for an age breakdown; the full date is a stronger identifier without answering anything the year does not |
 | `billing_state` | App + server | Includes `disputed` when a chargeback is open |
+| `plan_variant` | App + server | `plan_499` / `plan_299`, the account's side of the price split (§9.1). Set once at signup and never changed |
 | `subscription_status` | Server | Cashfree's own status |
 | `trial_ends_at`, `current_period_end` | App | |
 | `next_billing_at` | Server | |

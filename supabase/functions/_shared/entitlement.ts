@@ -12,6 +12,7 @@
 
 import { AppConfig, configSetting } from "./config.ts";
 import { chartToJson, computeChart } from "./jyotish.ts";
+import { PricingPlan, planPayload } from "./pricing.ts";
 
 /**
  * `none` and `trial` are both unpaid-looking, and the difference between them is the whole point:
@@ -62,6 +63,10 @@ export interface UserRow {
   subscription_started_at?: string | null;
   cancelled_at?: string | null;
   billing_state?: string | null;
+
+  /// `plan_499` or `plan_299`, set once at signup. Not an entitlement input either: it decides the
+  /// price the paywall shows and `subscription-start` charges, through `planFor`. Null reads as ₹499.
+  plan_variant?: string | null;
 }
 
 /**
@@ -74,7 +79,7 @@ export interface UserRow {
 export const USER_COLUMNS =
   "user_id, mobile_no, name, dob, birth_time, birth_place, language, creation_time, payment_type, " +
   "trial_ends_at, current_period_end, active_subscription_id, trial_started_at, " +
-  "subscription_started_at, cancelled_at, billing_state";
+  "subscription_started_at, cancelled_at, billing_state, plan_variant";
 
 /**
  * supabase-js derives a row type by parsing the *literal* select string, so passing the
@@ -162,6 +167,11 @@ export function isInTrial(user: UserRow, graceHours: number, now: Date = new Dat
 export function entitlementPayload(
   user: UserRow,
   graceHours: number,
+  /**
+   * `planFor(config, user.plan_variant)`. Required rather than defaulted, so a function that forgets
+   * it fails `deno check` instead of quietly sending a ₹299 account the ₹499 price.
+   */
+  plan: PricingPlan,
   now: Date = new Date(),
 ): Record<string, unknown> {
   return {
@@ -196,6 +206,9 @@ export function entitlementPayload(
     // `subscription-start` now read the same answer, so the price on the button, the UPI Autopay
     // consent line and the amount actually authorised cannot drift apart.
     trial_available: trialAvailable(user),
+    // The monthly price this account is on — its own side of the price split, never the other.
+    // The paywall prices itself from this, and `subscription-start` charges from the same `planFor`.
+    plan: planPayload(plan),
     // Not an entitlement signal — the user is still fully in — but the app needs it to warn
     // them while there is still time to fix the mandate. Without it, an on-hold subscription is
     // invisible until the day access disappears.
