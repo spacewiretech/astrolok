@@ -35,12 +35,33 @@ const UNAVAILABLE = "Payments are temporarily unavailable. Please try again.";
 
 // ---------------------------------------------------------------- settings
 
+/**
+ * The Cashfree account mandates were opened against before the 2026-09-14 dashboard switch.
+ *
+ * Those mandates did not move. They are still live, still debiting ₹499 a month, and the current
+ * credentials answer `subscription_not_found` for every one of them — so without this they cannot
+ * be fetched, cancelled, or reconciled, and the debit their holder is charged on the next schedule
+ * date lands with nothing on our side able to record it. That is not hypothetical: it is exactly
+ * how one user paid ₹499 and sat on the paywall for 36 hours.
+ *
+ * Keyed on the plan rather than a date, because the plan is what a mandate is permanently bound to
+ * and a date would have to be guessed against `created_at` drift.
+ */
+export interface LegacyAccount {
+  appId: string;
+  secret: string;
+  /** Cashfree plan ids whose mandates live in that account. */
+  planIds: string[];
+}
+
 export interface CashfreeSettings {
   appId: string;
   secret: string;
   baseUrl: string;
   apiVersion: string;
   env: string;
+  /** Null once no mandate on a legacy plan is still live. See [LegacyAccount]. */
+  legacy: LegacyAccount | null;
   trialAmount: number;
   /** The ₹499 plan's monthly amount: every account not on the other side of the price split. */
   recurringAmount: number;
@@ -86,6 +107,7 @@ export function cashfreeSettings(config: AppConfig): CashfreeSettings {
     appId,
     secret,
     env,
+    legacy: legacyAccount(config),
     baseUrl: env === "sandbox"
       ? "https://sandbox.cashfree.com/pg"
       : "https://api.cashfree.com/pg",
@@ -100,6 +122,53 @@ export function cashfreeSettings(config: AppConfig): CashfreeSettings {
     trialDays: numberFrom(config, "cashfree_trial_days", 1),
     graceHours: numberFrom(config, "entitlement_grace_hours", 2),
   };
+}
+
+/**
+ * The old account's credentials, or null when nothing is configured for it.
+ *
+ * All three rows are required together. A half-filled set — an app id with no secret, credentials
+ * with no plan ids — would silently route nothing, or route everything, and both are worse than
+ * staying switched off.
+ */
+function legacyAccount(config: AppConfig): LegacyAccount | null {
+  const appId = configSetting(config, "cashfree_legacy_app_id");
+  const secret = configSetting(config, "cashfree_legacy_secret_key");
+  const planIds = configSetting(config, "cashfree_legacy_plan_ids")
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+
+  if (!appId || !secret || planIds.length === 0) return null;
+  return { appId, secret, planIds };
+}
+
+/**
+ * The same settings, carrying whichever account's credentials [planId]'s mandate actually lives in.
+ *
+ * Only the credentials are swapped. Amounts, trial days and the plan list are properties of *our*
+ * pricing, not of the account holding the mandate, so a legacy ₹499 debit is still classified by
+ * the same rules as a current one — which is what keeps `buysAMonth` and `paymentKind` honest
+ * across the two.
+ */
+export function settingsForPlan(
+  settings: CashfreeSettings,
+  planId: string | null | undefined,
+): CashfreeSettings {
+  const legacy = settings.legacy;
+  if (!legacy || !planId || !legacy.planIds.includes(planId)) return settings;
+  return { ...settings, appId: legacy.appId, secret: legacy.secret };
+}
+
+/**
+ * Every secret a delivery to our webhook could legitimately have been signed with.
+ *
+ * Both accounts point their webhook at the one endpoint, and each signs with its own client
+ * secret, so verifying against a single secret rejects half the traffic — which is precisely the
+ * outage this is being added after.
+ */
+export function webhookSecrets(settings: CashfreeSettings): string[] {
+  return settings.legacy ? [settings.secret, settings.legacy.secret] : [settings.secret];
 }
 
 // ---------------------------------------------------------------- transport
@@ -529,14 +598,34 @@ export function constantTimeEquals(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/**
+ * Whether the delivery was signed by any account we own.
+ *
+ * Takes a list because two Cashfree accounts deliver to this one endpoint — see [webhookSecrets].
+ * Every candidate is still compared in constant time, and a wrong secret is indistinguishable from
+ * a forged signature, so trying more than one leaks nothing: the only thing that changes is which
+ * of *our own* keys is allowed to have signed it.
+ */
 export async function verifyWebhook(
-  secret: string,
+  secret: string | string[],
   timestamp: string | null,
   signature: string | null,
   rawBody: string,
 ): Promise<boolean> {
   if (!secret || !timestamp || !signature) return false;
-  return constantTimeEquals(await webhookSignature(secret, timestamp, rawBody), signature);
+
+  const candidates = (Array.isArray(secret) ? secret : [secret]).filter((s) => s.length > 0);
+  if (candidates.length === 0) return false;
+
+  // Deliberately not short-circuited: every candidate is hashed and compared, so the work done
+  // does not depend on which secret matched or on whether one matched at all.
+  let matched = false;
+  for (const candidate of candidates) {
+    if (constantTimeEquals(await webhookSignature(candidate, timestamp, rawBody), signature)) {
+      matched = true;
+    }
+  }
+  return matched;
 }
 
 /**

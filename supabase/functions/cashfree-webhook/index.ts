@@ -8,6 +8,7 @@ import {
   skewSeconds,
   subscriptionIdsFrom,
   verifyWebhook,
+  webhookSecrets,
 } from "../_shared/cashfree.ts";
 import { loadConfig } from "../_shared/config.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
@@ -274,7 +275,9 @@ Deno.serve(async (req) => {
     return new Response("payments not configured", { status: 503, headers: corsHeaders });
   }
 
-  verified = await verifyWebhook(settings.secret, timestamp, signature, raw);
+  // Both accounts deliver here, each signing with its own client secret, so a single-secret check
+  // rejects every mandate belonging to the other one. See `webhookSecrets`.
+  verified = await verifyWebhook(webhookSecrets(settings), timestamp, signature, raw);
 
   const eventRow = {
     event_type: eventType,

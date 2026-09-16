@@ -1,4 +1,9 @@
-import { cancelSubscription, CashfreeError, cashfreeSettings } from "../_shared/cashfree.ts";
+import {
+  cancelSubscription,
+  CashfreeError,
+  cashfreeSettings,
+  settingsForPlan,
+} from "../_shared/cashfree.ts";
 import { loadConfig } from "../_shared/config.ts";
 import { configureFacebookCapi } from "../_shared/facebook_capi.ts";
 import { configureMixpanel } from "../_shared/mixpanel.ts";
@@ -55,7 +60,13 @@ Deno.serve(async (req) => {
   }
 
   try {
-    await cancelSubscription(settings, subscription.subscription_id);
+    // A mandate opened before the dashboard switch can only be cancelled with the credentials of
+    // the account holding it. Without this the user taps cancel, gets an error, and keeps being
+    // debited ₹499 a month.
+    await cancelSubscription(
+      settingsForPlan(settings, subscription.plan_id),
+      subscription.subscription_id,
+    );
   } catch (error) {
     const detail = error instanceof CashfreeError ? error.detail : String(error);
     console.error("cashfree cancel failed", detail);

@@ -23,6 +23,7 @@ import {
   isExpiredStatus,
   isLiveStatus,
   isPausedStatus,
+  settingsForPlan,
   snapshotOf,
   SubscriptionSnapshot,
   WebhookDispute,
@@ -714,9 +715,14 @@ export async function reconcilePayments(
   settings: CashfreeSettings,
   subscription: SubscriptionRow,
 ): Promise<void> {
+  // Resolved here as well as in `syncSubscription`, because this is exported and a caller that
+  // reached it directly would otherwise ask the wrong account. Idempotent: re-resolving settings
+  // that already carry the legacy credentials yields the same values.
+  const account = settingsForPlan(settings, subscription.plan_id);
+
   let payments: WebhookPayment[];
   try {
-    payments = await fetchSubscriptionPayments(settings, subscription.subscription_id);
+    payments = await fetchSubscriptionPayments(account, subscription.subscription_id);
   } catch (error) {
     console.error(`could not list payments for ${subscription.subscription_id}: ${error}`);
     return;
@@ -758,9 +764,10 @@ export async function syncSubscription(
   depth = 0,
   withPayments = false,
 ): Promise<SyncResult> {
-  const cf = await fetchSubscription(settings, subscriptionId);
-  const snapshot = snapshotOf(cf);
-
+  // Read before Cashfree is called, not after, because the row is what says which account holds
+  // this mandate: everything opened before the 2026-09-14 dashboard switch lives in the old one
+  // and 404s against the current credentials. Asking first and choosing second is the only order
+  // that can get the right answer.
   const { data: existing, error: readError } = await db
     .from("subscriptions")
     .select(SUBSCRIPTION_COLUMNS)
@@ -769,12 +776,19 @@ export async function syncSubscription(
 
   if (readError) throw new Error(`subscriptions read failed: ${readError.message}`);
   if (!existing) {
-    // Cashfree knows about a subscription we do not. That means our create call succeeded and
-    // the row write did not, so there is a real mandate with no local owner — loud, not silent.
+    // A subscription id nothing here owns. Either our create call succeeded and the row write did
+    // not — a real mandate with no local owner — or a webhook named a subscription from another
+    // product. Loud either way; the caller decides what to do about it.
     throw new Error(`no local row for subscription ${subscriptionId}`);
   }
 
   const row = asSubscriptionRow(existing);
+
+  // From here on, every Cashfree call about *this* mandate goes through `account`.
+  const account = settingsForPlan(settings, row.plan_id);
+
+  const cf = await fetchSubscription(account, subscriptionId);
+  const snapshot = snapshotOf(cf);
 
   const patch: Record<string, unknown> = {
     cf_subscription_id: snapshot.cfSubscriptionId ?? row.cf_subscription_id,
@@ -804,7 +818,7 @@ export async function syncSubscription(
   // Before the user is read, so a debit recovered here is already reflected in the row that
   // userUpdatesFor then reasons about.
   if (withPayments) {
-    await reconcilePayments(db, settings, { ...row, ...patch } as SubscriptionRow);
+    await reconcilePayments(db, account, { ...row, ...patch } as SubscriptionRow);
   }
 
   const { data: userRow, error: userError } = await db
@@ -917,7 +931,12 @@ async function resolveDuplicateActive(
 
   if (incumbent) {
     const other = asSubscriptionRow(incumbent);
-    const refreshed = snapshotOf(await fetchSubscription(settings, other.subscription_id));
+    // The incumbent and the newcomer can sit in different Cashfree accounts — a user who
+    // re-subscribed after the dashboard switch is exactly how a duplicate arises — so each is
+    // asked about with its own credentials.
+    const refreshed = snapshotOf(
+      await fetchSubscription(settingsForPlan(settings, other.plan_id), other.subscription_id),
+    );
 
     if (refreshed.status !== "ACTIVE") {
       // Stale row. Correct it and let the original sync proceed.
@@ -934,7 +953,7 @@ async function resolveDuplicateActive(
     );
 
     try {
-      await cancelSubscription(settings, subscriptionId);
+      await cancelSubscription(settingsForPlan(settings, row.plan_id), subscriptionId);
     } catch (error) {
       console.error(`could not cancel duplicate ${subscriptionId}: ${error}`);
     }

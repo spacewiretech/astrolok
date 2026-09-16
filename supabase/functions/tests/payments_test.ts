@@ -12,6 +12,7 @@ import { assert, assertEquals, assertFalse } from "jsr:@std/assert@1";
 
 import {
   addMonths,
+  cashfreeSettings,
   CashfreeSettings,
   dedupeKey,
   disputeFrom,
@@ -24,11 +25,13 @@ import {
   notificationKey,
   paymentFrom,
   refundFrom,
+  settingsForPlan,
   skewSeconds,
   snapshotOf,
   subscriptionIdsFrom,
   toIstIso,
   verifyWebhook,
+  webhookSecrets,
   webhookSignature,
 } from "../_shared/cashfree.ts";
 import {
@@ -222,6 +225,122 @@ Deno.test("a missing secret, timestamp or signature fails closed", async () => {
   assertFalse(await verifyWebhook("", "1", signature, body), "no secret configured");
   assertFalse(await verifyWebhook(SECRET, null, signature, body), "no timestamp header");
   assertFalse(await verifyWebhook(SECRET, "1", null, body), "no signature header");
+});
+
+// ---------------------------------------------------------------- the legacy account
+//
+// Mandates opened before the 2026-09-14 dashboard switch still live in the old Cashfree account.
+// Every one of these tests stands for a failure that was live in production: a 401 on every
+// legacy webhook, a reconcile that threw for each one, and a cancel button that could not cancel.
+
+/** `cashfreeSettings` reads app_config, so the fixture is that map rather than a database. */
+function appConfig(rows: Record<string, string> = {}): Map<string, string> {
+  return new Map(Object.entries({
+    cashfree_app_id: "current_app",
+    cashfree_secret_key: "current_secret",
+    ...rows,
+  }));
+}
+
+const LEGACY = {
+  cashfree_legacy_app_id: "old_app",
+  cashfree_legacy_secret_key: "old_secret",
+  cashfree_legacy_plan_ids: "id_circle360_499,plan_1788962992020_1qt81t",
+};
+
+Deno.test("a mandate on a legacy plan is called with the legacy account's credentials", () => {
+  const settings = cashfreeSettings(appConfig(LEGACY));
+
+  const routed = settingsForPlan(settings, "id_circle360_499");
+  assertEquals(routed.appId, "old_app");
+  assertEquals(routed.secret, "old_secret");
+
+  // The second id in the list routes too. A parser that only read as far as the first comma
+  // would strand every mandate on the other plan, which is the shape of the original bug.
+  assertEquals(settingsForPlan(settings, "plan_1788962992020_1qt81t").appId, "old_app");
+});
+
+Deno.test("every other mandate keeps the current credentials", () => {
+  const settings = cashfreeSettings(appConfig(LEGACY));
+
+  assertEquals(settingsForPlan(settings, "plan_1789372781486_txhn0s").appId, "current_app");
+  assertEquals(settingsForPlan(settings, "plan_1789372781486_txhn0s").secret, "current_secret");
+  // A row that predates the plan_id column answers with the current account, not with neither.
+  assertEquals(settingsForPlan(settings, null).appId, "current_app");
+  assertEquals(settingsForPlan(settings, "").appId, "current_app");
+});
+
+Deno.test("routing swaps the credentials and nothing else", () => {
+  // Our pricing is a property of what we sell, not of the account holding the mandate. If these
+  // travelled with the credentials, a legacy ₹499 debit would be classified against a different
+  // trial amount and `buysAMonth` could refuse to credit a month that was genuinely paid.
+  const settings = cashfreeSettings(
+    appConfig({ ...LEGACY, cashfree_trial_amount: "3", cashfree_recurring_amount: "499" }),
+  );
+  const routed = settingsForPlan(settings, "id_circle360_499");
+
+  assertEquals(routed.trialAmount, settings.trialAmount);
+  assertEquals(routed.recurringAmount, settings.recurringAmount);
+  assertEquals(routed.trialDays, settings.trialDays);
+  assertEquals(routed.baseUrl, settings.baseUrl);
+});
+
+Deno.test("a half-configured legacy account routes nothing", () => {
+  // Credentials with no plan ids would route nothing; plan ids with no credentials would route
+  // them at an empty secret and fail every call. Both stay off instead.
+  const noPlans = cashfreeSettings(appConfig({
+    cashfree_legacy_app_id: "old_app",
+    cashfree_legacy_secret_key: "old_secret",
+  }));
+  assertEquals(noPlans.legacy, null);
+  assertEquals(settingsForPlan(noPlans, "id_circle360_499").appId, "current_app");
+
+  const noSecret = cashfreeSettings(appConfig({
+    cashfree_legacy_app_id: "old_app",
+    cashfree_legacy_plan_ids: "id_circle360_499",
+  }));
+  assertEquals(noSecret.legacy, null);
+
+  // Placeholder text in a dashboard cell is not configuration.
+  const placeholder = cashfreeSettings(appConfig({ ...LEGACY, cashfree_legacy_secret_key: "-" }));
+  assertEquals(placeholder.legacy, null);
+});
+
+Deno.test("an unconfigured deployment behaves exactly as before", () => {
+  const settings = cashfreeSettings(appConfig());
+  assertEquals(settings.legacy, null);
+  assertEquals(settingsForPlan(settings, "id_circle360_499").appId, "current_app");
+  assertEquals(webhookSecrets(settings), ["current_secret"]);
+});
+
+Deno.test("both accounts' secrets are accepted on the one webhook endpoint", async () => {
+  const settings = cashfreeSettings(appConfig(LEGACY));
+  const body = '{"type":"SUBSCRIPTION_PAYMENT_SUCCESS","data":{"payment_amount":499}}';
+  const ts = "1756728000";
+
+  // The old account signs the renewals of every pre-switch mandate. Rejecting these is what let a
+  // paying customer sit on the paywall.
+  assert(
+    await verifyWebhook(webhookSecrets(settings), ts, await webhookSignature("old_secret", ts, body), body),
+    "legacy account's delivery",
+  );
+  assert(
+    await verifyWebhook(webhookSecrets(settings), ts, await webhookSignature("current_secret", ts, body), body),
+    "current account's delivery",
+  );
+});
+
+Deno.test("accepting two secrets does not accept a third", async () => {
+  const settings = cashfreeSettings(appConfig(LEGACY));
+  const body = "{}";
+  const ts = "1756728000";
+
+  assertFalse(
+    await verifyWebhook(webhookSecrets(settings), ts, await webhookSignature("forged", ts, body), body),
+  );
+  // And the tamper check still holds under either key.
+  const signed = await webhookSignature("old_secret", ts, body);
+  assertFalse(await verifyWebhook(webhookSecrets(settings), ts, signed, '{"a":1}'));
 });
 
 Deno.test("the signature is base64 over timestamp+body, matching Cashfree's own sample", async () => {
