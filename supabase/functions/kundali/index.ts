@@ -1,3 +1,4 @@
+import { inBackground } from "../_shared/background.ts";
 import { loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
@@ -11,8 +12,13 @@ import {
   kundaliState,
   parseKundaliRequest,
   sameBirthInputs,
+  shouldLiftLock,
+  unlockAtFor,
+  waitsForReveal,
 } from "../_shared/kundali.ts";
 import { computeKundaliChart, kundaliChartToJson } from "../_shared/kundali_chart.ts";
+import { generateKundaliNow } from "../_shared/kundali_generate.ts";
+import { configureMixpanel } from "../_shared/mixpanel.ts";
 
 /**
  * The kundali: ask for one, check on it, and read it once it is revealed.
@@ -28,11 +34,18 @@ import { computeKundaliChart, kundaliChartToJson } from "../_shared/kundali_char
  * forgotten by a fourth action added later.
  *
  * The chart is cast here, at request time — it is arithmetic and takes milliseconds. The reading
- * is not: `kundali-worker` writes it a few minutes later, and it is revealed at `unlock_at`.
+ * is not, and when it is shown depends on the account:
+ *
+ *  - a trial waits `kundali_unlock_hours`. `kundali-worker` writes the reading a few minutes later
+ *    and it is revealed at `unlock_at` — the reveal a day later is the point of the feature there.
+ *  - a paying account does not wait. `unlock_at` is the request time, and the reading is started
+ *    here after the response, so it is revealed in the seconds it takes to write. If that attempt
+ *    fails, the worker retries it.
+ *
+ * A trial that converts while it waits has its wait lifted on the next status or report call.
  *
  * Open to every entitled account, trial included, and deliberately outside the palm/face trial
- * reading allowance: there is one live kundali per account, and the reveal a day later is the
- * point of the feature.
+ * reading allowance: there is one live kundali per account.
  */
 
 Deno.serve(async (req) => {
@@ -51,6 +64,7 @@ Deno.serve(async (req) => {
   }
 
   const config = await loadConfig(db);
+  configureMixpanel(config, "kundali");
   const settings = kundaliSettings(config);
   const now = new Date();
 
@@ -68,6 +82,8 @@ Deno.serve(async (req) => {
   if (!entitled) {
     return fail("not_entitled", "Your subscription has ended. Renew to see your Kundali.", 402);
   }
+  const waits = waitsForReveal(user, graceHoursFrom(config), now);
+  const action = body.action ?? "status";
 
   const [liveResult, usedResult] = await Promise.all([
     db.from("kundalis").select(KUNDALI_COLUMNS).eq("user_id", userId).is("superseded_at", null).maybeSingle(),
@@ -79,8 +95,31 @@ Deno.serve(async (req) => {
     return fail("server_error", "Something went wrong. Please try again.", 500);
   }
 
-  const live = liveResult.data ? asKundaliRow(liveResult.data) : null;
+  let live = liveResult.data ? asKundaliRow(liveResult.data) : null;
   const regenerationsLeft = settings.maxRegenerations - (usedResult.count ?? 0);
+
+  // Asked for during a trial, and paid for since: the wait was for someone still deciding, so it ends
+  // on the next look. A reading that is not written yet is started now rather than at its old slot.
+  if (live && (action === "status" || action === "report") && shouldLiftLock(live, waits, now)) {
+    const { data, error } = await db.from("kundalis")
+      .update({
+        unlock_at: now.toISOString(),
+        ...(live.status === "queued" ? { next_attempt_at: now.toISOString() } : {}),
+      })
+      .eq("id", live.id)
+      .is("superseded_at", null)
+      .select(KUNDALI_COLUMNS)
+      .maybeSingle();
+    if (error) {
+      console.error(`kundali ${live.id}: could not lift the wait`, error);
+    } else if (data) {
+      live = asKundaliRow(data);
+      console.log(`kundali ${live.id}: wait lifted for a paying account (status=${live.status})`);
+      if (live.status === "queued") {
+        await inBackground("kundali instant", generateKundaliNow(db, config, live));
+      }
+    }
+  }
 
   const summary = (row: KundaliRow, left = regenerationsLeft, includeReport = false) =>
     kundaliPayload(row, {
@@ -92,7 +131,7 @@ Deno.serve(async (req) => {
       stageFractions: settings.stageFractions,
     });
 
-  switch (body.action ?? "status") {
+  switch (action) {
     // ------------------------------------------------------------ status
     case "status": {
       if (!live) return json({ kundali: null });
@@ -136,18 +175,20 @@ Deno.serve(async (req) => {
         if (live.status !== "failed") return json({ kundali: summary(live) });
 
         // A generation that ran out of attempts, asked for again with the same details. Not a
-        // regeneration — the user changed nothing — so it costs them nothing, and the reveal keeps
-        // its original time unless that has already passed.
+        // regeneration — the user changed nothing — so it costs them nothing. A trial's reveal keeps
+        // its original time unless that has already passed; a paying account's is now, and its
+        // reading is started straight away.
         const floor = now.getTime() + (settings.generateDelayMinutes + 30) * 60_000;
-        const unlockAt = new Date(Math.max(Date.parse(live.unlock_at), floor)).toISOString();
+        const unlockAt = waits ? new Date(Math.max(Date.parse(live.unlock_at), floor)) : now;
+        const nextAttempt = waits ? new Date(now.getTime() + settings.generateDelayMinutes * 60_000) : now;
         const { data, error } = await db.from("kundalis")
           .update({
             status: "queued",
             attempts: 0,
             last_error: null,
             locked_at: null,
-            next_attempt_at: new Date(now.getTime() + settings.generateDelayMinutes * 60_000).toISOString(),
-            unlock_at: unlockAt,
+            next_attempt_at: nextAttempt.toISOString(),
+            unlock_at: unlockAt.toISOString(),
           })
           .eq("id", live.id)
           .select(KUNDALI_COLUMNS)
@@ -156,7 +197,9 @@ Deno.serve(async (req) => {
           console.error(`kundali ${live.id}: could not requeue`, error);
           return fail("server_error", "Something went wrong. Please try again.", 500);
         }
-        return json({ kundali: summary(asKundaliRow(data)) });
+        const requeued = asKundaliRow(data);
+        if (!waits) await inBackground("kundali instant", generateKundaliNow(db, config, requeued));
+        return json({ kundali: summary(requeued) });
       }
 
       if (live && regenerationsLeft <= 0) {
@@ -189,8 +232,11 @@ Deno.serve(async (req) => {
           birth_tz: request.place.timeZoneId,
           utc_offset_seconds: request.utcOffsetSeconds,
           chart: kundaliChartToJson(chart),
-          unlock_at: new Date(now.getTime() + settings.unlockHours * 3600_000).toISOString(),
-          next_attempt_at: new Date(now.getTime() + settings.generateDelayMinutes * 60_000).toISOString(),
+          unlock_at: unlockAtFor(waits, now, settings.unlockHours).toISOString(),
+          // A paying account's reading is started below, after the response; `now` is so the worker
+          // picks it up on its next run if that attempt does not get to it.
+          next_attempt_at: (waits ? new Date(now.getTime() + settings.generateDelayMinutes * 60_000) : now)
+            .toISOString(),
         },
       });
 
@@ -214,7 +260,10 @@ Deno.serve(async (req) => {
       }).eq("user_id", userId);
       if (profileError) console.error("kundali: could not save birth details to the profile", profileError);
 
-      return json({ kundali: summary(asKundaliRow(row), live ? regenerationsLeft - 1 : regenerationsLeft) });
+      const created = asKundaliRow(row);
+      if (!waits) await inBackground("kundali instant", generateKundaliNow(db, config, created));
+
+      return json({ kundali: summary(created, live ? regenerationsLeft - 1 : regenerationsLeft) });
     }
 
     default:

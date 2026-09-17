@@ -6,14 +6,18 @@
  * only thing that turns a `kundalis` row into a response, and it will not include the chart or the
  * report before `unlock_at`. The app's countdown is a courtesy; this is the lock.
  *
- * The reveal is deliberately a day after the request (`kundali_unlock_hours`), so the user has a
- * reason to come back. The report itself is written by `kundali-worker` a few minutes after the
- * request and held until then — which is why the copy the app shows says the reading is *revealed*
- * at a time, never that the calculation takes a day.
+ * For a trial the reveal is deliberately a day after the request (`kundali_unlock_hours`), so the
+ * user has a reason to come back. The report itself is written by `kundali-worker` a few minutes
+ * after the request and held until then — which is why the copy the app shows says the reading is
+ * *revealed* at a time, never that the calculation takes a day.
+ *
+ * A paying account does not wait: `unlock_at` is the request time and `kundali` starts the reading
+ * straight away, so it is revealed as soon as it is written ([waitsForReveal]).
  */
 
 import { AppConfig, configSetting } from "./config.ts";
 import { isValidTimeZone, localToUtc } from "./birth_timezone.ts";
+import { isInTrial, UserRow } from "./entitlement.ts";
 import { KundaliChartJson } from "./kundali_chart.ts";
 import { KundaliReport } from "./kundali_reading.ts";
 
@@ -218,6 +222,33 @@ export function stageTimeline(
 export function nextAttemptAt(attempts: number, now: Date): Date {
   const minutes = Math.min(5 * 2 ** Math.max(0, attempts - 1), 180);
   return new Date(now.getTime() + minutes * 60_000);
+}
+
+/**
+ * Whether this account waits for the reveal. Only a trial does: the day between asking and seeing is
+ * a reason to come back while someone is still deciding whether to stay. A paying account — `active`,
+ * or `cancelled` with paid time left — is shown its reading the moment it is written.
+ */
+export function waitsForReveal(user: UserRow, graceHours: number, now: Date): boolean {
+  return isInTrial(user, graceHours, now);
+}
+
+/** When a kundali asked for now is revealed: a day from now for a trial, straight away otherwise. */
+export function unlockAtFor(waits: boolean, now: Date, unlockHours: number): Date {
+  return waits ? new Date(now.getTime() + unlockHours * 3600_000) : new Date(now.getTime());
+}
+
+/**
+ * Whether a live kundali's wait should end now: it was asked for during a trial, and the account has
+ * paid since. Checked on every status and report call, so converting reveals it on the next look.
+ */
+export function shouldLiftLock(
+  row: Pick<KundaliRow, "status" | "unlock_at" | "superseded_at">,
+  waits: boolean,
+  now: Date,
+): boolean {
+  return !waits && row.superseded_at === null && row.status !== "failed" &&
+    now.getTime() < Date.parse(row.unlock_at);
 }
 
 export function kundaliState(row: Pick<KundaliRow, "status" | "unlock_at">, now: Date): KundaliState {

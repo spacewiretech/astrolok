@@ -120,7 +120,7 @@ App Launched
 | 2 | **Purchase** | `Paywall Viewed` → `Subscribe Tapped` → `Mandate Start Succeeded` → `Payment Completed (outcome=success)` | Break down by `flow` (`intent` vs `checkout`) and `app_id`. The Cashfree checkout-screen fallback converts materially worse than a one-tap UPI intent |
 | 3 | **Trial vs plan** | Same as #2, broken down by `offer_type` (`trial` / `plan`) | A ₹3 trial and a full-price purchase convert nothing like each other; a single paywall conversion rate averages them into meaninglessness |
 | 4 | **Activation** | `Payment Completed` → `Home Viewed` → `Reading Scan Started` → `Reading Succeeded` → `Ask Astro Tapped` | Whether people who pay actually get a reading. Break down by `feature` to compare palm and face |
-| 6 | **Kundali** | `Kundali Card Tapped` → `Kundali Requested` → `Kundali Waiting Viewed` → `Kundali Viewed (first_view = true)` → `Kundali PDF Exported` | Whether the 24-hour reveal brings people back. Count `Kundali Waiting Viewed` per `kundali_id` for return visits during the wait |
+| 6 | **Kundali** | `Kundali Card Tapped` → `Kundali Requested` → `Kundali Waiting Viewed` → `Kundali Viewed (first_view = true)` → `Kundali PDF Exported` | Whether the 24-hour reveal brings trial users back. Count `Kundali Waiting Viewed` per `kundali_id` for return visits during the wait; filter `instant = false`, since paying accounts do not wait |
 | 7 | **Push outcome** | `Notification Sent` → `Push Opened` → `Push Routed` → outcome event, held constant on `push_notification_id` / `notification_id` | Per campaign: delivered, opened, landed, and did the thing. `Notification Skipped` by `skip_reason` explains the gap before Sent |
 | 5 | **Retention & churn** | `Mandate Authorised` → `Subscription Renewed` (renewal 1) → `Subscription Renewed` (renewal 2+) · vs `Subscription Cancelled` / `Subscription Payment Failed` | The whole paid relationship. All server-side |
 
@@ -322,7 +322,7 @@ The single most instrumented flow in the app. **Every event in one checkout atte
 
 ### 8.5 Kundali
 
-The fourth reading. Cast from date, time and place of birth; **revealed 24 hours after the request** (`kundali_unlock_hours`) so there is a reason to come back. The reading is written by `kundali-worker` minutes after the request and held; the server refuses the report before the reveal. **The place, coordinates, date and time of birth are never sent to Mixpanel.**
+The fourth reading. Cast from date, time and place of birth. **A trial's is revealed 24 hours after the request** (`kundali_unlock_hours`) so there is a reason to come back; **a paying account's (`active`, or `cancelled` with paid time left) has no wait** and opens as soon as the reading is written, in seconds — `instant = true` below. A trial that converts mid-wait has its wait lifted on its next look. The reading is written by `kundali-worker` minutes after the request and held; the server refuses the report before the reveal. **The place, coordinates, date and time of birth are never sent to Mixpanel.**
 
 | Event | Fires when | Where | Key properties |
 |-------|-----------|-------|----------------|
@@ -332,9 +332,9 @@ The fourth reading. Cast from date, time and place of birth; **revealed 24 hours
 | `Place Search Started` | First search of a Google Places session (one per session token, not per keystroke) | `kundali_form_viewmodel.dart` | — |
 | `Place Selected` | A suggestion resolves to a place | `kundali_form_viewmodel.dart` | `result_rank`, `suggestion_count`, `time_zone`, `ms` |
 | `Place Search Failed` | Autocomplete or details refused or unreachable | `kundali_form_viewmodel.dart` | `code` |
-| **`Kundali Requested`** | The chart is cast and the wait starts. **The denominator of the kundali funnel** | `kundali_form_viewmodel.dart` | `kundali_id`, `is_regeneration`, `regenerations_left`, `time_zone`, `unlock_hours` |
+| **`Kundali Requested`** | The chart is cast and the wait starts. **The denominator of the kundali funnel** | `kundali_form_viewmodel.dart` | `kundali_id`, `is_regeneration`, `regenerations_left`, `time_zone`, `unlock_hours`, `instant` |
 | `Kundali Request Failed` | The request was refused | `kundali_form_viewmodel.dart` | `code`, `message` |
-| `Kundali Waiting Viewed` | The waiting screen opens. **Counted per open — returns during the wait are the recurrence the feature exists for** | `kundali_waiting_view.dart` | `kundali_id`, `kundali_state`, `hours_remaining`, `stage` (0-4) |
+| `Kundali Waiting Viewed` | The waiting screen opens. **Counted per open — returns during the wait are the recurrence the feature exists for** | `kundali_waiting_view.dart` | `kundali_id`, `kundali_state`, `hours_remaining`, `stage` (0-4), `instant` |
 | `Kundali Notify Tapped` | "Notify me when ready" | `kundali_waiting_view.dart` | `permission_before`, `permission_after`, `prompted` |
 | `Kundali Cross Sell Tapped` | A palm / face / chat card under "While you wait" | `kundali_waiting_view.dart` | `destination` |
 | **`Kundali Viewed`** | The report paints | `kundali_report_viewmodel.dart` | `kundali_id`, `first_view` (**true exactly once — the reveal**), `hours_since_unlock`, `language` |
@@ -378,7 +378,7 @@ Every server event carries `source: "server"`, `server_function` (which Edge Fun
 | **`Notification Sent`** | A push was delivered to FCM for at least one device (`notify.ts`) | `ns:{notification id}` | `campaign`, `notification_id`, `kind` (`transactional` / `marketing`), `route`, `language`, `trigger` (`cron` / `inline` / `test`), `tokens_attempted`, `tokens_delivered`, `attempt`, `delay_minutes`, `payment_type`, `entitled` |
 | `Notification Failed` | FCM refused every device after retries, or FCM is not configured | `nf:{notification id}` | `campaign`, `notification_id`, `error_code`, `tokens_attempted`, `attempt`, `trigger` |
 | `Notification Skipped` | A queued push was not sent — **terminal skips only**; deferrals for quiet hours or the daily cap are not events | `nk:{notification id}` | `campaign`, `notification_id`, `skip_reason` (`disabled` / `stale` / `opted_out` / `no_longer_eligible` / `cap` / `no_token` / `no_user`), `trigger` |
-| **`Kundali Generated`** | `kundali-worker` wrote a reading | `kg:{kundali id}` | `kundali_id`, `model`, `latency_ms`, `attempts`, `language`, `prompt_version`, `minutes_after_request`, `minutes_before_unlock`, `problem_count` |
+| **`Kundali Generated`** | A reading was written — by `kundali-worker`, or by `kundali` straight after a paying account's request | `kg:{kundali id}` | `kundali_id`, `model`, `latency_ms`, `attempts`, `language`, `prompt_version`, `minutes_after_request`, `minutes_before_unlock`, `instant`, `problem_count` |
 | `Kundali Generation Failed` | One attempt failed (`terminal = true` on the last) | `kf:{kundali id}:{attempt}` | `kundali_id`, `attempt`, `terminal`, `error_class` (`model` / `unusable` / `truncated`) |
 
 > **⚠️ The distinction that matters most:** `Payment Completed` (app, `outcome = success`) is the app *believing* a payment landed. `Mandate Authorised` and `Subscription Renewed` (server) are Cashfree confirming money actually moved. **Use the server events for anything revenue-shaped.**

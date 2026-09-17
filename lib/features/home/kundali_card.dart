@@ -79,6 +79,7 @@ class _KundaliCardState extends ConsumerState<KundaliCard> {
           summary.viewed ? null : const _Badge(label: KundaliCopy.cardReady, filled: true),
         ),
       KundaliSummary(state: KundaliState.failed) => (KundaliCopy.cardSubtitle, const _Badge(label: KundaliCopy.cardFailed)),
+      _ when summary.isWritingNow() => (KundaliCopy.cardWaitingSubtitle, const _Badge(label: KundaliCopy.cardPreparing)),
       _ when summary.isPastUnlock() => (KundaliCopy.cardWaitingSubtitle, const _Badge(label: KundaliCopy.cardAlmost)),
       _ => (
           KundaliCopy.cardWaitingSubtitle,

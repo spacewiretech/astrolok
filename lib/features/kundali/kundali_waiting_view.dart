@@ -32,6 +32,9 @@ import 'kundali_stages.dart';
 /// Built to be come back to: a countdown, stages that tick off as the day passes, the Moon's sign
 /// and nakshatra as a first glimpse, a way to be told when it is ready, and the other readings to
 /// fill the time. Every open is counted — returning to this screen is the recurrence the wait is for.
+///
+/// That wait is a trial's. A paying account's kundali has none: it lands here for the few seconds
+/// the reading takes to write, checks every few seconds, and opens the report the moment it is ready.
 class KundaliWaitingView extends ConsumerStatefulWidget {
   const KundaliWaitingView({super.key});
 
@@ -97,20 +100,35 @@ class _KundaliWaitingViewState extends ConsumerState<KundaliWaitingView> with Wi
         P.kundaliState: summary.state.name,
         P.hoursRemaining: double.parse((summary.remaining().inMinutes / 60).toStringAsFixed(1)),
         P.stage: summary.currentStage(),
+        P.instant: summary.isInstant,
       });
     }
 
     switch (summary?.state) {
       case KundaliState.ready:
+        _poll?.cancel();
         _go(Routes.kundaliReport);
       case null:
         // Nothing was ever asked for, or it was replaced from another device.
         if (ref.read(kundaliSummaryProvider).valueOrNull == null) _go(Routes.kundaliNew);
       case KundaliState.delayed:
-        _poll ??= Timer.periodic(const Duration(minutes: 1), (_) => _refresh());
+        // Being written right now — a paying account's, which has no wait — is seconds away, so
+        // look often. Past that it is late, and once a minute is plenty.
+        _pollEvery(summary!.isWritingNow() ? _writingPoll : _latePoll);
       default:
         break;
     }
+  }
+
+  static const _writingPoll = Duration(seconds: 3);
+  static const _latePoll = Duration(minutes: 1);
+  Duration? _pollInterval;
+
+  void _pollEvery(Duration interval) {
+    if (_poll != null && _pollInterval == interval) return;
+    _poll?.cancel();
+    _pollInterval = interval;
+    _poll = Timer.periodic(interval, (_) => _refresh());
   }
 
   void _go(String route) {
@@ -182,7 +200,9 @@ class _KundaliWaitingViewState extends ConsumerState<KundaliWaitingView> with Wi
                           ),
                           const SizedBox(height: 10),
                           Text(
-                            KundaliCopy.waitingSubtitle(formatReveal(summary.unlockAt, _now)),
+                            summary.isInstant
+                                ? KundaliCopy.instantSubtitle
+                                : KundaliCopy.waitingSubtitle(formatReveal(summary.unlockAt, _now)),
                             style: AppText.body,
                             textAlign: TextAlign.center,
                           ),
@@ -202,6 +222,13 @@ class _KundaliWaitingViewState extends ConsumerState<KundaliWaitingView> with Wi
                                 onPressed: () => context.push(Routes.kundaliNew),
                               ),
                             )
+                          else if (summary.isWritingNow(_now))
+                            const _StatusCard(
+                              icon: Icons.auto_awesome_rounded,
+                              busy: true,
+                              title: KundaliCopy.writingTitle,
+                              body: KundaliCopy.writingBody,
+                            )
                           else if (summary.isPastUnlock(_now))
                             const _StatusCard(
                               icon: Icons.hourglass_bottom_rounded,
@@ -218,7 +245,10 @@ class _KundaliWaitingViewState extends ConsumerState<KundaliWaitingView> with Wi
                           Text(KundaliCopy.stagesTitle, style: AppText.section),
                           const SizedBox(height: 10),
                           StageChecklist(items: kundaliStageItems(summary, _now)),
-                          if (config.configFlag(pushPrimerEnabledKey) && _notify != _Notify.unknown) ...[
+                          // Not while it is seconds away: it will open here before a push could arrive.
+                          if (config.configFlag(pushPrimerEnabledKey) &&
+                              _notify != _Notify.unknown &&
+                              !summary.isWritingNow(_now)) ...[
                             const SizedBox(height: 16),
                             _NotifyCard(state: _notify, onAsk: _askToNotify),
                           ],
@@ -385,12 +415,15 @@ class _NotifyCard extends StatelessWidget {
 }
 
 class _StatusCard extends StatelessWidget {
-  const _StatusCard({required this.icon, this.title, this.body, this.action});
+  const _StatusCard({required this.icon, this.title, this.body, this.action, this.busy = false});
 
   final IconData icon;
   final String? title;
   final String? body;
   final Widget? action;
+
+  /// A spinner in place of the icon, for something happening now.
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -407,7 +440,17 @@ class _StatusCard extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(icon, color: AppColors.gold, size: 22),
+              if (busy)
+                const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: Padding(
+                    padding: EdgeInsets.all(2),
+                    child: CircularProgressIndicator(strokeWidth: 2.2, color: AppColors.gold),
+                  ),
+                )
+              else
+                Icon(icon, color: AppColors.gold, size: 22),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(

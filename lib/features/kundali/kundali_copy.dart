@@ -2,7 +2,8 @@
 ///
 /// One rule runs through the waiting copy: the reading is *revealed* at a time. The chart is cast in
 /// milliseconds and the reading written within minutes, so nothing here claims the calculation
-/// takes a day — it says when the Kundali will be revealed, which is true.
+/// takes a day — it says when the Kundali will be revealed, which is true. Only a trial waits the
+/// day; a paying account's is revealed as soon as it is written, and says "a few seconds".
 abstract final class KundaliCopy {
   // ---------------------------------------------------------------- home card
 
@@ -11,6 +12,7 @@ abstract final class KundaliCopy {
   static const cardReady = 'Ready ✨';
   static const cardReadySubtitle = 'Your Kundali has been revealed. Tap to view.';
   static const cardAlmost = 'Almost ready';
+  static const cardPreparing = 'Preparing…';
   static const cardFailed = 'Tap to try again';
   static String cardWaiting(String left) => 'Ready in $left';
   static const cardWaitingSubtitle = 'Your birth chart is being prepared.';
@@ -39,8 +41,9 @@ abstract final class KundaliCopy {
   static const requestFailed = 'Could not start your Kundali. Please try again.';
 
   static const regenerateTitle = 'Re-cast your Kundali?';
-  static String regenerateBody(int left) =>
-      'A new chart will be cast from these details and revealed after a fresh wait. '
+  /// [waits] for a trial, whose new chart is revealed after another day. A paying account's is not.
+  static String regenerateBody(int left, {required bool waits}) =>
+      'A new chart will be cast from these details${waits ? ' and revealed after a fresh wait' : ''}. '
       'You can do this $left more ${left == 1 ? 'time' : 'times'}.';
   static const regenerateConfirm = 'Re-cast';
   static const cancel = 'Cancel';
@@ -51,6 +54,11 @@ abstract final class KundaliCopy {
   static const waitingTitleAccent = 'being prepared';
   static String waitingSubtitle(String when) =>
       'Your chart is being cast from the exact moment and place of your birth. It will be revealed $when.';
+  /// A paying account's, revealed as soon as it is written.
+  static const instantSubtitle =
+      'Your chart is being cast from the exact moment and place of your birth. This takes just a few seconds.';
+  static const writingTitle = 'Writing your life insights…';
+  static const writingBody = 'Your Kundali opens here the moment it is ready.';
   static const revealedIn = 'Revealed in';
   static const almostTitle = 'Almost ready';
   static const almostBody = 'The finishing touches are taking a little longer than usual. We will check again shortly.';

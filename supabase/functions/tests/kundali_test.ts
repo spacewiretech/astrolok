@@ -9,8 +9,12 @@ import {
   parseKundaliRequest,
   parseStageFractions,
   sameBirthInputs,
+  shouldLiftLock,
   stageTimeline,
+  unlockAtFor,
+  waitsForReveal,
 } from "../_shared/kundali.ts";
+import { UserRow } from "../_shared/entitlement.ts";
 import { computeKundaliChart, kundaliChartToJson } from "../_shared/kundali_chart.ts";
 import {
   buildKundaliPrompt,
@@ -128,6 +132,71 @@ Deno.test("retries back off from five minutes and cap at three hours", () => {
   assertEquals(minutes(2), 10);
   assertEquals(minutes(4), 40);
   assertEquals(minutes(10), 180);
+});
+
+// ---------------------------------------------------------------- who waits
+
+function account(over: Partial<UserRow> = {}): UserRow {
+  return {
+    user_id: "u1",
+    mobile_no: "9931145610",
+    name: "Asha",
+    dob: "1990-01-01",
+    payment_type: "active",
+    trial_ends_at: "2026-09-10T09:00:00Z",
+    current_period_end: "2026-10-10T09:00:00Z",
+    active_subscription_id: "sub_1",
+    ...over,
+  };
+}
+
+const TRIAL = account({
+  payment_type: "trial",
+  trial_ends_at: "2026-09-18T09:00:00Z",
+  current_period_end: null,
+});
+
+Deno.test("only a trial waits for the reveal; a paying account sees it once it is written", () => {
+  assert(waitsForReveal(TRIAL, 24, NOW), "trial");
+  assertFalse(waitsForReveal(account(), 24, NOW), "active");
+  assertFalse(waitsForReveal(account({ current_period_end: null }), 24, NOW), "active, not yet billed");
+  assertFalse(
+    waitsForReveal(account({ payment_type: "cancelled", cancelled_at: "2026-09-12T00:00:00Z" }), 24, NOW),
+    "cancelled with paid time left",
+  );
+});
+
+Deno.test("the reveal is a day away for a trial and now for a paying account", () => {
+  assertEquals(unlockAtFor(true, NOW, 24).toISOString(), "2026-09-18T10:00:00.000Z");
+  assertEquals(unlockAtFor(false, NOW, 24).toISOString(), NOW.toISOString());
+});
+
+Deno.test("a paid-for kundali asked for now is delayed, never waiting, and locked until written", () => {
+  const instant = row({
+    status: "queued",
+    report: null,
+    generated_at: null,
+    requested_at: NOW.toISOString(),
+    unlock_at: unlockAtFor(false, NOW, 24).toISOString(),
+  });
+  const payload = kundaliPayload(instant, options);
+  assertEquals(payload.state, "delayed");
+  assertFalse("chart" in payload);
+  assertFalse("report" in payload);
+
+  const written = kundaliPayload({ ...instant, status: "ready", report: row().report }, options);
+  assertEquals(written.state, "ready");
+  assert("report" in written);
+});
+
+Deno.test("the wait is lifted only for a paying account whose live kundali is still locked", () => {
+  const locked = row({ status: "ready", unlock_at: "2026-09-18T09:00:00Z" });
+  assert(shouldLiftLock(locked, false, NOW), "paid, locked, ready");
+  assert(shouldLiftLock({ ...locked, status: "queued" }, false, NOW), "paid, locked, not written");
+  assertFalse(shouldLiftLock(locked, true, NOW), "still in trial");
+  assertFalse(shouldLiftLock(row(), false, NOW), "already revealed");
+  assertFalse(shouldLiftLock({ ...locked, superseded_at: "2026-09-17T00:00:00Z" }, false, NOW), "superseded");
+  assertFalse(shouldLiftLock({ ...locked, status: "failed" }, false, NOW), "failed");
 });
 
 // ---------------------------------------------------------------- the request

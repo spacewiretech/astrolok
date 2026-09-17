@@ -596,6 +596,9 @@ abstract final class P {
   static const isRegeneration = 'is_regeneration';
   static const regenerationsLeft = 'regenerations_left';
   static const unlockHours = 'unlock_hours';
+
+  /// No wait before the reveal: a paying account's kundali, shown as soon as it is written.
+  static const instant = 'instant';
   static const timeZone = 'time_zone';
   static const prefilledDob = 'prefilled_dob';
   static const prefilledTime = 'prefilled_time';

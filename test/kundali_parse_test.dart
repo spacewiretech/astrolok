@@ -74,6 +74,29 @@ void main() {
       expect(items.map((i) => i.status), [StageStatus.done, StageStatus.done, StageStatus.active, StageStatus.pending]);
     });
 
+    test('a paid-for kundali has no wait, and is being written until the server says ready', () {
+      const at = '2026-09-17T12:00:00Z';
+      final instant = KundaliSummary.fromServer(
+        _summary(state: 'delayed', requested: at, unlock: at, serverNow: '2026-09-17T12:00:05Z'),
+        receivedAt: DateTime.parse('2026-09-17T12:00:05Z'),
+      )!;
+      expect(instant.isInstant, isTrue);
+      expect(instant.isWritingNow(DateTime.parse('2026-09-17T12:00:30Z')), isTrue);
+      // Past the window it is late, and the screen says so rather than "a few seconds" forever.
+      expect(instant.isWritingNow(DateTime.parse('2026-09-17T12:03:00Z')), isFalse);
+
+      final written = KundaliSummary.fromServer(
+        _summary(state: 'ready', requested: at, unlock: at, serverNow: '2026-09-17T12:00:20Z'),
+        receivedAt: DateTime.parse('2026-09-17T12:00:20Z'),
+      )!;
+      expect(written.isWritingNow(DateTime.parse('2026-09-17T12:00:20Z')), isFalse);
+
+      // A trial's is a day's wait, counting down rather than being written.
+      final trial = KundaliSummary.fromServer(_summary(), receivedAt: DateTime.parse('2026-09-17T12:00:00Z'))!;
+      expect(trial.isInstant, isFalse);
+      expect(trial.isWritingNow(DateTime.parse('2026-09-17T12:00:00Z')), isFalse);
+    });
+
     test('a failed kundali shows nothing in progress', () {
       final s = KundaliSummary.fromServer(_summary(state: 'failed'), receivedAt: DateTime.parse('2026-09-17T12:00:00Z'))!;
       expect(kundaliStageItems(s, DateTime.parse('2026-09-17T12:00:00Z')).any((i) => i.status == StageStatus.active), isFalse);

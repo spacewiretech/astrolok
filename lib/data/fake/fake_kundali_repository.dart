@@ -11,10 +11,20 @@ import 'fake_session.dart';
 /// The wait is real but short — [unlockAfter] — so the whole journey, form to countdown to reveal,
 /// can be seen in one sitting. The chart is a genuine one from the server's engine; the reading is
 /// canned.
+///
+/// A paying account's kundali has no wait: `unlockAfter: Duration.zero`, with [writeAfter] standing
+/// in for the seconds the reading takes to write.
 class FakeKundaliRepository implements KundaliRepository {
-  FakeKundaliRepository({this.unlockAfter = const Duration(seconds: 45), this.latency = true});
+  FakeKundaliRepository({
+    this.unlockAfter = const Duration(seconds: 45),
+    this.writeAfter = Duration.zero,
+    this.latency = true,
+  });
 
   final Duration unlockAfter;
+
+  /// How long after the request the reading is written. Past the reveal and before this, `delayed`.
+  final Duration writeAfter;
 
   /// Off in tests, where a timer left pending at teardown fails the test.
   final bool latency;
@@ -95,7 +105,11 @@ class FakeKundaliRepository implements KundaliRepository {
     final moon = fakeKundaliChart['moon'] as Map;
     return {
       ...row,
-      'state': now.isBefore(unlock) ? 'waiting' : 'ready',
+      'state': now.isBefore(unlock)
+          ? 'waiting'
+          : now.isBefore(requested.add(writeAfter))
+              ? 'delayed'
+              : 'ready',
       'server_now': now.toIso8601String(),
       'unlock_hours': span.inSeconds / 3600,
       'teaser': {

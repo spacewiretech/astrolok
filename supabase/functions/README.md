@@ -31,8 +31,8 @@ they are invoked with the anon key, before any session exists — so each valida
 | `cashfree-webhook` | POST from Cashfree | **HMAC signature** | verifies `x-webhook-signature` over the raw body, dedupes, drives `syncSubscription` |
 | `subscription-reconcile` | POST from `pg_cron` | **shared secret** | `app_config.reconcile_secret`, compared with `constantTimeEquals`; sweeps abandoned/drifted/stale subscriptions |
 | `place-search` | POST `{action: autocomplete \| details, …, session_token}` | bearer + entitled | Google Places (New) + Time Zone API with the key server-side; metered per user per hour (`place_search_per_hour`) |
-| `kundali` | POST `{action: status \| report \| request, …}` | bearer + entitled (trial OK) | casts the chart at request time; `report` answers **409 `not_ready` until `unlock_at`** — the lock lives in `kundaliPayload`, the only serializer |
-| `kundali-worker` | POST from `pg_cron` (every 5 min) | **shared secret** (`x-cron-secret`) | answers 202, then writes due readings with Gemini after the response; retries with backoff |
+| `kundali` | POST `{action: status \| report \| request, …}` | bearer + entitled (trial OK) | casts the chart at request time; `report` answers **409 `not_ready` until `unlock_at`** — the lock lives in `kundaliPayload`, the only serializer. A trial's `unlock_at` is 24 h out; a paying account's is now, and its reading is written straight after the response (`_shared/kundali_generate.ts`) |
+| `kundali-worker` | POST from `pg_cron` (every 5 min) | **shared secret** (`x-cron-secret`) | answers 202, then writes due readings with Gemini after the response; retries with backoff, including a paying account's instant attempt that failed |
 | `notification-dispatch` | POST from `pg_cron` (every 5 min); `{action: dry_run \| send_test}` for an operator | **shared secret** (`x-cron-secret`) | finds each enabled campaign's candidates, enqueues, sends through FCM HTTP v1. Nothing is sent while `notifications_enabled` is false |
 | `cancellation-feedback` | POST `{reason, comment?, source?, notification_id?}` | bearer, **no entitlement check** | why a mandate was cancelled; one answer per subscription |
 

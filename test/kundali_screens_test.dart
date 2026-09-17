@@ -147,6 +147,24 @@ void main() {
         expect(find.text('Chat with Astro'), findsOneWidget);
         await teardownScreen(tester);
       });
+
+      testWidgets('a paid-for kundali says a few seconds, with no countdown, at $size', (tester) async {
+        final fake = FakeKundaliRepository(
+          unlockAfter: Duration.zero,
+          writeAfter: const Duration(minutes: 2),
+          latency: false,
+        );
+        await fake.request(birthDate: DateTime(1995, 3, 21), birthTime: '10:30', place: _place);
+        await pumpAt(tester, size, const KundaliWaitingView(), kundali: fake);
+
+        expect(tester.takeException(), isNull);
+        expect(find.textContaining('This takes just a few seconds.'), findsOneWidget);
+        expect(find.text('Writing your life insights…'), findsOneWidget);
+        expect(find.text('Revealed in'), findsNothing);
+        expect(find.text('Almost ready'), findsNothing);
+        expect(find.text('Notify me when ready'), findsNothing);
+        await teardownScreen(tester);
+      });
     }
   });
 
@@ -194,6 +212,14 @@ void main() {
       final fake = await requested();
       await pumpAt(tester, tall, const KundaliCard(), kundali: fake);
       expect(find.textContaining('Ready in '), findsOneWidget);
+      await teardownScreen(tester);
+    });
+
+    testWidgets('says Preparing while a paid-for kundali is written', (tester) async {
+      final fake = FakeKundaliRepository(unlockAfter: Duration.zero, writeAfter: const Duration(minutes: 2), latency: false);
+      await fake.request(birthDate: DateTime(1995, 3, 21), birthTime: '10:30', place: _place);
+      await pumpAt(tester, tall, const KundaliCard(), kundali: fake);
+      expect(find.text('Preparing…'), findsOneWidget);
       await teardownScreen(tester);
     });
 

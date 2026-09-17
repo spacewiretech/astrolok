@@ -120,6 +120,18 @@ class KundaliSummary {
   /// True once the reveal time has passed. The server still has to say [KundaliState.ready].
   bool isPastUnlock([DateTime? deviceNow]) => !serverTime(deviceNow).isBefore(unlockAt);
 
+  /// Revealed the moment it is written, with no wait: asked for by a paying account. Only a trial
+  /// waits the day. Derived from the two times rather than sent, so a cached summary reads too.
+  bool get isInstant => unlockAt.difference(requestedAt) < const Duration(minutes: 1);
+
+  /// How long past the reveal a reading still being written is expected any second, rather than
+  /// late. Long enough for a model call; after it the screen says it is taking longer.
+  static const writingWindow = Duration(minutes: 3);
+
+  /// The reveal has passed and the reading is being written right now.
+  bool isWritingNow([DateTime? deviceNow]) =>
+      state == KundaliState.delayed && serverTime(deviceNow).difference(unlockAt) < writingWindow;
+
   /// The stage in progress, 0-3, or 4 when every stage is done.
   ///
   /// The last stage — the reading itself — only completes when the server says the reading is

@@ -5,6 +5,7 @@ import '../../data/analytics/analytics.dart';
 import '../../data/analytics/analytics_events.dart';
 import '../../data/entitlement.dart';
 import '../../data/kundali_summary.dart';
+import '../../data/models/app_user.dart';
 import '../../data/models/birth_place.dart';
 import '../../data/models/kundali.dart';
 import '../../data/providers.dart';
@@ -124,6 +125,7 @@ class KundaliFormViewModel extends AutoDisposeFamilyNotifier<KundaliFormState, b
         P.regenerationsLeft: summary.regenerationsLeft,
         P.timeZone: place.timeZoneId,
         P.unlockHours: summary.unlockHours,
+        P.instant: summary.isInstant,
       });
 
       state = state.copyWith(busy: false);
@@ -138,6 +140,10 @@ class KundaliFormViewModel extends AutoDisposeFamilyNotifier<KundaliFormState, b
       return null;
     }
   }
+
+  /// Whether a re-cast chart is revealed after another wait, which only a trial's is. The server
+  /// decides; the confirmation only has to say the same thing it will do.
+  bool get recastWaits => ref.read(entitlementProvider)?.paymentType == PaymentType.trial;
 
   String? _refuse(String message) {
     state = state.copyWith(error: message);

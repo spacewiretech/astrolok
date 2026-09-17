@@ -128,7 +128,13 @@ class KundaliFormView extends ConsumerWidget {
         routeSettings: const RouteSettings(name: 'kundali-recast'),
         builder: (context) => AlertDialog(
           title: Text(KundaliCopy.regenerateTitle, style: AppText.section),
-          content: Text(KundaliCopy.regenerateBody(state.existing?.regenerationsLeft ?? 0), style: AppText.body),
+          content: Text(
+            KundaliCopy.regenerateBody(
+              state.existing?.regenerationsLeft ?? 0,
+              waits: ref.read(kundaliFormViewModelProvider(edit).notifier).recastWaits,
+            ),
+            style: AppText.body,
+          ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context, false), child: const Text(KundaliCopy.cancel)),
             TextButton(onPressed: () => Navigator.pop(context, true), child: const Text(KundaliCopy.regenerateConfirm)),
