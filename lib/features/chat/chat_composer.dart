@@ -10,6 +10,7 @@ import '../../data/analytics/analytics.dart';
 import '../../data/analytics/analytics_events.dart';
 import '../../data/models/astro_message.dart';
 import '../../widgets/safe_asset.dart';
+import 'chat_birth_time_sheet.dart';
 import 'chat_copy.dart';
 import 'chat_rating.dart';
 import 'chat_state.dart';
@@ -27,9 +28,15 @@ class ChatComposer extends StatefulWidget {
     required this.onSend,
     required this.onDraftRestored,
     required this.onRate,
+    this.focus,
   });
 
   final ChatState state;
+
+  /// The field's focus, when the screen needs to put the cursor there itself — the note under a
+  /// reply asking for a birthplace does. Owned by whoever passes it; one is made here otherwise.
+  final FocusNode? focus;
+
   /// The second argument names the affordance the message came from — `composer`, `quick_reply`
   /// or `birth_time`. Only this widget knows which, and the three are very different levels of
   /// intent: a tapped suggestion is nearly free, a typed sentence is not.
@@ -49,7 +56,8 @@ class ChatComposer extends StatefulWidget {
 
 class _ChatComposerState extends State<ChatComposer> {
   final _controller = TextEditingController();
-  final _focus = FocusNode();
+  FocusNode? _ownFocus;
+  FocusNode get _focus => widget.focus ?? (_ownFocus ??= FocusNode());
 
   /// How long the thank-you stays before the card folds away.
   static const _thanksFor = Duration(milliseconds: 1600);
@@ -85,7 +93,7 @@ class _ChatComposerState extends State<ChatComposer> {
     _thanks?.cancel();
     _controller.dispose();
     _feedback.dispose();
-    _focus.dispose();
+    _ownFocus?.dispose();
     super.dispose();
   }
 
@@ -120,25 +128,11 @@ class _ChatComposerState extends State<ChatComposer> {
     setState(() => _picked = null);
   }
 
+  /// The same sheet the note under the reply opens. See [askBirthTime] for why it is not a clock.
   Future<void> _pickTime() async {
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: const TimeOfDay(hour: 9, minute: 0),
-      helpText: ChatCopy.birthTimePrompt,
-    );
-    if (picked == null || !mounted) return;
-
-    // Sent as ordinary words rather than as a form value: it becomes a turn in the transcript,
-    // and "07:30" sitting in a navy bubble would read as a machine talking. The server picks
-    // the time back out of the sentence.
-    //
-    // With AM or PM, never as a bare "11:55". The server no longer guesses which half of the day
-    // an unmarked hour means — guessing morning is how someone born at 11:55 at night got the
-    // wrong chart — so an unmarked time would only be asked about all over again.
-    final hour = picked.hourOfPeriod == 0 ? 12 : picked.hourOfPeriod;
-    final minute = picked.minute.toString().padLeft(2, '0');
-    final period = picked.period == DayPeriod.am ? 'AM' : 'PM';
-    _send('I was born at $hour:$minute $period.', 'birth_time');
+    final sentence = await askBirthTime(context, source: 'composer');
+    if (sentence == null || !mounted) return;
+    _send(sentence, 'birth_time');
   }
 
   @override
@@ -262,6 +256,9 @@ class _QuickReplies extends StatelessWidget {
 ///
 /// A real picker rather than trusting free text: the birth time decides the nakshatra, and
 /// "half seven-ish" is not something worth guessing a chart from.
+///
+/// Kept here as well as under the reply's verdict: the question itself is written at the foot of
+/// the reply, and someone who reads down to it looks for the answer here.
 class _TimeRequest extends StatelessWidget {
   const _TimeRequest({required this.onPick, required this.onUnknown});
 

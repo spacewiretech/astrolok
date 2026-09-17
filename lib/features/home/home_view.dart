@@ -87,6 +87,12 @@ class _HomeViewState extends ConsumerState<HomeView> {
     // redraw when it lands, and the provider is kept alive, so this one read outlives the screen.
     final threads = ref.read(chatThreadsProvider);
 
+    // Dark until `kundali_enabled` is switched on from the dashboard, so an installed build never
+    // advertises a backend that is not deployed yet. One read for both the promo slide and the
+    // card, so the two cannot disagree.
+    final kundaliEnabled =
+        (ref.watch(appConfigProvider).valueOrNull ?? shippedAppConfig).configFlag(kundaliEnabledKey);
+
     // Once per visit, not per rebuild. What the user already has decides what Home is for: an
     // account with three readings and a chat history is a returning user, and one with none is
     // still deciding whether the app does anything.
@@ -157,10 +163,19 @@ class _HomeViewState extends ConsumerState<HomeView> {
               ],
 
               const SizedBox(height: 20),
-              // The three cards each open the reading they advertise, in the same order as the
-              // Explore rows below, so the strip and the list never disagree about what exists.
+              // Each card opens the reading it advertises, in the same order as the Explore rows
+              // below, so the strip and the list never disagree about what exists.
               PromoCarousel(
                 slides: [
+                  if (kundaliEnabled)
+                    PromoSlide(
+                      image: Img.promoKundali,
+                      label: "Kundali Chart. Your stars hold a story. Let's discover yours. "
+                          'Discover now.',
+                      // The gate, not a screen: unlike the card, the strip has no summary of its
+                      // own to route by, and the gate asks the server which screen is current.
+                      onTap: () => _openReading(context, Routes.kundali, ReadingFeature.kundali, 'carousel'),
+                    ),
                   PromoSlide(
                     image: Img.promoChatAstro,
                     // The card's heading and button are pixels, so this is the only thing a
@@ -211,9 +226,7 @@ class _HomeViewState extends ConsumerState<HomeView> {
                 fallbackIcon: Icons.face_retouching_natural_outlined,
                 onTap: () => _openReading(context, Routes.faceCapture, 'face', 'card'),
               ),
-              // Dark until `kundali_enabled` is switched on from the dashboard, so an installed
-              // build never shows a card for a backend that is not deployed yet.
-              if ((ref.watch(appConfigProvider).valueOrNull ?? shippedAppConfig).configFlag(kundaliEnabledKey)) ...[
+              if (kundaliEnabled) ...[
                 const SizedBox(height: 14),
                 const KundaliCard(),
               ],
@@ -224,9 +237,9 @@ class _HomeViewState extends ConsumerState<HomeView> {
     );
   }
 
-  /// Opens one of the three destinations, recording which surface sent them.
+  /// Opens one of the reading destinations, recording which surface sent them.
   ///
-  /// The carousel and the cards below it advertise exactly the same three things, so without
+  /// The carousel and the cards below it advertise exactly the same things, so without
   /// [surface] the two are one number and there is no way to tell whether the strip at the top
   /// of the screen earns the space it takes.
   Future<void> _openReading(
@@ -241,8 +254,9 @@ class _HomeViewState extends ConsumerState<HomeView> {
     });
 
     // A trial is one palm reading and one face reading. Once one is spent, the tap explains that
-    // rather than opening a camera whose photo the server would refuse.
-    if (destination != ReadingFeature.chat &&
+    // rather than opening a camera whose photo the server would refuse. Chat and the kundali are
+    // not photo readings, and never pass through here.
+    if ((destination == ReadingFeature.palm || destination == ReadingFeature.face) &&
         await guardTrialScan(context, ref, destination, source: surface)) {
       return;
     }

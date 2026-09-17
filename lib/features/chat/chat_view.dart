@@ -19,6 +19,7 @@ import '../../widgets/audio_bars.dart';
 import '../../widgets/brand_logo.dart';
 import '../../widgets/circle_icon_button.dart';
 import '../../widgets/safe_asset.dart';
+import 'chat_birth_time_sheet.dart';
 import 'chat_composer.dart';
 import 'chat_copy.dart';
 import 'chat_drawer.dart';
@@ -51,6 +52,10 @@ class ChatView extends ConsumerStatefulWidget {
 class _ChatViewState extends ConsumerState<ChatView> {
   final _scroll = ScrollController();
   final _scaffold = GlobalKey<ScaffoldState>();
+
+  /// The composer's field, held here so the note under a reply asking for a birthplace can put
+  /// the cursor in it.
+  final _composerFocus = FocusNode();
 
   @override
   void initState() {
@@ -88,6 +93,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
   @override
   void dispose() {
     _scroll.dispose();
+    _composerFocus.dispose();
     super.dispose();
   }
 
@@ -166,6 +172,21 @@ class _ChatViewState extends ConsumerState<ChatView> {
     ref.read(selectedThreadProvider.notifier).state = ChatThread.draftId;
   }
 
+  /// Answers what the newest reply asked for, from the note under its verdict.
+  Future<void> _answerAsk(AskFor ask, ChatViewModel model) async {
+    switch (ask) {
+      case AskFor.birthTime:
+        final sentence = await askBirthTime(context, source: 'reply');
+        if (sentence == null || !mounted) return;
+        model.send(sentence, entry: 'birth_time');
+      case AskFor.birthPlace:
+        analytics.track(Ev.elementTapped, {P.elementId: 'chat_ask_birth_place'});
+        _composerFocus.requestFocus();
+      case AskFor.none:
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final selected = ref.watch(selectedThreadProvider);
@@ -235,11 +256,13 @@ class _ChatViewState extends ConsumerState<ChatView> {
                             onSpeak: model.toggleSpeech,
                             onRevealed: model.revealed,
                             onReplyEntered: _bringReplyIntoView,
+                            onAsk: (ask) => _answerAsk(ask, model),
                           ),
               ),
 
               ChatComposer(
                 state: state,
+                focus: _composerFocus,
                 onSend: (message, entry) => model.send(message, entry: entry),
                 onDraftRestored: model.pendingRestored,
                 onRate: (rating, comment) => model.rate(rating, comment: comment),
@@ -388,6 +411,7 @@ class _Transcript extends StatelessWidget {
     required this.onSpeak,
     required this.onRevealed,
     required this.onReplyEntered,
+    required this.onAsk,
   });
 
   final ChatState state;
@@ -397,6 +421,9 @@ class _Transcript extends StatelessWidget {
 
   /// See [ChatReveal.onEntered].
   final void Function(BuildContext context) onReplyEntered;
+
+  /// The note under the newest reply's verdict was tapped.
+  final ValueChanged<AskFor> onAsk;
 
   @override
   Widget build(BuildContext context) {
@@ -413,7 +440,8 @@ class _Transcript extends StatelessWidget {
       itemBuilder: (context, index) {
         if (state.sending && index == 0) return const _Thinking();
 
-        final message = items[index - (state.sending ? 1 : 0)];
+        final position = index - (state.sending ? 1 : 0);
+        final message = items[position];
         return Padding(
           padding: const EdgeInsets.only(bottom: 16),
           child: message.isUser
@@ -428,9 +456,14 @@ class _Transcript extends StatelessWidget {
                   // Only the reply that just arrived. Everything else — history, the cache, a
                   // bubble scrolled back into view — is already finished.
                   revealing: state.revealingId == message.id,
+                  // Only on the newest turn — [ChatState.askFor] is already `none` for anything
+                  // older and while a turn is in flight — and not once the day is spent, when there
+                  // is no way left to answer.
+                  ask: position == 0 && state.canSend ? state.askFor : AskFor.none,
                   onSpeak: () => onSpeak(message),
                   onRevealed: () => onRevealed(message.id),
                   onEntered: onReplyEntered,
+                  onAsk: onAsk,
                 ),
         );
       },
@@ -480,9 +513,11 @@ class _AstroBubble extends StatelessWidget {
     required this.canSpeak,
     required this.speaking,
     required this.revealing,
+    required this.ask,
     required this.onSpeak,
     required this.onRevealed,
     required this.onEntered,
+    required this.onAsk,
   });
 
   final AstroMessage message;
@@ -492,14 +527,24 @@ class _AstroBubble extends StatelessWidget {
   /// True only for the reply that just arrived. See [ChatReveal.active].
   final bool revealing;
 
+  /// What this reply is still waiting to be told, or `none`. Only ever set on the newest reply.
+  final AskFor ask;
+
   final VoidCallback onSpeak;
   final VoidCallback onRevealed;
 
   /// See [ChatReveal.onEntered].
   final void Function(BuildContext context) onEntered;
 
+  final ValueChanged<AskFor> onAsk;
+
   @override
   Widget build(BuildContext context) {
+    // The note takes the first staged slot, straight after the verdict has typed itself out, and
+    // everything under it moves back one.
+    final asking = ask != AskFor.none;
+    final staged = asking ? 1 : 0;
+
     return ChatReveal(
       active: revealing,
       onEntered: onEntered,
@@ -528,9 +573,21 @@ class _AstroBubble extends StatelessWidget {
               _VerdictCard(emoji: message.titleEmoji, text: verdict),
             ],
 
+            // Directly under the answer rather than where the question is written, at the foot of
+            // the reply: someone who reads only the verdict must still find out they were asked.
+            if (asking)
+              RevealedPart(
+                progress: progress,
+                index: 0,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: _AskNote(ask: ask, onTap: () => onAsk(ask)),
+                ),
+              ),
+
             RevealedPart(
               progress: progress,
-              index: 0,
+              index: staged,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -552,7 +609,7 @@ class _AstroBubble extends StatelessWidget {
             for (final (index, section) in message.sections.indexed)
               RevealedPart(
                 progress: progress,
-                index: index + 1,
+                index: index + 1 + staged,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -640,6 +697,100 @@ class _VerdictCard extends StatelessWidget {
                 fontSize: 16,
                 height: 1.4,
                 color: AppColors.navy,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// What the sage asked for, said plainly under the answer, with the way to give it.
+///
+/// Softer than [_VerdictCard] on purpose — a cream card with a thin gold edge rather than a gold
+/// wash — so it reads as an aside from Astro and never competes with the answer above it.
+class _AskNote extends StatelessWidget {
+  const _AskNote({required this.ask, required this.onTap});
+
+  final AskFor ask;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final (emoji, heading, reason, action, icon) = switch (ask) {
+      AskFor.birthPlace => (
+          '📍',
+          ChatCopy.askPlaceHeading,
+          ChatCopy.askPlaceReason,
+          ChatCopy.birthPlaceAction,
+          Icons.edit_location_alt_outlined,
+        ),
+      _ => (
+          '🪔',
+          ChatCopy.askTimeHeading,
+          ChatCopy.askTimeReason,
+          ChatCopy.birthTimeAction,
+          Icons.schedule_rounded,
+        ),
+    };
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 11, 12, 12),
+      decoration: BoxDecoration(
+        color: AppColors.cardSoft,
+        borderRadius: AppShape.control,
+        border: Border.all(color: AppColors.gold.withValues(alpha: 0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ExcludeSemantics(child: Text(emoji, style: const TextStyle(fontSize: 18))),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(heading, style: AppText.title.copyWith(fontSize: 14, height: 1.3)),
+                    const SizedBox(height: 2),
+                    Text(reason, style: AppText.meta.copyWith(fontSize: 13, height: 1.4)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Material(
+            color: AppColors.navy,
+            borderRadius: AppShape.pill,
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 16, color: AppColors.gold),
+                    const SizedBox(width: 7),
+                    Flexible(
+                      child: Text(
+                        action,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.meta.copyWith(
+                          fontSize: 13,
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

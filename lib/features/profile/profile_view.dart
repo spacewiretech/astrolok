@@ -216,11 +216,16 @@ class ProfileView extends ConsumerWidget {
   ) async {
     final picked = await showModalBottomSheet<String>(
       context: context,
+      // Allowed past the default nine-sixteenths of the screen. Seven languages under the heading
+      // are taller than that on most phones, and the capped sheet overflowed and hid the last few.
+      isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (sheet) => SafeArea(
+        top: false,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -237,15 +242,24 @@ class ProfileView extends ConsumerWidget {
                 style: AppText.body.copyWith(color: AppColors.muted),
               ),
             ),
-            for (final language in languages)
-              ListTile(
-                title: Text(language, style: AppText.title),
-                trailing: language == selected
-                    ? const Icon(Icons.check_rounded, color: AppColors.gold)
-                    : null,
-                onTap: () => Navigator.of(sheet).pop(language),
+            // Sized to the list when it fits and scrolling when it does not, so the sheet stays
+            // short on a tall phone and a longer list from the dashboard can never overflow it.
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                padding: const EdgeInsets.only(bottom: 8),
+                children: [
+                  for (final language in languages)
+                    ListTile(
+                      title: Text(language, style: AppText.title),
+                      trailing: language == selected
+                          ? const Icon(Icons.check_rounded, color: AppColors.gold)
+                          : null,
+                      onTap: () => Navigator.of(sheet).pop(language),
+                    ),
+                ],
               ),
-            const SizedBox(height: 8),
+            ),
           ],
         ),
       ),

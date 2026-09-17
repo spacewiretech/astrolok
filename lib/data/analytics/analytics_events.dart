@@ -209,6 +209,14 @@ abstract final class Ev {
   static const chatRated = 'Chat Rated';
   static const chatRatingDismissed = 'Chat Rating Dismissed';
 
+  /// The birth time sheet opened, from the note under a reply or the button above the composer.
+  static const chatBirthTimeOpened = 'Chat Birth Time Opened';
+
+  /// The sheet was answered with a time or with "I don't know". `adjusted` false on a known time
+  /// means the wheels were never moved off the part of day's first hour — the preset the old clock
+  /// picker's 9 AM default taught people to accept.
+  static const chatBirthTimeChosen = 'Chat Birth Time Chosen';
+
   // ---------------------------------------------------------------- profile
 
   static const profileViewed = 'Profile Viewed';
@@ -574,6 +582,11 @@ abstract final class P {
   static const optionIndex = 'option_index';
   static const askFor = 'ask_for';
   static const hasOpener = 'has_opener';
+
+  /// On the birth time sheet: `early_morning` … `after_midnight`.
+  static const partOfDay = 'part_of_day';
+  static const adjusted = 'adjusted';
+  static const unknown = 'unknown';
 
   // ---------------------------------------------------------------- profile
 

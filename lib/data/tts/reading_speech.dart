@@ -1,7 +1,27 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+
+/// One sentence to speak, and how long to stay silent after it.
+@immutable
+class SpeechSegment {
+  const SpeechSegment(this.text, this.pauseAfter);
+
+  final String text;
+  final Duration pauseAfter;
+
+  @override
+  bool operator ==(Object other) =>
+      other is SpeechSegment && other.text == text && other.pauseAfter == pauseAfter;
+
+  @override
+  int get hashCode => Object.hash(text, pauseAfter);
+
+  @override
+  String toString() => 'SpeechSegment($text, ${pauseAfter.inMilliseconds}ms)';
+}
 
 /// Reads a palm reading aloud, using the voice already on the device.
 ///
@@ -23,9 +43,22 @@ class ReadingSpeech {
   /// second tap cancels the first playback rather than the two interleaving.
   int _generation = 0;
 
-  /// Some Android engines truncate long strings and become sluggish to stop mid-utterance.
-  /// Speaking in sentence-sized pieces also makes stopping feel immediate.
-  static const _maxChunk = 300;
+  /// The breath after a sentence, and the longer rest between a reading's parts — verdict,
+  /// opening, each section.
+  ///
+  /// Silence rather than a slower voice alone: counsel read without a pause is heard as a stream,
+  /// and the listener needs a beat to take one line in before the next arrives. Spaces cannot do
+  /// this — every engine collapses a run of whitespace to one.
+  ///
+  /// Short, because they add to the engine's own gap between utterances rather than replacing it:
+  /// 350 and 800 ms, the first values tried, left the reading sounding halting.
+  static const _sentencePause = Duration(milliseconds: 120);
+  static const _paragraphPause = Duration(milliseconds: 350);
+
+  /// The pause in progress, so [stop] can end it at once instead of leaving a cancelled [speak]
+  /// to finish late — which would clear a "speaking" flag that a new playback has since set.
+  Timer? _pauseTimer;
+  Completer<void>? _pauseDone;
 
   /// The language the engine is currently set to speak, so [prepare] can skip re-setting it.
   String? _language;
@@ -94,8 +127,10 @@ class ReadingSpeech {
         );
       }
 
-      // The scales differ by platform: 0.5 is ordinary on Android and noticeably fast on iOS.
-      await _tts.setSpeechRate(Platform.isIOS ? 0.45 : 0.52);
+      // Unhurried on both, and the scales differ. On Android the plugin doubles the value before
+      // the engine sees it, so 0.44 is 0.88× ordinary speech — 0.52 was slightly *faster* than
+      // ordinary, and listeners said so. On iOS 0.5 is AVSpeech's default, so 0.40 is a calmer pace.
+      await _tts.setSpeechRate(Platform.isIOS ? 0.40 : 0.44);
       await _tts.setPitch(1.0);
       await _tts.setVolume(1.0);
 
@@ -161,10 +196,13 @@ class ReadingSpeech {
     final generation = _generation;
 
     try {
-      for (final chunk in _chunk(text)) {
-        // A stop, or another speak, happened while the previous chunk was playing.
+      for (final segment in segments(text)) {
+        // A stop, or another speak, happened while the previous sentence was playing.
         if (generation != _generation) return;
-        await _tts.speak(chunk);
+        await _tts.speak(segment.text);
+
+        if (generation != _generation) return;
+        await _pause(segment.pauseAfter);
       }
     } catch (error) {
       debugPrint('[reading] speech failed: $error');
@@ -174,6 +212,7 @@ class ReadingSpeech {
   Future<void> stop() async {
     if (!_available) return;
     _generation++;
+    _endPause();
     try {
       await _tts.stop();
     } catch (error) {
@@ -181,33 +220,58 @@ class ReadingSpeech {
     }
   }
 
-  /// Splits on sentence ends, then regroups into pieces under [_maxChunk].
+  Future<void> _pause(Duration length) {
+    if (length <= Duration.zero) return Future.value();
+
+    final done = _pauseDone = Completer<void>();
+    _pauseTimer = Timer(length, _endPause);
+    return done.future;
+  }
+
+  void _endPause() {
+    _pauseTimer?.cancel();
+    _pauseTimer = null;
+    final done = _pauseDone;
+    _pauseDone = null;
+    if (done != null && !done.isCompleted) done.complete();
+  }
+
+  /// The text as sentences, each with the silence that follows it.
   ///
-  /// Grouping back up matters: speaking sentence by sentence leaves an audible gap at every
-  /// full stop, and a reading is eight paragraphs long.
-  static List<String> _chunk(String text) {
-    final sentences = text
-        .split(RegExp(r'(?<=[.!?])\s+|\n+'))
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty);
+  /// Paragraphs are the parts every `spoken` getter joins with a blank line — a reply's verdict,
+  /// title, opening and sections; a reading's invocation, trait and lines — and get the longer
+  /// rest. Sentences within one get a breath. Nothing follows the last.
+  ///
+  /// One utterance per sentence, which also keeps each well inside what an Android engine will
+  /// take in one call, and makes Stop land at once. The engine's own gap between utterances is
+  /// uneven; the pause after it is what makes the rhythm deliberate rather than accidental.
+  ///
+  /// The danda ends a sentence too. Without it a Hindi reply in Devanagari is one long breathless
+  /// utterance.
+  @visibleForTesting
+  static List<SpeechSegment> segments(String text) {
+    final paragraphs = text
+        .split(RegExp(r'\n\s*\n'))
+        .map((paragraph) => paragraph
+            .split(RegExp(r'(?<=[.!?।॥])\s+|\n+'))
+            .map((sentence) => sentence.trim())
+            .where((sentence) => sentence.isNotEmpty)
+            .toList())
+        .where((sentences) => sentences.isNotEmpty)
+        .toList();
 
-    final chunks = <String>[];
-    final buffer = StringBuffer();
-
-    for (final sentence in sentences) {
-      if (buffer.isNotEmpty && buffer.length + sentence.length + 1 > _maxChunk) {
-        chunks.add(buffer.toString());
-        buffer.clear();
-      }
-      if (buffer.isNotEmpty) buffer.write(' ');
-
-      // A single sentence longer than the cap goes out on its own rather than being cut in
-      // the middle of a clause.
-      buffer.write(sentence);
-    }
-
-    if (buffer.isNotEmpty) chunks.add(buffer.toString());
-    return chunks;
+    return [
+      for (final (p, sentences) in paragraphs.indexed)
+        for (final (s, sentence) in sentences.indexed)
+          SpeechSegment(
+            sentence,
+            s < sentences.length - 1
+                ? _sentencePause
+                : p < paragraphs.length - 1
+                    ? _paragraphPause
+                    : Duration.zero,
+          ),
+    ];
   }
 
   Future<void> dispose() => stop();

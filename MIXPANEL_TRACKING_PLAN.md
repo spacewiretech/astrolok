@@ -12,9 +12,9 @@
 
 | Source | Live events | What it answers |
 |--------|-------------|-----------------|
-| **Flutter app** | 128 | Everything the user does in front of the screen: onboarding, paywall, payments, readings, chat, Kundali, push taps, profile |
+| **Flutter app** | 130 | Everything the user does in front of the screen: onboarding, paywall, payments, readings, chat, Kundali, push taps, profile |
 | **Supabase Edge Functions** | 14 | Everything that happens while the app is closed: recurring UPI debits, mandate holds, cancellations, refunds, disputes, push notifications sent, Kundali readings written |
-| **Total live** | **142** | |
+| **Total live** | **144** | |
 
 Six more events are declared in code but not currently emitted — see [§11](#11-declared-but-not-emitted).
 
@@ -155,7 +155,7 @@ App Launched
 | `Splash Resolved` | The splash decides where to send the user | `splash_viewmodel.dart` | `destination`, `is_signed_in`, `entitled`, `has_name`, `has_birth_date`, `payment_type`, `ms` |
 
 **Screen names** reported by `Screen Viewed`: Splash, Onboarding, Birth Date, Paywall, Payment Status, Home, Palm Capture, Palm Scan, Palm Reading, Palm Line, Face Capture, Face Scan, Face Reading, Face Part, Chat, Profile, Downloads, Astro Memory, Kundali, Kundali Form, Kundali Waiting, Kundali Report, Cancellation Reason.
-**Modal names:** UPI App Picker, Chat Drawer, Rename Thread Dialog, Delete Thread Dialog, Forget Fact Dialog, Forget All Dialog.
+**Modal names:** UPI App Picker, Chat Drawer, Rename Thread Dialog, Delete Thread Dialog, Forget Fact Dialog, Forget All Dialog, Birth Time Sheet.
 
 > Note: `/onboarding` is a single route whose three steps are a query parameter, so phone, OTP and name are **one screen**. The step transitions are covered by the explicit onboarding events below, which carry far more than a screen view could.
 
@@ -303,6 +303,8 @@ The single most instrumented flow in the app. **Every event in one checkout atte
 | `Chat Rating Shown` | A reply asks for the five-face rating. **At most once per account** — the server stops asking once they answer or dismiss, so this against the two below is a response rate | `chat_viewmodel.dart` | `thread_id`, `turn_index` |
 | `Chat Rated` | The rating card is submitted with a face picked, and an optional written comment | `chat_viewmodel.dart` | `thread_id`, `rating` (1 worst – 5 best), `has_comment`, `comment_chars` (length only — **the words are never sent to Mixpanel**; read them in `chat_feedback.comment`), `turn_index`, `chat_language` |
 | `Chat Rating Dismissed` | The rating card is closed without a score | `chat_viewmodel.dart` | `thread_id`, `turn_index`, `chat_language` |
+| `Chat Birth Time Opened` | The birth time sheet opens, after a reply asked for the hour | `chat_birth_time_sheet.dart` | `source` (`reply` — the note under the verdict / `composer` — the button above the field) |
+| `Chat Birth Time Chosen` | The sheet is answered with a time or "I don't know" | `chat_birth_time_sheet.dart` | `source`, `unknown`, `part_of_day` (`early_morning` / `morning` / `afternoon` / `evening` / `night` / `after_midnight`), `adjusted` (**false means the wheels were never moved off the part of day's first hour — the preset-acceptance the old 9 AM clock produced**) |
 
 ### 8.4 Profile
 
@@ -584,7 +586,7 @@ The server never *creates* a profile for someone who has not used the app — `i
 3. **Identity** — signup and login land on the same profile; sign-out starts a fresh anonymous session; `install_id` stays constant across both
 4. **App vs server** — `Payment Completed` only from the app, `Mandate Authorised` / `Subscription Renewed` only from the server. Use the server pair for revenue
 5. **Dedupe** — redeliver a Cashfree webhook and confirm the renewal count does not move
-6. **Lexicon** — add descriptions for all 142 live events in Mixpanel Data Management
+6. **Lexicon** — add descriptions for all 144 live events in Mixpanel Data Management
 7. **Funnels** — build the seven funnels in [§4](#4-core-funnels)
 8. **Push** — `notification-dispatch` `send_test` to an internal account; confirm `Notification Sent`, then `Push Opened` and `Push Routed` with the same `notification_id`, then an outcome event carrying `push_campaign`
 
@@ -600,13 +602,13 @@ The server never *creates* a profile for someone who has not used the app — `i
 | Paywall & payment | 31 |
 | Home | 3 |
 | Readings (palm + face, shared vocabulary) | 15 |
-| Chat | 11 |
+| Chat | 13 |
 | Profile | 8 |
 | Push (received, routed, dropped, primer) | 5 |
 | Kundali | 14 |
 | Cancellation reason | 3 |
-| **App subtotal** | **128** |
+| **App subtotal** | **130** |
 | Server / webhook | 9 |
 | Server / notifications & kundali | 5 |
-| **Total live** | **142** |
+| **Total live** | **144** |
 | Declared but not emitted | 7 (6 app + 1 server) |

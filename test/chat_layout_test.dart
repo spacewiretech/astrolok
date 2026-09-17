@@ -2,12 +2,16 @@ import 'package:astrolok/app/theme/app_theme.dart';
 import 'package:astrolok/data/models/astro_message.dart';
 import 'package:astrolok/data/providers.dart';
 import 'package:astrolok/data/repositories/chat_repository.dart';
+import 'package:astrolok/features/chat/chat_birth_time_sheet.dart';
 import 'package:astrolok/features/chat/chat_composer.dart';
+import 'package:astrolok/features/chat/chat_copy.dart';
 import 'package:astrolok/features/chat/chat_rating.dart';
 import 'package:astrolok/features/chat/chat_state.dart';
 import 'package:astrolok/features/chat/chat_view.dart';
 import 'package:astrolok/features/chat/chat_viewmodel.dart';
 import 'package:astrolok/features/profile/memory_view.dart';
+import 'package:astrolok/widgets/date_wheel.dart';
+import 'package:astrolok/widgets/primary_button.dart';
 import 'package:astrolok/widgets/safe_asset.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -585,6 +589,176 @@ void main() {
     });
   });
 
+  group('asking for the birth time', () {
+    const verdict = 'Patience is your inheritance.';
+    const reasoning = 'Your Chandra rests in Vrishabha, a patient sign.';
+
+    AstroMessage asking({String id = 'a', AskFor askFor = AskFor.birthTime}) => AstroMessage(
+          id: id,
+          role: ChatRole.astro,
+          createdAt: DateTime(2026, 9, 4),
+          verdict: verdict,
+          title: 'Before We Begin',
+          text: reasoning,
+          askFor: askFor,
+        );
+
+    /// Opens the sheet from the note under the verdict. The composer's button carries the same
+    /// label, and comes after the transcript in the tree.
+    Future<void> openSheet(WidgetTester tester) async {
+      await tester.tap(find.text(ChatCopy.birthTimeAction).first);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    testWidgets('the note sits under the verdict, above the reasoning', (tester) async {
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(
+        _StubChatRepository(messages: [asking()], remaining: 5),
+      ));
+
+      expect(tester.takeException(), isNull);
+
+      final answer = tester.getTopLeft(find.text(verdict)).dy;
+      final note = tester.getTopLeft(find.text(ChatCopy.askTimeHeading)).dy;
+      final body = tester.getTopLeft(find.text(reasoning)).dy;
+      expect(answer, lessThan(note));
+      expect(note, lessThan(body));
+
+      // Beside the note and still above the composer, both opening the same sheet.
+      expect(find.text(ChatCopy.birthTimeAction), findsNWidgets(2));
+    });
+
+    testWidgets('an older reply that asked keeps no note', (tester) async {
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(
+        _StubChatRepository(
+          remaining: 5,
+          messages: [
+            asking(),
+            AstroMessage(
+              id: 'u',
+              role: ChatRole.user,
+              createdAt: DateTime(2026, 9, 4, 1),
+              text: 'I was born at 6:45 PM.',
+            ),
+            asking(id: 'b', askFor: AskFor.none),
+          ],
+        ),
+      ));
+
+      expect(tester.takeException(), isNull);
+      expect(find.text(ChatCopy.askTimeHeading), findsNothing);
+    });
+
+    testWidgets('no note once the day is spent, when there is no way to answer', (tester) async {
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(
+        _StubChatRepository(messages: [asking()], remaining: 0),
+      ));
+
+      expect(tester.takeException(), isNull);
+      expect(find.text(ChatCopy.askTimeHeading), findsNothing);
+    });
+
+    testWidgets('a birthplace is asked for the same way', (tester) async {
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(
+        _StubChatRepository(messages: [asking(askFor: AskFor.birthPlace)], remaining: 5),
+      ));
+
+      expect(tester.takeException(), isNull);
+      expect(find.text(ChatCopy.askPlaceHeading), findsOneWidget);
+
+      await tester.tap(find.text(ChatCopy.birthPlaceAction));
+      await tester.pump();
+      expect(tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus, isTrue);
+    });
+
+    testWidgets('the sheet sends no time until a part of the day is chosen', (tester) async {
+      final repository = _StubChatRepository(messages: [asking()], remaining: 5);
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(repository));
+
+      await openSheet(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text(ChatCopy.timeSheetTitle), findsOneWidget);
+
+      // No preset: the button names what is missing rather than offering a time nobody chose.
+      expect(find.text(ChatCopy.timeSheetPickFirst), findsOneWidget);
+      expect(tester.widget<PrimaryButton>(find.byType(PrimaryButton)).onPressed, isNull);
+
+      await tester.tap(find.text(ChatCopy.partEvening));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(tester.takeException(), isNull);
+
+      // The wheels open, and the button reads back exactly what it will send.
+      expect(find.text(ChatCopy.timeSheetHour), findsOneWidget);
+      expect(find.text('Confirm 4:00 PM'), findsOneWidget);
+
+      await tester.tap(find.text('Confirm 4:00 PM'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(tester.takeException(), isNull);
+      expect(repository.sent, ['I was born at 4:00 PM.']);
+    });
+
+    testWidgets('the wheels follow the chips, and the button follows the wheels', (tester) async {
+      final repository = _StubChatRepository(messages: [asking()], remaining: 5);
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(repository));
+      await openSheet(tester);
+
+      // Four frames: the wheels open, then scroll themselves into view on the frame after.
+      Future<void> settle() async {
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump(const Duration(milliseconds: 400));
+      }
+
+      // The last row of chips sits below the fold on the smallest phone. The question scrolls; the
+      // button does not.
+      await tester.ensureVisible(find.text(ChatCopy.partNight));
+      await settle();
+
+      // Across both the hour and the half of the day at once: 8 PM to 12 AM.
+      await tester.tap(find.text(ChatCopy.partNight));
+      await settle();
+      expect(find.text('Confirm 8:00 PM'), findsOneWidget);
+
+      await tester.tap(find.text(ChatCopy.partAfterMidnight));
+      await settle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Confirm 12:00 AM'), findsOneWidget);
+
+      // One row down the minute wheel.
+      await tester.drag(find.text('00'), const Offset(0, -DateWheel.itemExtent));
+      await settle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Confirm 12:01 AM'), findsOneWidget);
+    });
+
+    testWidgets('"I don\'t know" is an answer too', (tester) async {
+      final repository = _StubChatRepository(messages: [asking()], remaining: 5);
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(repository));
+
+      await openSheet(tester);
+      await tester.tap(find.text(ChatCopy.timeSheetUnknown));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(tester.takeException(), isNull);
+      expect(repository.sent, [ChatCopy.birthTimeUnknown]);
+    });
+
+    test('a chosen time is always sent with morning or night', () {
+      // The server reads a bare "11:55" as ambiguous and asks again.
+      expect(birthTimeSentence(const TimeOfDay(hour: 0, minute: 5)), 'I was born at 12:05 AM.');
+      expect(birthTimeSentence(const TimeOfDay(hour: 12, minute: 30)), 'I was born at 12:30 PM.');
+      expect(birthTimeSentence(const TimeOfDay(hour: 23, minute: 55)), 'I was born at 11:55 PM.');
+      expect(birthTimeSentence(const TimeOfDay(hour: 7, minute: 0)), 'I was born at 7:00 AM.');
+    });
+  });
+
   group('what Astro remembers', () {
     testWidgets('lists the facts and offers a way out of each', (tester) async {
       await pumpAt(tester, small, const MemoryView(), overrides: [
@@ -659,9 +833,23 @@ class _StubChatRepository implements ChatRepository {
     return ChatThreadList(threads: threadList, facts: facts, remaining: remaining);
   }
 
+  /// Every message sent, oldest first.
+  final sent = <String>[];
+
   @override
-  Future<ChatReply> send(String message, {String? threadId}) async =>
-      throw UnimplementedError('these tests never send');
+  Future<ChatReply> send(String message, {String? threadId}) async {
+    sent.add(message);
+    return ChatReply(
+      threadId: threadId ?? 'thread-1',
+      remaining: remaining,
+      message: AstroMessage(
+        id: 'reply-${sent.length}',
+        role: ChatRole.astro,
+        createdAt: DateTime(2026, 9, 4),
+        text: 'Then your Chandra rests in Rohini.',
+      ),
+    );
+  }
 
   @override
   Future<ChatThreadList> renameThread(String id, String title) async => threads();

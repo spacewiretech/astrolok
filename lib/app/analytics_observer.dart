@@ -58,6 +58,7 @@ const _modalNames = <String, String>{
   'delete-thread': 'Delete Thread Dialog',
   'forget-fact': 'Forget Fact Dialog',
   'forget-all': 'Forget All Dialog',
+  'chat-birth-time': 'Birth Time Sheet',
 };
 
 /// The friendly name for a route pattern, or null when it is not one we know.

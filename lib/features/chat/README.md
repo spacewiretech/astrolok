@@ -21,6 +21,22 @@ The Astro conversation: one route, many threads, with a sidebar for switching be
   `ChatReveal`, `RevealedPart`.
 - `chat_rating.dart` — the five-face rating card the composer raises, once per account. Declares:
   `ChatRatingCard`.
+- `chat_birth_time_sheet.dart` — the sheet that asks for the hour of birth. Declares:
+  `askBirthTime`, `birthTimeSentence`, `formatBirthClock`.
+
+## Asking for what the sage lacks
+
+When a reply's `ask_for` is `birth_time` or `birth_place`, the newest reply shows a note **directly
+under its verdict** saying what Astro asked and why, with the button to answer. The question itself
+is written at the foot of the reply, and a reader who stops at the answer never reaches it. The
+button above the composer stays too, for the reader who does read to the end. Both open the same
+sheet.
+
+The sheet has **no preset time**. It replaced a clock dialog that opened on 9:00 AM without saying
+what it wanted, and a large share of birth times arrived as exactly 9:00 AM. A promoted
+`users.birth_time` is never overwritten, so each of those was a wrong nakshatra for good. The user
+picks a part of the day before anything can be confirmed, and the button reads back the exact time
+it will send. `Chat Birth Time Chosen.adjusted` says whether the wheels were moved after that.
 
 ## The transcript scrolls itself, in exactly two places
 

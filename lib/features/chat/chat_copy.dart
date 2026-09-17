@@ -44,12 +44,55 @@ abstract final class ChatCopy {
 
   // ---------------------------------------------------------------- asking back
 
-  static const birthTimePrompt = 'Set the hour you were born';
-  static const birthTimeAction = 'Choose a time';
+  static const birthTimeAction = 'Share my birth time';
+
+  /// Sent as the user's own words, so it stays a sentence rather than a button label.
   static const birthTimeUnknown = 'I do not know';
 
   static const birthPlacePrompt = 'Where were you born?';
   static const birthPlaceHint = 'City or town';
+  static const birthPlaceAction = 'Type my birthplace';
+
+  // The note under the verdict. The question itself is written at the foot of the reply, which is
+  // exactly where a reader who stopped at the answer never gets to.
+  static const askTimeHeading = 'Astro is asking for your birth time';
+  static const askTimeReason =
+      'Your exact hour reveals your nakshatra, and sharpens every answer that follows.';
+  static const askPlaceHeading = 'Astro is asking where you were born';
+  static const askPlaceReason = 'Your birthplace tunes the chart to the sky you were born under.';
+
+  // ---------------------------------------------------------------- the birth time sheet
+
+  static const timeSheetTitle = 'The moment you arrived';
+  static const timeSheetWhy =
+      'The hour you were born decides your nakshatra — the star you were born beneath.';
+  static const timeSheetWhere =
+      'Look on your birth certificate or janam patri, or ask your mother or family.';
+  static const timeSheetStepDay = 'When in the day were you born?';
+
+  static const partEarlyMorning = 'Early morning';
+  static const partEarlyMorningRange = '4 – 8 AM';
+  static const partMorning = 'Morning';
+  static const partMorningRange = '8 AM – 12 noon';
+  static const partAfternoon = 'Afternoon';
+  static const partAfternoonRange = '12 – 4 PM';
+  static const partEvening = 'Evening';
+  static const partEveningRange = '4 – 8 PM';
+  static const partNight = 'Night';
+  static const partNightRange = '8 PM – 12 midnight';
+  static const partAfterMidnight = 'After midnight';
+  static const partAfterMidnightRange = '12 – 4 AM';
+
+  static const timeSheetStepExact = 'Now turn to the exact hour and minute';
+  static const timeSheetHour = 'Hour';
+  static const timeSheetMinute = 'Minute';
+  static const timeSheetPeriod = 'AM/PM';
+
+  /// Until a part of the day is chosen there is no time to confirm, and the button says so rather
+  /// than offering one the user never picked.
+  static const timeSheetPickFirst = 'Choose a part of the day';
+  static String timeSheetConfirm(String time) => 'Confirm $time';
+  static const timeSheetUnknown = "I don't know my birth time";
 
   // ---------------------------------------------------------------- narration
 
