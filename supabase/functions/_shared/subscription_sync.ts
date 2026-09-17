@@ -33,6 +33,7 @@ import {
 import { asUserRow, USER_COLUMNS, UserRow } from "./entitlement.ts";
 import { facebookCapiConfigured, reportRenewalPurchase } from "./facebook_capi.ts";
 import { incrementProfile, setProfile, trackServer } from "./mixpanel.ts";
+import { onChargeRecorded, onSubscriptionTransition } from "./notification_triggers.ts";
 import { DEFAULT_VARIANT, PricingPlan } from "./pricing.ts";
 import { qualifyReferral } from "./referral.ts";
 
@@ -50,11 +51,13 @@ export interface SubscriptionRow {
   current_period_end?: string | null;
   /** Which side of the price split this mandate was opened on. Null only on a row this predates. */
   plan_variant?: string | null;
+  /** Bumped by every sync, so before one it says when the mandate was last seen in its old state. */
+  updated_at?: string | null;
 }
 
 export const SUBSCRIPTION_COLUMNS =
   "id, user_id, subscription_id, cf_subscription_id, plan_id, status, session_id, " +
-  "session_expiry, authorized_at, next_schedule_date, plan_variant";
+  "session_expiry, authorized_at, next_schedule_date, plan_variant, updated_at";
 
 /** See [asUserRow] — supabase-js cannot infer a row type from a non-literal select string. */
 export function asSubscriptionRow(row: unknown): SubscriptionRow {
@@ -434,6 +437,17 @@ export async function recordPayment(
       // can each be compared between ₹499 and ₹299.
       ...planProps(settings, subscription),
     },
+  });
+
+  // A failed renewal is worth a push while access still has days to run. Only the first time this
+  // charge is seen failing — `prior` is what makes a redelivery a no-op.
+  await onChargeRecorded(db, {
+    userId: subscription.user_id,
+    subscriptionId: subscription.subscription_id,
+    kind,
+    status: payment.status,
+    failed,
+    priorStatus: prior?.status ?? null,
   });
 
   // A referred user becoming a paying one is the moment the referral is worth anything, and it
@@ -877,6 +891,16 @@ export async function syncSubscription(
         plan: planProps(settings, row),
       });
     }
+
+    // The cancellation-reason and on-hold pushes. Inert until `configureNotifications` has run and
+    // the campaign is switched on; never throws, and sends after the response rather than before it.
+    await onSubscriptionTransition(db, {
+      userId: row.user_id,
+      subscriptionId,
+      fromStatus: row.status,
+      toStatus: snapshot.status,
+      previousCheckedAt: row.updated_at ?? null,
+    });
 
     await setProfile(row.user_id, {
       subscription_status: snapshot.status,

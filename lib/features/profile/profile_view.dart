@@ -154,6 +154,7 @@ class ProfileView extends ConsumerWidget {
                             value: language,
                             onTap: () => _pickLanguage(context, ref, languages, language),
                           ),
+                        if (user != null) _OffersRow(user: user),
                         _MenuRow(
                           icon: Icons.card_giftcard_rounded,
                           label: 'Invite friends',
@@ -613,6 +614,62 @@ class _BillingNotice extends StatelessWidget {
           const Icon(Icons.info_outline_rounded, size: 20, color: AppColors.gold),
           const SizedBox(width: 10),
           Expanded(child: Text(message, style: AppText.meta)),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Offers & reminders": on unless the account opted out of marketing pushes. Transactional ones —
+/// a kundali that is ready, a failed autopay — are not affected, and the subtitle says so.
+class _OffersRow extends ConsumerStatefulWidget {
+  const _OffersRow({required this.user});
+
+  final AppUser user;
+
+  @override
+  ConsumerState<_OffersRow> createState() => _OffersRowState();
+}
+
+class _OffersRowState extends ConsumerState<_OffersRow> {
+  bool? _pending;
+
+  Future<void> _set(bool on) async {
+    setState(() => _pending = on);
+    try {
+      final user = await ref.read(authRepositoryProvider).saveMarketingOptOut(!on);
+      ref.read(entitlementProvider.notifier).set(user);
+      analytics.track(Ev.notificationPreferenceChanged, {P.marketingOptOut: !on});
+    } catch (error) {
+      if (mounted) showAppSnackBar(context, 'Could not save that setting. Please try again.', error: true);
+    } finally {
+      if (mounted) setState(() => _pending = null);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final on = _pending ?? !widget.user.pushMarketingOptOut;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 8, 10, 8),
+      child: Row(
+        children: [
+          const Icon(Icons.notifications_none_rounded, size: 22, color: AppColors.navy),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Offers & reminders', style: AppText.title),
+                Text('Your Kundali and payment alerts always arrive.', style: AppText.legal),
+              ],
+            ),
+          ),
+          Switch(
+            value: on,
+            activeTrackColor: AppColors.gold,
+            onChanged: _pending == null ? _set : null,
+          ),
         ],
       ),
     );

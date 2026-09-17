@@ -11,10 +11,8 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_theme.dart';
 import '../../app/theme/app_typography.dart';
 import '../../data/analytics/analytics_events.dart';
-import '../../data/attribution/attribution_service.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/app_config_repository.dart';
-import '../../data/repositories/referral_repository.dart';
 import '../../data/sms/sms_code_reader.dart';
 import '../../widgets/astral_background.dart';
 import '../../widgets/otp_field.dart';
@@ -26,11 +24,14 @@ import '../../widgets/terms_footer.dart';
 import 'onboarding_state.dart';
 import 'onboarding_viewmodel.dart';
 
-/// Phone, OTP and name on one screen.
+/// Phone and OTP on one screen.
 ///
-/// The three frames in the design share a layout: a hero the user can swipe through, pinned
-/// above a sheet whose contents change as the flow advances. Building them as three routes
-/// would rebuild — and so restart — the hero pager on every step.
+/// The frames in the design share a layout: a hero the user can swipe through, pinned above a
+/// sheet whose contents change as the flow advances. Building them as separate routes would
+/// rebuild — and so restart — the hero pager on every step.
+///
+/// The name used to be a third sheet here. It now comes after payment, on the birth screen, so
+/// verifying the code always leaves this screen.
 class OnboardingView extends ConsumerStatefulWidget {
   const OnboardingView({super.key, this.initialStep = OnboardingStep.phone});
 
@@ -42,7 +43,6 @@ class OnboardingView extends ConsumerStatefulWidget {
 
 class _OnboardingViewState extends ConsumerState<OnboardingView> {
   final _phone = TextEditingController();
-  final _name = TextEditingController();
   final _otp = OtpFieldController();
   final _pager = PageController();
 
@@ -69,10 +69,10 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
       final model = ref.read(onboardingViewModelProvider.notifier);
       model.startAt(widget.initialStep);
 
-      // The paywall's promo clip, started four routes before the paywall. Opening a player is a
+      // The paywall's promo clip, started two routes before the paywall. Opening a player is a
       // network round trip, and doing it when the paywall mounts is exactly what turns its video
-      // card into a spinner on the screen that asks for money. Everything from here to the birth
-      // date is lead time.
+      // card into a spinner on the screen that asks for money. Everything from here to the
+      // language pick is lead time.
       //
       // `read`, not `watch`, the same way Home warms the conversation list: this screen has
       // nothing to redraw when the player lands, and the provider is kept alive, so the one read
@@ -83,10 +83,8 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
       // OTP sheet shows the number the user already typed.
       final state = ref.read(onboardingViewModelProvider);
       _phone.text = state.phone;
-      _name.text = state.name;
 
       _phone.addListener(() => model.setPhone(_phone.text));
-      _name.addListener(() => model.setName(_name.text));
     });
   }
 
@@ -96,7 +94,6 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
     // reading it for the first time here would go through `ref` after the widget is gone.
     if (_smsListen > 0) unawaited(_smsReader.cancel());
     _phone.dispose();
-    _name.dispose();
     _pager.dispose();
     super.dispose();
   }
@@ -186,7 +183,7 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
         // A Stack, not a Column. Sizing the hero with Expanded made the mockup shrink to
         // whatever the sheet left over — 54% of the screen width against the render's 63%,
         // and different on each step as the sheet's content changed height. Here the mockup is
-        // placed against the screen, so it is the same size on all three steps, and the sheet
+        // placed against the screen, so it is the same size on both steps, and the sheet
         // simply overlays whatever it needs.
         child: Stack(
           children: [
@@ -209,7 +206,7 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
     final width = MediaQuery.sizeOf(context).width * _heroWidth;
 
     return SizedBox(
-      // Sized from the screen rather than from the space left over, so all three steps show
+      // Sized from the screen rather than from the space left over, so both steps show
       // the same mockup at the same scale.
       height: width / _heroAspect,
       child: PageView.builder(
@@ -252,7 +249,6 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
             child: switch (state.step) {
               OnboardingStep.phone => _phoneSheet(state),
               OnboardingStep.otp => _otpSheet(state),
-              OnboardingStep.name => _nameSheet(state),
             },
           ),
         ),
@@ -260,7 +256,7 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
     );
   }
 
-  /// Both sheets end with the same footer, and its links come from config so a policy URL can
+  /// The phone sheet ends with the terms, and their links come from config so a policy URL can
   /// be corrected without an app release. Defaults stand in until config resolves.
   Widget get _termsFooter {
     final config = ref.watch(appConfigProvider).valueOrNull ?? shippedAppConfig;
@@ -322,42 +318,6 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
     );
   }
 
-  Widget _nameSheet(OnboardingState state) {
-    return _Sheet(
-      title: 'Enter your name',
-      subtitle: 'This name will be displayed on your profile',
-      error: state.error,
-      children: [
-        TextFieldBox(
-          controller: _name,
-          hint: 'Enter your name',
-          keyboardType: TextInputType.name,
-          onSubmitted: (_) => _saveName(),
-        ),
-        const SizedBox(height: 20),
-        PrimaryButton(
-          label: 'continue',
-          busy: state.busy,
-          onPressed: state.canSaveName ? _saveName : null,
-        ),
-        // Below the primary action and collapsed by default, so it competes with nothing. The
-        // last-resort path for a referred install the Play referrer could not cover — see
-        // `attribution_service.dart` — and most users should never open it.
-        //
-        // Hidden entirely when referrals are off, which makes `referral_enabled` a real switch
-        // for the signup screen and not just for the invite screen.
-        if (_referralsEnabled) const _InviteCodeRow(),
-        const SizedBox(height: 16),
-        _termsFooter,
-      ],
-    );
-  }
-
-  bool get _referralsEnabled {
-    final config = ref.watch(appConfigProvider).valueOrNull ?? shippedAppConfig;
-    return config.configFlag(referralEnabledKey);
-  }
-
   /// [entryMethod] separates a code the OS auto-filled from the SMS from one the user typed.
   /// Only the view knows which happened, and the difference is how the SMS sender id is doing.
   Future<void> _verify({String entryMethod = 'button'}) async {
@@ -366,28 +326,20 @@ class _OnboardingViewState extends ConsumerState<OnboardingView> {
         .verifyOtp(entryMethod: entryMethod);
     if (!mounted) return;
 
-    // Verified, whether that moves to the name sheet or off this screen: nothing is waiting for a
-    // code any more, and a listener left running would still put Android's consent sheet up.
-    if (next != null || ref.read(onboardingViewModelProvider).step != OnboardingStep.otp) {
-      _cancelSms();
-    }
-
-    // Null means the flow stayed here — a rejected code, or the name sheet taking over.
+    // Null means the flow stayed here — a rejected code.
     if (next == null) {
       _otp.clear();
       return;
     }
-    context.go(next.route);
-  }
 
-  Future<void> _saveName() async {
-    final next = await ref.read(onboardingViewModelProvider.notifier).saveName();
-    if (!mounted || next == null) return;
+    // Verified: nothing is waiting for a code any more, and a listener left running would still
+    // put Android's consent sheet up over the next screen.
+    _cancelSms();
     context.go(next.route);
   }
 }
 
-/// Shared frame for the three sheets: centred heading, body, error line.
+/// Shared frame for the two sheets: centred heading, body, error line.
 class _Sheet extends StatelessWidget {
   const _Sheet({
     required this.title,
@@ -498,126 +450,6 @@ class _HeroPlaceholder extends StatelessWidget {
           alignment: Alignment.center,
           child: const ZodiacRing(diameter: 150),
         ),
-      ),
-    );
-  }
-}
-
-/// "Have an invite code?" — the manual fallback, collapsed until asked for.
-///
-/// ## Why this exists at all
-///
-/// An invite is a Play Store link carrying `ref_code`, and Google hands that back through the
-/// Install Referrer API on first launch — so almost every referred install attributes itself with
-/// nobody typing anything. This covers the cases where Google has no referrer to give: a build
-/// installed from an APK, a device restored from a backup, or someone who reached the listing by
-/// searching for the app after being told about it rather than by tapping the link.
-///
-/// Deliberately unobtrusive. There is no reward yet, so almost nobody has a reason to open it, and
-/// a mandatory field here would cost more signups than the attribution is worth.
-///
-/// ## Why it is safe to leave in the funnel
-///
-/// It renders as a single text button until tapped, it never blocks `continue`, and the whole row
-/// disappears when `referral_enabled` is false — so if it ever does measurably hurt conversion it
-/// can be switched off from the dashboard without a release.
-class _InviteCodeRow extends StatefulWidget {
-  const _InviteCodeRow();
-
-  @override
-  State<_InviteCodeRow> createState() => _InviteCodeRowState();
-}
-
-class _InviteCodeRowState extends State<_InviteCodeRow> {
-  final _controller = TextEditingController();
-  bool _open = false;
-  bool _busy = false;
-  String? _message;
-  bool _applied = false;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    if (_busy) return;
-    setState(() {
-      _busy = true;
-      _message = null;
-    });
-
-    final result = await attributionService.submitManualCode(_controller.text);
-    if (!mounted) return;
-
-    setState(() {
-      _busy = false;
-      // `alreadyReferred` counts as applied: the user's install is attributed, just not to the
-      // code they typed, and telling them their invite "failed" would be both confusing and
-      // untrue.
-      _applied = result.status == ReferralClaimStatus.created ||
-          result.status == ReferralClaimStatus.alreadyReferred;
-      _message = switch (result.status) {
-        ReferralClaimStatus.created => 'Invite applied',
-        ReferralClaimStatus.alreadyReferred => 'Invite applied',
-        ReferralClaimStatus.invalidCode => 'That code is not valid',
-        ReferralClaimStatus.selfReferral => 'You cannot use your own invite code',
-        ReferralClaimStatus.notEligible => 'This code cannot be applied to your account',
-        // Everything else is a "not now" rather than a "no" — an unreachable backend, or the
-        // feature switched off between the screen rendering and the tap.
-        _ => 'Could not apply that code right now',
-      };
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_applied) {
-      return Padding(
-        padding: const EdgeInsets.only(top: 12),
-        child: Text(
-          _message ?? 'Invite applied',
-          style: AppText.meta.copyWith(color: AppColors.success),
-          textAlign: TextAlign.center,
-        ),
-      );
-    }
-
-    if (!_open) {
-      return TextButton(
-        onPressed: () => setState(() => _open = true),
-        child: Text(
-          'Have an invite code?',
-          style: AppText.meta.copyWith(color: AppColors.muted),
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: Column(
-        children: [
-          TextFieldBox(
-            controller: _controller,
-            hint: 'Invite code',
-            onSubmitted: (_) => _submit(),
-          ),
-          const SizedBox(height: 8),
-          TextButton(
-            onPressed: _busy ? null : _submit,
-            child: Text(
-              _busy ? 'Applying…' : 'Apply code',
-              style: AppText.meta.copyWith(color: AppColors.goldDeep),
-            ),
-          ),
-          if (_message != null)
-            Text(
-              _message!,
-              style: AppText.meta.copyWith(color: AppColors.danger),
-              textAlign: TextAlign.center,
-            ),
-        ],
       ),
     );
   }

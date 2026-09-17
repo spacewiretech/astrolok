@@ -85,14 +85,19 @@ abstract final class Ev {
   /// Android consent sheet leaves no trace: they simply type the code, and look like a user whose
   /// autofill never offered.
   static const otpAutofillResult = 'OTP Autofill Result';
-  static const nameEntryStarted = 'Name Entry Started';
-  static const nameSubmitted = 'Name Submitted';
-  static const nameSaveFailed = 'Name Save Failed';
+
+  /// The last step before the paywall, and so the end of signup: this is where `Signup Completed`
+  /// fires, which keeps the ad platforms' registration ahead of their purchase.
+  static const languageSelected = 'Language Selected';
+  static const languageSaveFailed = 'Language Save Failed';
   static const signupCompleted = 'Signup Completed';
   static const signedOut = 'Signed Out';
 
   // ---------------------------------------------------------------- birth
 
+  /// Name and birth date share one screen, after payment.
+  static const nameEntryStarted = 'Name Entry Started';
+  static const nameSubmitted = 'Name Submitted';
   static const birthEntryStarted = 'Birth Entry Started';
   static const birthWheelChanged = 'Birth Wheel Changed';
   static const birthDateSubmitted = 'Birth Date Submitted';
@@ -248,6 +253,68 @@ abstract final class Ev {
 
   /// A code typed by hand, which is the iOS fallback when no deferred match was found.
   static const inviteCodeSubmitted = 'Invite Code Submitted';
+
+  // ---------------------------------------------------------------- kundali
+
+  /// The Kundali card on Home, with the state it was in — a tap on "Ready" and a tap on "Ready in
+  /// 14h" are different people doing different things.
+  static const kundaliCardTapped = 'Kundali Card Tapped';
+  static const kundaliFormViewed = 'Kundali Form Viewed';
+
+  /// Once per search session (one session token), not per keystroke.
+  static const placeSearchStarted = 'Place Search Started';
+  static const placeSelected = 'Place Selected';
+  static const placeSearchFailed = 'Place Search Failed';
+
+  /// The chart was cast and the wait started. The denominator of the whole kundali funnel.
+  static const kundaliRequested = 'Kundali Requested';
+  static const kundaliRequestFailed = 'Kundali Request Failed';
+
+  /// The waiting screen opened. How often people come back to it before the reveal is the
+  /// recurrence the 24-hour wait exists to create.
+  static const kundaliWaitingViewed = 'Kundali Waiting Viewed';
+  static const kundaliNotifyTapped = 'Kundali Notify Tapped';
+  static const kundaliCrossSellTapped = 'Kundali Cross Sell Tapped';
+
+  /// The reveal. `first_view` separates the moment it was revealed from every re-read after it.
+  static const kundaliViewed = 'Kundali Viewed';
+  static const kundaliInsightOpened = 'Kundali Insight Opened';
+  static const kundaliPdfExported = 'Kundali PDF Exported';
+  static const kundaliPdfFailed = 'Kundali PDF Failed';
+
+  /// Raised server-side by `kundali-worker`; named here so the funnel's server half is greppable.
+  /// Never tracked from the app.
+  static const kundaliGenerated = 'Kundali Generated';
+
+  // ---------------------------------------------------------------- push
+
+  /// A push arrived while the app was on screen and was shown as the in-app banner.
+  static const pushReceived = 'Push Received';
+
+  /// A tapped push was taken to its screen.
+  static const pushRouted = 'Push Routed';
+
+  /// A tapped push could not go where it pointed — signed out, not entitled, or a route this build
+  /// does not know. `drop_reason` says which.
+  static const pushDropped = 'Push Dropped';
+
+  /// The app's own explanation before the system prompt, and what the user said to it.
+  static const pushPrimerShown = 'Push Primer Shown';
+  static const pushPrimerAnswered = 'Push Primer Answered';
+
+  /// Profile → "Offers & reminders".
+  static const notificationPreferenceChanged = 'Notification Preference Changed';
+
+  /// Server-side, from `notify.ts`. Never tracked from the app.
+  static const notificationSent = 'Notification Sent';
+
+  // ---------------------------------------------------------------- cancellation reason
+
+  /// The why-are-you-leaving screen, usually opened from the `mid_cancel` push minutes after a
+  /// mandate was cancelled in a UPI app.
+  static const cancellationReasonViewed = 'Cancellation Reason Viewed';
+  static const cancellationReasonSubmitted = 'Cancellation Reason Submitted';
+  static const cancellationReasonDismissed = 'Cancellation Reason Dismissed';
 }
 
 /// Property keys.
@@ -298,6 +365,8 @@ abstract final class P {
   static const inTrial = 'in_trial';
   static const hasEverSubscribed = 'has_ever_subscribed';
   static const billingState = 'billing_state';
+  /// Whether the account has ever chosen a language — the one thing asked before the paywall.
+  static const hasLanguage = 'has_language';
   static const hasName = 'has_name';
   static const hasBirthDate = 'has_birth_date';
   static const birthYear = 'birth_year';
@@ -514,6 +583,54 @@ abstract final class P {
   static const link = 'link';
   static const function = 'function';
   static const slide = 'slide';
+
+  // ---------------------------------------------------------------- kundali
+
+  static const kundaliId = 'kundali_id';
+
+  /// `none`, `waiting`, `delayed`, `ready` or `failed`.
+  static const kundaliState = 'kundali_state';
+  static const hoursRemaining = 'hours_remaining';
+  static const hoursSinceUnlock = 'hours_since_unlock';
+  static const isEdit = 'is_edit';
+  static const isRegeneration = 'is_regeneration';
+  static const regenerationsLeft = 'regenerations_left';
+  static const unlockHours = 'unlock_hours';
+  static const timeZone = 'time_zone';
+  static const prefilledDob = 'prefilled_dob';
+  static const prefilledTime = 'prefilled_time';
+  static const prefilledPlace = 'prefilled_place';
+
+  /// Position of the chosen row in the suggestions, 0-based. Never the place itself.
+  static const resultRank = 'result_rank';
+  static const suggestionCount = 'suggestion_count';
+
+  /// Length of what was typed. The query text never leaves the device.
+  static const queryLength = 'query_length';
+  static const stage = 'stage';
+  static const firstView = 'first_view';
+  static const insight = 'insight';
+  static const language = 'language';
+  static const rasterised = 'rasterised';
+  static const permissionBefore = 'permission_before';
+  static const permissionAfter = 'permission_after';
+
+  // ---------------------------------------------------------------- push
+
+  /// Which campaign a push belonged to. Named `push_campaign` on the session super property, where
+  /// plain `campaign` is already the ad campaign an install came from.
+  static const pushCampaign = 'push_campaign';
+  static const notificationId = 'notification_id';
+  static const pushNotificationId = 'push_notification_id';
+  static const route = 'route';
+  static const dropReason = 'drop_reason';
+  static const choice = 'choice';
+  static const marketingOptOut = 'marketing_opt_out';
+
+  // ---------------------------------------------------------------- cancellation reason
+
+  static const wasInTrial = 'was_in_trial';
+  static const recorded = 'recorded';
 }
 
 /// How a screen was left, for [P.exitType].
@@ -548,4 +665,7 @@ abstract final class ReadingFeature {
   /// Not a reading, but narration and the "Ask Astro" bridge are shared with the chat, and those
   /// events want one vocabulary across all three surfaces.
   static const chat = 'chat';
+
+  /// The fourth card on Home. Not a photo reading: it never goes through the trial scan guard.
+  static const kundali = 'kundali';
 }

@@ -9,7 +9,7 @@ import 'fast2sms_exception.dart';
 /// Real OTP delivery over Fast2SMS.
 ///
 /// Only the OTP half is real. The account record still lives in [FakeSession], so
-/// `saveName`/`saveBirthDate`/`currentUser`/`signOut` behave exactly as they did on the fake
+/// `saveDetails`/`currentUser`/`signOut` behave exactly as they did on the fake
 /// until Supabase takes over persistence.
 class Fast2SmsAuthRepository implements AuthRepository {
   Fast2SmsAuthRepository(this._client, this._session);
@@ -73,16 +73,10 @@ class Fast2SmsAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<AppUser> saveName(String name) async {
-    final user = _current().copyWith(name: name.trim());
-    _session.user = user;
-    return user;
-  }
-
-  @override
-  Future<AppUser> saveBirthDate(DateTime date) async {
+  Future<AppUser> saveDetails({required String name, required DateTime birthDate}) async {
     final user = _current().copyWith(
-      birthDate: DateTime(date.year, date.month, date.day),
+      name: name.trim(),
+      birthDate: DateTime(birthDate.year, birthDate.month, birthDate.day),
     );
     _session.user = user;
     return user;
@@ -106,6 +100,13 @@ class Fast2SmsAuthRepository implements AuthRepository {
       birthTime: trimmed,
       clearBirthTime: trimmed == null || trimmed.isEmpty,
     );
+    _session.user = user;
+    return user;
+  }
+
+  @override
+  Future<AppUser> saveMarketingOptOut(bool optOut) async {
+    final user = _current().copyWith(pushMarketingOptOut: optOut);
     _session.user = user;
     return user;
   }

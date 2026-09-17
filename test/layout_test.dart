@@ -1,5 +1,6 @@
 import 'package:astrolok/app/theme/app_theme.dart';
 import 'package:astrolok/features/birth/birth_view.dart';
+import 'package:astrolok/features/language/language_view.dart';
 import 'package:astrolok/features/subscription/subscription_view.dart';
 import 'package:astrolok/widgets/feature_pills.dart';
 import 'package:flutter/material.dart';
@@ -8,9 +9,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// The paywall stacks a video, four feature pills, a price, a consent line and a pinned pay
-/// bar; the birth screen stacks a logo, two blocks of copy and a 220pt picker. Both were laid
-/// out against a 393x852 iPhone 15 Pro, and both are the kind of screen that overflows on a
-/// small phone without anyone noticing until a user reports it.
+/// bar; the birth screen stacks a logo, two blocks of copy, a name field and a 220pt picker; the
+/// language picker is four rows of image cards. All were laid out against a large phone, and all
+/// are the kind of screen that overflows on a small one without anyone noticing until a user
+/// reports it.
 ///
 /// A RenderFlex overflow throws in a test, so pumping at a small size and asserting no
 /// exception is the whole check.
@@ -64,10 +66,29 @@ void main() {
     await pumpAt(tester, small, const BirthView());
 
     expect(tester.takeException(), isNull);
-    expect(find.text('Set Your Date of Birth'), findsOneWidget);
+    expect(find.text('Tell us about yourself'), findsOneWidget);
+    expect(find.text('Enter your name'), findsOneWidget);
     expect(find.text('continue'), findsOneWidget);
     // Zero-padded, as the design draws them.
     expect(find.text('01'), findsWidgets);
+  });
+
+  testWidgets('the language picker lays out all seven cards on a small phone', (tester) async {
+    await pumpAt(tester, small, const LanguageView());
+
+    expect(tester.takeException(), isNull);
+    for (final option in LanguageView.options) {
+      // `findsWidgets`: English is its own title and subtitle.
+      expect(find.text(option.title), findsWidgets, reason: option.language);
+    }
+    expect(find.bySemanticsLabel('Kannada'), findsOneWidget);
+    // Nothing is preselected: every account reaches the paywall having actually chosen.
+    expect(find.byIcon(Icons.check_rounded), findsNothing);
+  });
+
+  testWidgets('the language picker lays out on a tall phone', (tester) async {
+    await pumpAt(tester, const Size(430, 932), const LanguageView());
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('four feature pills fit side by side without breaking a word', (tester) async {

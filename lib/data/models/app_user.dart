@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import 'birth_chart.dart';
+import 'birth_place.dart';
 
 /// Mirrors the `public.payment_status` enum. The database is the authority on the spelling.
 enum PaymentType {
@@ -129,6 +130,8 @@ class AppUser {
     this.birthTime,
     this.chart,
     this.plan,
+    this.birthPlace,
+    this.pushMarketingOptOut = false,
   });
 
   final String id;
@@ -137,7 +140,7 @@ class AppUser {
   final String phone;
   final String name;
 
-  /// Date of birth, collected on the step after the name. Date only — no time, no place — so
+  /// Date of birth, collected with the name after payment. Date only — no time, no place — so
   /// the time component is always midnight and must not be read as a birth time. That is
   /// [birthTime].
   final DateTime? birthDate;
@@ -190,6 +193,14 @@ class AppUser {
   /// This account's monthly price, from the server. Null from a server or a cache that predates the
   /// price split — see [UserPlan].
   final UserPlan? plan;
+
+  /// Where they were born, as the kundali form resolved it. Null until the form has been used, and
+  /// again once the coordinates age out of Google's 30-day caching window.
+  final BirthPlace? birthPlace;
+
+  /// Profile → "Offers & reminders" switched off. Marketing pushes skip the account; a kundali that
+  /// is ready or a failed autopay still arrives.
+  final bool pushMarketingOptOut;
 
   bool get hasName => name.trim().isNotEmpty;
 
@@ -292,6 +303,8 @@ class AppUser {
       birthTime: parseBirthTime(raw['birth_time']),
       chart: BirthChart.fromServer(raw['chart']),
       plan: UserPlan.fromServer(raw['plan']),
+      birthPlace: BirthPlace.fromUserJson(raw),
+      pushMarketingOptOut: raw['push_marketing_opt_out'] == true,
     );
   }
 
@@ -347,6 +360,8 @@ class AppUser {
     String? birthTime,
     BirthChart? chart,
     UserPlan? plan,
+    BirthPlace? birthPlace,
+    bool? pushMarketingOptOut,
 
     /// Explicit, because null is a meaningful value here — it means the mandate recovered.
     bool clearBillingState = false,
@@ -374,6 +389,8 @@ class AppUser {
       birthTime: clearBirthTime ? null : (birthTime ?? this.birthTime),
       chart: chart ?? this.chart,
       plan: plan ?? this.plan,
+      birthPlace: birthPlace ?? this.birthPlace,
+      pushMarketingOptOut: pushMarketingOptOut ?? this.pushMarketingOptOut,
     );
   }
 }

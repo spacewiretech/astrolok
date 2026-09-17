@@ -41,6 +41,25 @@ signature check. No network, no database.
 - `review_account_test.ts` (6) — the store-review sign-in gate, focused on when it must stay
   **off**: half-filled config, placeholder values, malformed input.
 
+- `kundali_chart_test.ts` — the full chart against **Meeus worked examples** (sidereal time,
+  the mean node, Venus) and published positions (the 2020 great conjunction, sidereal signs of
+  Saturn/Jupiter/Rahu, retrograde windows), the ascendant on the eastern horizon, dignity,
+  whole-sign houses and the dasha timeline.
+- `birth_timezone_test.ts` — India's clock history (+6:30 in 1943, Madras time before 1906) and
+  DST gaps and overlaps.
+- `kundali_test.ts` — **the reveal lock** (no chart or report before unlock, unentitled or
+  unwritten), request parsing, stages, backoff, and the report normaliser (invented evidence
+  dropped, years and ages stripped, thin reports retried).
+- `place_search_test.ts` — Google Places and Time Zone parsing and error classification.
+- `fcm_test.ts` — the service-account JWT (a real RS256 signature against a generated key), the
+  message shape, and FCM error classification.
+- `notify_test.ts` — IST quiet hours and the daily cap, insert ids inside Mixpanel's 36
+  characters, the mid-cancel and billing trigger decisions, and that the route allowlist matches
+  the app's `push_payload.dart` (run with `--allow-read` for that check).
+- `notification_copy_test.ts` — every campaign in all seven languages: present, in the right
+  script, placeholders filled or removed cleanly, within lock-screen lengths.
+- `cancellation_feedback_test.ts` — the why-are-you-leaving parser.
+
 ## Notes
 
 - Run from the `supabase/` directory:
@@ -50,7 +69,7 @@ signature check. No network, no database.
   ```
 
   The root README quotes `deno test functions/tests/payments_test.ts` for the payments file
-  alone. 294 tests in total.
+  alone. 368 tests in total.
 - Everything under test is deliberately pure, which is why the normalisers in `_shared/` take
   and return plain data rather than touching the DB themselves.
 - `mixpanel_test.ts` guards a specific past failure: the server `$insert_id` must key on the

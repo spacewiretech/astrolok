@@ -32,6 +32,8 @@ The shared design-system widgets: everything more than one screen draws. Present
 - `otp_field.dart` — Declares: `OtpField`, `OtpFieldController`.
 - `date_wheel.dart` — the date-of-birth picker. Declares: `DatePickerCard`, `DateWheelColumn<T>`,
   `DateWheel<T>`.
+- `invite_code_row.dart` — "Have an invite code?", collapsed until tapped. Declares:
+  `InviteCodeRow`. Lives on the language screen; it must stay before the paywall.
 
 **Capture** (shared by the palm and face flows)
 - `capture_frame.dart` — Declares: `CameraCopy`, `CaptureViewfinder`, `CornerBrackets`,
@@ -49,7 +51,16 @@ The shared design-system widgets: everything more than one screen draws. Present
 - `promo_video.dart` — Declares: `PromoVideo`. Takes a **borrowed** `VideoPlayerController` —
   `promoVideoProvider` owns it and warms it during onboarding — so this plays and stops it but
   never disposes it.
-- `reading_card.dart` — one "Explore Readings" row. Declares: `ReadingCard`.
+- `reading_card.dart` — one "Explore Readings" row, with an optional status `badge`. Declares: `ReadingCard`.
+- `north_indian_chart.dart` — the kundali diagram. Declares: `NorthIndianChart`, `houseGeometry()`
+  (pure, tested), `planetColor()`.
+- `zodiac_wheel.dart` — the turning ring on the kundali wait; still under reduced motion. Declares: `ZodiacWheel`.
+- `stage_checklist.dart` — Declares: `StageChecklist`, `StageItem`, `StageStatus`.
+- `place_search_field.dart` — debounced Google place search with the billing session token and
+  "Powered by Google". Declares: `PlaceSearchField`, `newPlaceSessionToken()`.
+- `push_banner.dart` — a push that arrives while the app is open. Declares: `PushBannerHost`.
+- `push_primer_sheet.dart` — the explanation before the system notification prompt. Declares:
+  `showPushPrimer()`.
 - `feature_pills.dart` — Declares: `Feature`, `FeaturePills`.
 - `step_indicator.dart` — the 1—2—3 strip. Declares: `StepIndicator`.
 - `terms_footer.dart` — Declares: `TermsFooter`; links to `astrolok.app/privacy` and `/terms`.

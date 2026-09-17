@@ -48,18 +48,25 @@ class SupabaseAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<AppUser> saveName(String name) async {
+  Future<AppUser> saveDetails({required String name, required DateTime birthDate}) async {
     final data = await _guard(
       () async => _functions.call(
         'update-profile',
-        body: {'name': name.trim()},
+        // Both in one body: `update-profile` applies every field it is given in a single update,
+        // so the name and the date land together or not at all. The date goes as a bare
+        // YYYY-MM-DD, never an ISO instant: the column is a `date`, and letting a UTC offset into
+        // it is how a birthday lands on the wrong day.
+        body: {
+          'name': name.trim(),
+          'dob': AppUser.formatBirthDate(birthDate),
+        },
         bearerToken: await _requireToken(),
       ),
     );
 
     final user = _userFrom(data['user']);
     if (user == null) {
-      throw const OtpSendException('Could not save your name. Please try again.');
+      throw const OtpSendException('Could not save your details. Please try again.');
     }
     await _sessions.cacheUser(user);
     return user;
@@ -106,20 +113,18 @@ class SupabaseAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<AppUser> saveBirthDate(DateTime date) async {
+  Future<AppUser> saveMarketingOptOut(bool optOut) async {
     final data = await _guard(
       () async => _functions.call(
         'update-profile',
-        // Sent as a bare YYYY-MM-DD, never an ISO instant: the column is a `date`, and letting
-        // a UTC offset into it is how a birthday lands on the wrong day.
-        body: {'dob': AppUser.formatBirthDate(date)},
+        body: {'push_marketing_opt_out': optOut},
         bearerToken: await _requireToken(),
       ),
     );
 
     final user = _userFrom(data['user']);
     if (user == null) {
-      throw const OtpSendException('Could not save your date of birth. Please try again.');
+      throw const OtpSendException('Could not save that setting. Please try again.');
     }
     await _sessions.cacheUser(user);
     return user;

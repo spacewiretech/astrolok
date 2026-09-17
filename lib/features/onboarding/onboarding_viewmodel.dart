@@ -11,13 +11,13 @@ import '../../data/repositories/auth_repository.dart';
 import '../splash/splash_viewmodel.dart';
 import 'onboarding_state.dart';
 
-/// Drives phone → OTP → name inside the one onboarding screen.
+/// Drives phone → OTP inside the one onboarding screen.
 ///
-/// The steps that end holding a user return the [SplashDestination] the flow resumes at rather
-/// than a bare "it worked", because step order is not the same thing as where the user belongs:
-/// someone who signs in again on a wiped device already has a name, a birth date and a live
-/// trial, and must not be walked through those steps and dropped on the paywall. The ViewModel
-/// itself still never touches the router.
+/// Verifying returns the [SplashDestination] the flow resumes at rather than a bare "it worked",
+/// because step order is not the same thing as where the user belongs: someone who signs in
+/// again on a wiped device already has a language, a name, a birth date and a live trial, and
+/// must not be walked through those steps and dropped on the paywall. The ViewModel itself still
+/// never touches the router.
 class OnboardingViewModel extends Notifier<OnboardingState> {
   Timer? _ticker;
 
@@ -50,7 +50,7 @@ class OnboardingViewModel extends Notifier<OnboardingState> {
       ? 0
       : DateTime.now().difference(_otpRequestedAt!).inSeconds;
 
-  /// Restores the step the router asked for, e.g. a returning user resuming at the name sheet.
+  /// Restores the step the router asked for.
   void startAt(OnboardingStep step) {
     if (state.step == step) return;
     state = state.copyWith(step: step, clearError: true);
@@ -73,11 +73,6 @@ class OnboardingViewModel extends Notifier<OnboardingState> {
   void setCode(String value) {
     if (value.isNotEmpty) _fieldStarted(Ev.otpEntryStarted);
     state = state.copyWith(code: value, clearError: true);
-  }
-
-  void setName(String value) {
-    if (value.isNotEmpty) _fieldStarted(Ev.nameEntryStarted);
-    state = state.copyWith(name: value, clearError: true);
   }
 
   Future<bool> sendOtp() async {
@@ -136,8 +131,7 @@ class OnboardingViewModel extends Notifier<OnboardingState> {
   /// Handles its own failures rather than delegating to [_guard], because only a code the
   /// provider actually rejected may burn an attempt — a dropped connection must not.
   ///
-  /// Returns null when the flow stays on this screen, either because the code was refused or
-  /// because the user still has to give a name.
+  /// Returns null when the code was refused and the flow stays on this screen.
   Future<SplashDestination?> verifyOtp({String entryMethod = 'button'}) async {
     if (!state.canVerify) return null;
 
@@ -162,9 +156,11 @@ class OnboardingViewModel extends Notifier<OnboardingState> {
         P.entryMethod: entryMethod,
         P.attemptsUsed: attemptsUsed,
         P.resendsUsed: state.resendsUsed,
-        // A returning user on a wiped device already has all of this, and must not be counted as
-        // a signup. This is the property that separates the two.
-        P.isNewUser: !user.hasName,
+        // A returning user on a wiped device already has some of this, and must not be counted
+        // as a signup. A new account has neither: the language is the first thing it is asked,
+        // and the name comes after payment.
+        P.isNewUser: !user.hasName && user.chatLanguage == null,
+        P.hasLanguage: user.chatLanguage != null,
         P.hasName: user.hasName,
         P.hasBirthDate: user.hasBirthDate,
         P.entitled: user.entitled,
@@ -172,12 +168,6 @@ class OnboardingViewModel extends Notifier<OnboardingState> {
         P.secondsToVerify: _secondsToVerify,
       });
 
-      // A first-time account has no name yet, and the name sheet is part of this same screen —
-      // so that case is a step change here, not a route change for the view.
-      if (destination == SplashDestination.name) {
-        goTo(OnboardingStep.name);
-        return null;
-      }
       return destination;
     } on InvalidOtpException catch (e) {
       final left = state.attemptsLeft - 1;
@@ -222,26 +212,6 @@ class OnboardingViewModel extends Notifier<OnboardingState> {
       P.error: message,
       P.secondsToVerify: _secondsToVerify,
     });
-  }
-
-  Future<SplashDestination?> saveName() async {
-    if (!state.canSaveName) return null;
-
-    // The length rather than the name: it distinguishes a real name from a single character
-    // someone typed to get past the sheet, without collecting the name itself as an event.
-    _analytics.track(Ev.nameSubmitted, {P.nameLength: state.name.trim().length});
-
-    final destination =
-        await _guard(() async => _destinationFor(await _auth.saveName(state.name)));
-
-    if (destination == null) {
-      _analytics.track(Ev.nameSaveFailed, {P.message: state.error});
-      return null;
-    }
-
-    // The end of onboarding proper, and the denominator of everything after it.
-    _analytics.track(Ev.signupCompleted, {P.destination: destination.name});
-    return destination;
   }
 
   /// Where the flow goes next for [user].

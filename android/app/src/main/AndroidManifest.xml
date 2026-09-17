@@ -9,6 +9,10 @@
          one nobody remembers to answer for. -->
     <uses-permission android:name="com.google.android.gms.permission.AD_ID"/>
 
+    <!-- Android 13+ shows nothing from a push without this. firebase_messaging merges it in as
+         well; declared by hand so the permission the notification primer asks for is visible here. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <!-- Palm reading photographs the user's hand. -->
     <uses-permission android:name="android.permission.CAMERA"/>
 
@@ -83,6 +87,18 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- Push notifications. The channel is created in MainActivity; the icon must be a white,
+             transparent silhouette or Android draws it as a white square in the status bar. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="astrolok_default" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notification" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_gold" />
 
         <!-- REQUIRED. Without this the Cashfree SDK never fires the subscription callback, so
              every mandate appears to hang even when the money moved. -->

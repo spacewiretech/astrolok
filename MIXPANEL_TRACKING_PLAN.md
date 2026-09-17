@@ -1,10 +1,10 @@
 # Astrolok — Mixpanel Tracking Plan
 
-**Product:** Astrolok (palm reading, face reading & AI astrology chat)
+**Product:** Astrolok (palm reading, face reading, AI astrology chat & Kundali)
 **Platforms:** Flutter app (Android + iOS) + Supabase Edge Functions (server)
 **SDK:** `mixpanel_flutter` (app) · Mixpanel HTTP Track/Engage API (server)
 **`distinct_id`:** `users.user_id` — the database primary key. Never a phone number or email.
-**Last updated:** 10 September 2026
+**Last updated:** 17 September 2026
 
 ---
 
@@ -12,9 +12,9 @@
 
 | Source | Live events | What it answers |
 |--------|-------------|-----------------|
-| **Flutter app** | 105 | Everything the user does in front of the screen: onboarding, paywall, payments, readings, chat, profile |
-| **Supabase Edge Functions** | 9 | Everything that happens while the app is closed: recurring UPI debits, mandate holds, cancellations, refunds, disputes |
-| **Total live** | **114** | |
+| **Flutter app** | 128 | Everything the user does in front of the screen: onboarding, paywall, payments, readings, chat, Kundali, push taps, profile |
+| **Supabase Edge Functions** | 14 | Everything that happens while the app is closed: recurring UPI debits, mandate holds, cancellations, refunds, disputes, push notifications sent, Kundali readings written |
+| **Total live** | **142** | |
 
 Six more events are declared in code but not currently emitted — see [§11](#11-declared-but-not-emitted).
 
@@ -69,6 +69,8 @@ Gathered once at boot and merged into every event, so no call site has to pass t
 | `screen` | string | The screen the user was on when the event fired — filled in by the navigator observer. **This is why no event has to name its own screen.** |
 | `is_modal` | boolean | Present only when the current surface is a sheet or dialog |
 | `session_id` | string | Survives a process death inside the 30-minute idle window |
+| `push_campaign` | string | Present for the rest of a session that a push opened — `kundali_ready`, `mid_cancel`, … **This is what turns a push into an outcome**: `Kundali Viewed` or `Subscribe Tapped` carrying the campaign that caused it. In memory only, cleared when a new session starts; plain `campaign` is the ad campaign |
+| `push_notification_id` | string | The `notifications.id` of that push, for joining to `Notification Sent` |
 | `install_id` | string | Stable per installation, **survives sign-out** (unlike Mixpanel's `$device_id`). This is what makes "two accounts on one handset" answerable |
 | `days_since_install` | number | |
 | `is_new_user` | boolean | True on the very first launch |
@@ -110,7 +112,7 @@ App Launched
    → Subscription Cancelled    (server, churn)
 ```
 
-**The five funnels worth building first:**
+**The funnels worth building first:**
 
 | # | Funnel | Steps | What it tells you |
 |---|--------|-------|-------------------|
@@ -118,6 +120,8 @@ App Launched
 | 2 | **Purchase** | `Paywall Viewed` → `Subscribe Tapped` → `Mandate Start Succeeded` → `Payment Completed (outcome=success)` | Break down by `flow` (`intent` vs `checkout`) and `app_id`. The Cashfree checkout-screen fallback converts materially worse than a one-tap UPI intent |
 | 3 | **Trial vs plan** | Same as #2, broken down by `offer_type` (`trial` / `plan`) | A ₹3 trial and a full-price purchase convert nothing like each other; a single paywall conversion rate averages them into meaninglessness |
 | 4 | **Activation** | `Payment Completed` → `Home Viewed` → `Reading Scan Started` → `Reading Succeeded` → `Ask Astro Tapped` | Whether people who pay actually get a reading. Break down by `feature` to compare palm and face |
+| 6 | **Kundali** | `Kundali Card Tapped` → `Kundali Requested` → `Kundali Waiting Viewed` → `Kundali Viewed (first_view = true)` → `Kundali PDF Exported` | Whether the 24-hour reveal brings people back. Count `Kundali Waiting Viewed` per `kundali_id` for return visits during the wait |
+| 7 | **Push outcome** | `Notification Sent` → `Push Opened` → `Push Routed` → outcome event, held constant on `push_notification_id` / `notification_id` | Per campaign: delivered, opened, landed, and did the thing. `Notification Skipped` by `skip_reason` explains the gap before Sent |
 | 5 | **Retention & churn** | `Mandate Authorised` → `Subscription Renewed` (renewal 1) → `Subscription Renewed` (renewal 2+) · vs `Subscription Cancelled` / `Subscription Payment Failed` | The whole paid relationship. All server-side |
 
 ---
@@ -135,8 +139,13 @@ App Launched
 | `UPI App Opened` | The app backgrounds while a UPI hand-off is outstanding | `analytics_session.dart` | `app_id` |
 | `UPI App Returned` | The app foregrounds after that hand-off | `analytics_session.dart` | `app_id`, `seconds_in_upi_app` |
 | `Tracking Consent Resolved` | iOS ATT status is answered, or was already standing | `att_consent.dart` | `status`, `granted`, `prompted` |
-| `Push Permission Resolved` | The notification permission prompt is answered, or was already standing. Asked from Home once the ATT prompt settles, never at launch | `push_messaging.dart` | `status`, `granted`, `prompted` |
-| `Push Opened` | A push notification is tapped. **Nothing sends pushes yet** — live so the first campaign is measurable from its first send | `push_messaging.dart` | `source` (`launch` / `background`), `message_id` |
+| `Push Permission Resolved` | The notification permission prompt is answered, or was already standing. Asked by the primer after the language pick (`source = language`), by **Notify me when ready** on the kundali wait (`kundali`), and from Home for anyone never asked (`home`) | `push_messaging.dart` | `status`, `granted`, `prompted`, `source` |
+| `Push Opened` | A push notification is tapped | `push_messaging.dart` | `source` (`launch` / `background`), `message_id`, `campaign`, `notification_id`, `route` |
+| `Push Received` | A push arrives while the app is on screen and is shown as the in-app banner | `push_messaging.dart` | `message_id`, `campaign`, `notification_id`, `route` |
+| `Push Routed` | A tapped push (or banner) is taken to its screen | `push_navigation.dart` | `route`, `campaign`, `notification_id` |
+| `Push Dropped` | A tapped push cannot go where it points | `push_navigation.dart` | `drop_reason` (`unknown_route` / `signed_out` / `not_entitled` / `onboarding` / `already_entitled` / `no_longer_needed`), `campaign`, `notification_id`, `route` |
+| `Push Primer Shown` | The app's own explanation before the system prompt | `push_primer_sheet.dart` | `source` |
+| `Push Primer Answered` | Allow or Not now on it | `push_primer_sheet.dart` | `source`, `choice` (`allow` / `not_now`) |
 | `Screen Viewed` | Any route is pushed, replaced, or resurfaced after a back | `analytics_observer.dart` | `screen`, `previous_screen`, `route_path`, `nav_type`, `is_modal`, plus `route_*` params |
 | `Screen Exited` | Any route is popped, replaced or removed | `analytics_observer.dart` | `screen`, `exit_type`, `seconds_on_screen` |
 | `Back Pressed` | The user goes back (system or in-app) | `analytics_observer.dart` | `screen`, `blocked`, `is_modal` |
@@ -145,7 +154,7 @@ App Launched
 | `Edge Call Failed` | Any Supabase Edge Function call fails — one chokepoint, so backend health needs no per-feature instrumentation | `edge_functions.dart` | `function`, `code` (null = never reached the server), `message`, `ms` |
 | `Splash Resolved` | The splash decides where to send the user | `splash_viewmodel.dart` | `destination`, `is_signed_in`, `entitled`, `has_name`, `has_birth_date`, `payment_type`, `ms` |
 
-**Screen names** reported by `Screen Viewed`: Splash, Onboarding, Birth Date, Paywall, Payment Status, Home, Palm Capture, Palm Scan, Palm Reading, Palm Line, Face Capture, Face Scan, Face Reading, Face Part, Chat, Profile, Downloads, Astro Memory.
+**Screen names** reported by `Screen Viewed`: Splash, Onboarding, Birth Date, Paywall, Payment Status, Home, Palm Capture, Palm Scan, Palm Reading, Palm Line, Face Capture, Face Scan, Face Reading, Face Part, Chat, Profile, Downloads, Astro Memory, Kundali, Kundali Form, Kundali Waiting, Kundali Report, Cancellation Reason.
 **Modal names:** UPI App Picker, Chat Drawer, Rename Thread Dialog, Delete Thread Dialog, Forget Fact Dialog, Forget All Dialog.
 
 > Note: `/onboarding` is a single route whose three steps are a query parameter, so phone, OTP and name are **one screen**. The step transitions are covered by the explicit onboarding events below, which carry far more than a screen view could.
@@ -306,7 +315,43 @@ The single most instrumented flow in the app. **Every event in one checkout atte
 | `Memory Cleared` | Everything is erased. **The strongest privacy signal this app gets** — counted separately from correcting one wrong fact | `memory_viewmodel.dart` | `fact_count`, `count` |
 | `Support Link Opened` | Contact / policy links tapped | `profile_view.dart` | `link`, `result` (`opened` / `failed`) — **both stores check these at review time and a dead one fails a review** |
 | `Renew Tapped` | "Renew to keep your readings" tapped | `profile_view.dart` | — |
+| `Notification Preference Changed` | Profile → "Offers & reminders" switched | `profile_view.dart` | `marketing_opt_out` |
 | `Element Tapped` | Profile menu rows and the profile button on Home | `profile_view.dart`, `home_view.dart` | `element_id` (`profile_button`, `profile_downloads`, `profile_memory`) |
+
+---
+
+### 8.5 Kundali
+
+The fourth reading. Cast from date, time and place of birth; **revealed 24 hours after the request** (`kundali_unlock_hours`) so there is a reason to come back. The reading is written by `kundali-worker` minutes after the request and held; the server refuses the report before the reveal. **The place, coordinates, date and time of birth are never sent to Mixpanel.**
+
+| Event | Fires when | Where | Key properties |
+|-------|-----------|-------|----------------|
+| `Reading Card Tapped` | The Kundali card on Home (same event as palm/face) | `kundali_card.dart` | `destination = kundali`, `source` |
+| `Kundali Card Tapped` | The same tap, with where the kundali stands | `kundali_card.dart` | `kundali_state` (`none` / `waiting` / `delayed` / `ready` / `failed`), `hours_remaining` |
+| `Kundali Form Viewed` | The birth-details form opens | `kundali_form_viewmodel.dart` | `is_edit`, `prefilled_dob`, `prefilled_time`, `prefilled_place` |
+| `Place Search Started` | First search of a Google Places session (one per session token, not per keystroke) | `kundali_form_viewmodel.dart` | — |
+| `Place Selected` | A suggestion resolves to a place | `kundali_form_viewmodel.dart` | `result_rank`, `suggestion_count`, `time_zone`, `ms` |
+| `Place Search Failed` | Autocomplete or details refused or unreachable | `kundali_form_viewmodel.dart` | `code` |
+| **`Kundali Requested`** | The chart is cast and the wait starts. **The denominator of the kundali funnel** | `kundali_form_viewmodel.dart` | `kundali_id`, `is_regeneration`, `regenerations_left`, `time_zone`, `unlock_hours` |
+| `Kundali Request Failed` | The request was refused | `kundali_form_viewmodel.dart` | `code`, `message` |
+| `Kundali Waiting Viewed` | The waiting screen opens. **Counted per open — returns during the wait are the recurrence the feature exists for** | `kundali_waiting_view.dart` | `kundali_id`, `kundali_state`, `hours_remaining`, `stage` (0-4) |
+| `Kundali Notify Tapped` | "Notify me when ready" | `kundali_waiting_view.dart` | `permission_before`, `permission_after`, `prompted` |
+| `Kundali Cross Sell Tapped` | A palm / face / chat card under "While you wait" | `kundali_waiting_view.dart` | `destination` |
+| **`Kundali Viewed`** | The report paints | `kundali_report_viewmodel.dart` | `kundali_id`, `first_view` (**true exactly once — the reveal**), `hours_since_unlock`, `language` |
+| `Kundali Insight Opened` | A life-insight tile opens its detail | `kundali_report_viewmodel.dart` | `kundali_id`, `insight` (`love` / `career` / `finance` / `year_ahead`) |
+| `Kundali PDF Exported` | The share sheet returns | `kundali_report_viewmodel.dart` | `kundali_id`, `language`, `rasterised` (Indic text drawn as images), `bytes`, `ms` |
+| `Kundali PDF Failed` | The export threw | `kundali_report_viewmodel.dart` | `error` |
+| `Ask Astro Tapped` | "Ask Astro about your Kundali" | `kundali_report_view.dart` | `source = kundali_report`, `kundali_id` |
+
+### 8.6 Cancellation reason
+
+Asked by the `mid_cancel` push minutes after a mandate is cancelled (the reason was null on every one of 525 trial cancellations). `/leaving` is **ungated** — the person it asks has usually just lost access. The comment text is stored in `cancellation_feedback.comment` and never sent to Mixpanel.
+
+| Event | Fires when | Where | Key properties |
+|-------|-----------|-------|----------------|
+| `Cancellation Reason Viewed` | The screen opens | `cancellation_reason_viewmodel.dart` | `source` (`push` / `in_app`), `notification_id`, `entitled` |
+| **`Cancellation Reason Submitted`** | A reason is sent | `cancellation_reason_viewmodel.dart` | `reason` (`too_expensive` / `not_accurate` / `not_useful` / `only_exploring` / `payment_trouble` / `technical_issue` / `found_alternative` / `other`), `has_comment`, `recorded` (false = already answered), `was_in_trial`, `notification_id` |
+| `Cancellation Reason Dismissed` | "Skip" | `cancellation_reason_viewmodel.dart` | `notification_id` |
 
 ---
 
@@ -330,6 +375,11 @@ Every server event carries `source: "server"`, `server_function` (which Edge Fun
 | **`Referral Attributed`** | A referral relationship is created by `referral-claim`. Fires **once per referred user, ever** — the `referrals` primary key makes a second one impossible | `ref:{referred_user_id}` | `referral_code`, `referred_by`, `attribution_type`, `acquisition_source` |
 | **`Referral Converted`** | A referred user's first successful charge — the ₹3 mandate. **This is the event a referral programme is judged on** | `refconv:{referred_user_id}` | `referred_by`, `referral_code`, `cf_payment_id`, `amount`, `currency` |
 | `Attribution Recorded` | `attribution-report` stores a user's acquisition. **Distinct from the app's `Attribution Resolved`** — that one fires when an install works out where it came from, including for the many installs that never sign up; this one fires when the backend stores it against an account | `attr:{user_id}:{source}:{channel}` | `acquisition_source`, `acquisition_channel`, `campaign`, `campaign_id`, `adset`, `ad`, `referral_code`, `is_first_touch` |
+| **`Notification Sent`** | A push was delivered to FCM for at least one device (`notify.ts`) | `ns:{notification id}` | `campaign`, `notification_id`, `kind` (`transactional` / `marketing`), `route`, `language`, `trigger` (`cron` / `inline` / `test`), `tokens_attempted`, `tokens_delivered`, `attempt`, `delay_minutes`, `payment_type`, `entitled` |
+| `Notification Failed` | FCM refused every device after retries, or FCM is not configured | `nf:{notification id}` | `campaign`, `notification_id`, `error_code`, `tokens_attempted`, `attempt`, `trigger` |
+| `Notification Skipped` | A queued push was not sent — **terminal skips only**; deferrals for quiet hours or the daily cap are not events | `nk:{notification id}` | `campaign`, `notification_id`, `skip_reason` (`disabled` / `stale` / `opted_out` / `no_longer_eligible` / `cap` / `no_token` / `no_user`), `trigger` |
+| **`Kundali Generated`** | `kundali-worker` wrote a reading | `kg:{kundali id}` | `kundali_id`, `model`, `latency_ms`, `attempts`, `language`, `prompt_version`, `minutes_after_request`, `minutes_before_unlock`, `problem_count` |
+| `Kundali Generation Failed` | One attempt failed (`terminal = true` on the last) | `kf:{kundali id}:{attempt}` | `kundali_id`, `attempt`, `terminal`, `error_class` (`model` / `unusable` / `truncated`) |
 
 > **⚠️ The distinction that matters most:** `Payment Completed` (app, `outcome = success`) is the app *believing* a payment landed. `Mandate Authorised` and `Subscription Renewed` (server) are Cashfree confirming money actually moved. **Use the server events for anything revenue-shaped.**
 
@@ -357,6 +407,28 @@ New signups are split between two monthly prices: ₹3 trial → ₹499/month, o
 > **Compare only accounts created after `pricing_split_enabled` was turned on.** Before that, and for any signup from an app build older than the split, every account is assigned `plan_499`. Those accounts count toward the ₹499 side without ever having been part of the test.
 
 ---
+
+### 9.2 Push campaigns
+
+Every push is a row in `notifications`, unique on a `dedupe_key` that names the real-world occurrence, so the webhook, the hourly reconcile and a status poll racing each other still send one. Each campaign has its own `notif_<campaign>_enabled` switch under the master `notifications_enabled`; all ship **off**. Marketing campaigns respect Profile → "Offers & reminders"; everything except `mid_cancel` waits out quiet hours (22:00–08:00 IST); capped campaigns share `notif_daily_cap` (2 per IST day) and `notif_min_gap_minutes` (180). Copy exists in all seven chat languages (`notification_copy.ts`).
+
+| Campaign | Kind | Trigger | Opens |
+|----------|------|---------|-------|
+| `mid_cancel` | transactional | **Inline**, the moment a mandate is cancelled from a UPI app (or our cancel endpoint) | `/leaving` |
+| `billing_issue` | transactional | **Inline**, a new failed RECURRING debit or a transition to `ON_HOLD` | Home, or the paywall if access lapsed |
+| `kundali_ready` / `kundali_ready_lapsed` | transactional / marketing | The reveal; the lapsed variant (renew to reveal) only if its own switch is on | `/kundali` / `/subscribe` |
+| `kundali_halfway` | marketing | Halfway through the wait, if the waiting screen was not reopened | `/kundali` |
+| `kundali_not_opened` | marketing | Revealed a day ago, not opened | `/kundali` |
+| `palm_no_face` | marketing | Palm read 2h+ ago, no face reading | `/face` |
+| `reading_no_chat` | marketing | A reading 3h+ ago, no question to Astro | `/chat` |
+| `trial_no_reading` | marketing | 3h into a trial, nothing read | `/palm` |
+| `paywall_abandoned` | marketing | Chose a language 30 min+ ago, never started a trial | `/subscribe` |
+| `onboarding_incomplete` | transactional | Paid 20 min+ ago, no name or birth date | `/birth` |
+| `post_charge_no_return` | marketing | First full-price charge 24–72h ago, not back since | `/kundali` or Home |
+| `winback_paid` | marketing | A paying subscriber's period ended 1–3 days ago | `/subscribe` |
+| `dormant` | marketing | Entitled, away 3+ days; once a week at most | `/chat` |
+
+Not built: "Tarot ready" (no Tarot feature) and UPI hand-off abandonment (separate Payment Leak PRD).
 
 ## 9a. Referral & acquisition attribution
 
@@ -433,6 +505,7 @@ These names exist as constants in `analytics_events.dart` but **nothing currentl
 | `Manage Billing Tapped` | No call site |
 | `Reading Shared` | No call site |
 | `Profile Viewed` | No call site — the Profile screen is covered by `Screen Viewed` |
+| `Kundali Generated`, `Notification Sent` | **Server-only by design.** Declared in `analytics_events.dart` so the whole funnel is greppable from the app; never passed to `track` there (a client twin would carry no `$insert_id` and double-count) |
 
 ---
 
@@ -467,6 +540,7 @@ These names exist as constants in `analytics_events.dart` but **nothing currentl
 | `next_billing_at` | Server | |
 | `last_payment_at`, `last_payment_status` | Server | |
 | `cancelled_at`, `cancelled_by` | Server | |
+| `last_cancel_reason` | Server | From `cancellation-feedback`; never `dismissed` |
 | `last_seen` | App | Written on every resume |
 | `initial_acquisition_source`, `initial_acquisition_channel`, `initial_campaign`, `initial_campaign_id`, `initial_adset`, `initial_ad`, `initial_referral_code` | Server | **First touch. `setOnce`, and backed by an insert that does nothing on conflict.** Never overwritten — a first touch replaced by a later retargeting click re-attributes the acquisition to the campaign that had the least to do with it, and is invisible once it has happened |
 | `acquisition_source`, `acquisition_channel`, `campaign`, `campaign_id`, `adset`, `ad`, `referral_code` | Server | Last touch. Freely updated — this is the half that is *supposed* to move |
@@ -484,6 +558,10 @@ The server never *creates* a profile for someone who has not used the app — `i
 - **OTP values**
 - **Full birth dates** — only `birth_year` and `age_years`
 - **Reading and photo content** — only `bytes`, `focus`, `line_count` / `section_count`
+- **Birth place, coordinates, time of birth, and place-search text** — only `time_zone`, `result_rank`, `suggestion_count`
+- **Kundali reading text** — only `language`, `insight` keys and counts
+- **Cancellation comments** — only `has_comment`; the words stay in `cancellation_feedback.comment`
+- **Push copy** — the rendered title and body are kept in `notifications`, not in events
 - **Email addresses as `distinct_id`**
 - Device/OS/geo fields the SDK already attaches (never duplicated under a second name)
 
@@ -506,8 +584,9 @@ The server never *creates* a profile for someone who has not used the app — `i
 3. **Identity** — signup and login land on the same profile; sign-out starts a fresh anonymous session; `install_id` stays constant across both
 4. **App vs server** — `Payment Completed` only from the app, `Mandate Authorised` / `Subscription Renewed` only from the server. Use the server pair for revenue
 5. **Dedupe** — redeliver a Cashfree webhook and confirm the renewal count does not move
-6. **Lexicon** — add descriptions for all 114 live events in Mixpanel Data Management
-7. **Funnels** — build the five funnels in [§4](#4-core-funnels)
+6. **Lexicon** — add descriptions for all 142 live events in Mixpanel Data Management
+7. **Funnels** — build the seven funnels in [§4](#4-core-funnels)
+8. **Push** — `notification-dispatch` `send_test` to an internal account; confirm `Notification Sent`, then `Push Opened` and `Push Routed` with the same `notification_id`, then an outcome event carrying `push_campaign`
 
 ---
 
@@ -522,8 +601,12 @@ The server never *creates* a profile for someone who has not used the app — `i
 | Home | 3 |
 | Readings (palm + face, shared vocabulary) | 15 |
 | Chat | 11 |
-| Profile | 7 |
-| **App subtotal** | **105** |
+| Profile | 8 |
+| Push (received, routed, dropped, primer) | 5 |
+| Kundali | 14 |
+| Cancellation reason | 3 |
+| **App subtotal** | **128** |
 | Server / webhook | 9 |
-| **Total live** | **114** |
+| Server / notifications & kundali | 5 |
+| **Total live** | **142** |
 | Declared but not emitted | 7 (6 app + 1 server) |

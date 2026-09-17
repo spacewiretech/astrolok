@@ -35,7 +35,9 @@ paths, the paid-content gate, and the analytics navigation observer.
   and a cold-start check alone would miss it. It always re-asks the server; the timer is capped
   at a 6-hour horizon.
 - **Gating is per-route.** `appRouter` has no global redirect — paid routes are individually
-  wrapped, and `/birth`, `/subscribe` and `/payment-status/:outcome` are deliberately ungated.
+  wrapped, and `/language`, `/subscribe`, `/payment-status/:outcome` and `/birth` are deliberately
+  ungated. `/birth` comes after payment but is still ungated: the user held straight after checkout
+  is the stale, unentitled one, and a gate would bounce them back to the paywall.
 - `Env.load()` tolerates a missing file: the getters fall back to empty strings, `isConfigured`
   goes false, and the app runs on the fake tier. That is what makes a fresh checkout walkable.
 - `assets.dart` lists paths that **do not all exist yet** — every `Svg.*` entry is still to be

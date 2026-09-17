@@ -12,6 +12,7 @@ import '../../data/entitlement.dart';
 import '../../data/providers.dart';
 import '../../widgets/astral_background.dart';
 import '../../widgets/primary_button.dart';
+import '../splash/splash_viewmodel.dart';
 import 'payment_outcome.dart';
 
 /// How the checkout ended, and what to do about it.
@@ -91,7 +92,7 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView> {
             P.planVariant: user.plan?.variant,
             P.planAmount: user.plan?.amount,
           });
-          context.go(Routes.home);
+          context.go(destinationAfterPayment(user).route);
           return;
         }
       } catch (error) {
@@ -203,10 +204,12 @@ class _PaymentStatusViewState extends ConsumerState<PaymentStatusView> {
 
   void _onAction() {
     switch (widget.outcome) {
-      // Home is gated, so if the entitlement has not actually landed the gate bounces them
-      // back to the paywall rather than this screen having to decide.
+      // On to the name and birth date when the account has not given them yet, which after a
+      // first checkout it never has; otherwise Home. Both routes decide entitlement for
+      // themselves — the birth step from the user its save returns, Home through its gate — so
+      // this screen does not have to.
       case PaymentOutcome.success:
-        context.go(Routes.home);
+        context.go(destinationAfterPayment(ref.read(entitlementProvider)).route);
       case PaymentOutcome.pending:
         analytics.track(Ev.paymentStatusChecked, {P.trigger: 'manual'});
         _pollUntilEntitled(trigger: 'manual');

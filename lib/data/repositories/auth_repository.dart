@@ -19,13 +19,12 @@ abstract interface class AuthRepository {
   /// has aged out or was already used.
   Future<AppUser> verifyOtp({required String phone, required String code});
 
-  Future<AppUser> saveName(String name);
-
-  /// Stores the date of birth collected on the step after the name.
+  /// Stores the name and date of birth collected together after payment.
   ///
-  /// Takes a [DateTime] whose time component is ignored — the server column is a `date`, and
-  /// the app never collects a birth time.
-  Future<AppUser> saveBirthDate(DateTime date);
+  /// One call rather than one per field, because they are one screen and one Continue: two
+  /// requests would leave a half-saved account whenever the second one failed. [birthDate]'s time
+  /// component is ignored — the server column is a `date`.
+  Future<AppUser> saveDetails({required String name, required DateTime birthDate});
 
   /// Sets the language Astro replies in, or clears it back to the configured default.
   ///
@@ -39,6 +38,10 @@ abstract interface class AuthRepository {
   /// Returns the whole user because the server answers with the chart recomputed from it — which
   /// is the point: the sign Profile shows and the sign the chat reads from are one computation.
   Future<AppUser> saveBirthTime(String? time);
+
+  /// Profile → "Offers & reminders". [optOut] true stops marketing pushes; a kundali that is ready
+  /// or a failed autopay still arrives.
+  Future<AppUser> saveMarketingOptOut(bool optOut);
 
   Future<void> signOut();
 }

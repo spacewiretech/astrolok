@@ -85,6 +85,24 @@ and run in lexical order.
 - `20260916000002_chat_feedback_comment.sql` — `chat_feedback.comment` (text, nullable, at most 500
   characters): the optional written answer submitted with the chat rating. It sits on the same row
   as the score, so there is still one answer per account. No backfill.
+- `20260916000004_onboarding_languages.sql` — data only: adds Telugu, Tamil, Kannada and Malayalam
+  to `chat_languages` for the onboarding language picker. **Only rewrites a row still holding the
+  shipped `Hinglish,English,Hindi`**; a list edited in the dashboard is left alone and needs the
+  four added by hand. The default stays Hinglish.
+- `20260917000001_kundali.sql` — the kundali: birth-place columns on `users` (`birth_place_id`,
+  `birth_lat`, `birth_lng`, `birth_tz`, `birth_coords_at`), the `kundalis` table (one live row per
+  account, a queue for the worker, `unlock_at` for the reveal), `replace_live_kundali` (atomic
+  re-cast) and `claim_due_kundalis` (SKIP LOCKED), a per-user `api_throttle` with
+  `consume_rate_limit`, the `kundali_*` and `place_search_*` config rows (`kundali_enabled` ships
+  **false**), the `kundali-worker-5min` cron job, and `purge_expired` extended to drop superseded
+  kundalis and **null Google coordinates older than 30 days** (Places caching terms).
+- `20260917000002_notifications.sql` — push notifications: `push_tokens.app_build` and
+  `notifications_authorized`, `users.push_marketing_opt_out`, the `notifications` log (unique
+  `dedupe_key` per real-world occurrence), `cancellation_feedback`, the claim functions,
+  `notification_candidates` (one plpgsql function, a branch per scheduled campaign), the
+  `notif_*` config rows (**every switch false**), the `notification-dispatch-5min` cron job, and
+  `purge_expired` extended to drop push history after 180 days. **Apply both `20260917…`
+  migrations before deploying any function** — `entitlement.ts` selects the new user columns.
 
 ## Notes
 

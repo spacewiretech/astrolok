@@ -70,11 +70,18 @@ class _FakePushPlatform implements PushPlatform {
 
 class _RecordingPushRepository implements PushRepository {
   final registrations = <({String token, String platform})>[];
+  final details = <({int? appBuild, bool? authorized})>[];
   bool accept = true;
 
   @override
-  Future<bool> register({required String token, required String platform}) async {
+  Future<bool> register({
+    required String token,
+    required String platform,
+    int? appBuild,
+    bool? notificationsAuthorized,
+  }) async {
     registrations.add((token: token, platform: platform));
+    details.add((appBuild: appBuild, authorized: notificationsAuthorized));
     return accept;
   }
 }
@@ -117,7 +124,11 @@ void main() {
   final instances = <PushMessaging>[];
 
   PushMessaging push({_FakePushPlatform? on}) {
-    final instance = PushMessaging(platform: on ?? platform, preferences: SharedPreferencesAsync());
+    final instance = PushMessaging(
+      platform: on ?? platform,
+      preferences: SharedPreferencesAsync(),
+      appBuild: () async => 9,
+    );
     instances.add(instance);
     return instance;
   }
@@ -263,6 +274,7 @@ void main() {
         P.status: 'authorized',
         P.granted: true,
         P.prompted: true,
+        P.source: 'home',
       });
     });
 
@@ -371,6 +383,82 @@ void main() {
 
       // Nothing was shown, so nothing was opened.
       expect(recorded.named(Ev.pushOpened), isEmpty);
+    });
+  });
+
+  group('notification sender support', () {
+    test('registration reports the build and whether notifications can show', () async {
+      platform.status = AuthorizationStatus.denied;
+      final messaging = push();
+      await messaging.attachBackend(backend);
+      await messaging.onUserResolved(_user());
+
+      expect(backend.details.single, (appBuild: 9, authorized: false));
+    });
+
+    test('allowing notifications later registers the device again', () async {
+      platform.status = AuthorizationStatus.denied;
+      final messaging = push();
+      await messaging.attachBackend(backend);
+      await messaging.onUserResolved(_user());
+
+      // Turned on in Settings; the next resume resolves the user again.
+      platform.status = AuthorizationStatus.authorized;
+      await messaging.onUserResolved(_user());
+
+      expect(backend.details.map((d) => d.authorized), [false, true]);
+    });
+
+    test('a push opened from a campaign reports where it pointed', () async {
+      final messaging = push();
+      await messaging.start();
+
+      platform.opened.add(const RemoteMessage(
+        messageId: 'm2',
+        data: {'route': '/kundali', 'campaign': 'kundali_ready', 'notification_id': 'n-1', 'params': '{}'},
+      ));
+      await pumpEventQueue();
+
+      expect(recorded.named(Ev.pushOpened).single, {
+        P.source: 'background',
+        P.messageId: 'm2',
+        P.campaign: 'kundali_ready',
+        P.notificationId: 'n-1',
+        P.route: '/kundali',
+      });
+    });
+
+    test('a push on screen is published for the banner and reported as received', () async {
+      final messaging = push();
+      await messaging.start();
+      final shown = <RemoteMessage>[];
+      messaging.received.listen(shown.add);
+
+      platform.foreground.add(const RemoteMessage(messageId: 'fg-2', data: {'campaign': 'dormant', 'route': '/chat'}));
+      await pumpEventQueue();
+
+      expect(shown.single.messageId, 'fg-2');
+      expect(recorded.named(Ev.pushReceived).single[P.campaign], 'dormant');
+    });
+
+    test('the primer only offers a prompt the OS will actually show', () async {
+      final messaging = push();
+      expect(await messaging.canPrompt(), isTrue);
+
+      expect(await messaging.requestFromPrimer(source: 'kundali'), isTrue);
+      expect(recorded.named(Ev.pushPermissionResolved).single[P.source], 'kundali');
+      expect(await messaging.canPrompt(), isFalse);
+      expect(await messaging.isAuthorized(), isTrue);
+    });
+
+    test('an Android decline stays declined: the primer does not ask twice', () async {
+      platform.answer = AuthorizationStatus.denied;
+      final messaging = push();
+
+      expect(await messaging.requestFromPrimer(source: 'language'), isFalse);
+      expect(await messaging.canPrompt(), isFalse);
+      expect(await messaging.requestFromPrimer(source: 'kundali'), isFalse);
+      expect(platform.requests, 1);
     });
   });
 }

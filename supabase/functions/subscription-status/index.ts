@@ -2,6 +2,7 @@ import { cashfreeSettings } from "../_shared/cashfree.ts";
 import { loadConfig } from "../_shared/config.ts";
 import { configureFacebookCapi } from "../_shared/facebook_capi.ts";
 import { configureMixpanel } from "../_shared/mixpanel.ts";
+import { configureNotifications } from "../_shared/notify.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
 import {
@@ -37,6 +38,7 @@ Deno.serve(async (req) => {
 
   const config = await loadConfig(db);
   configureMixpanel(config, "subscription-status");
+  configureNotifications(config, "subscription-status");
   configureFacebookCapi(config, "subscription-status");
   const graceHours = graceHoursFrom(config);
 

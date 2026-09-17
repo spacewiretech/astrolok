@@ -495,13 +495,14 @@ class _LanguageRepository implements AuthRepository {
       throw UnimplementedError();
 
   @override
-  Future<AppUser> saveName(String name) => throw UnimplementedError();
-
-  @override
-  Future<AppUser> saveBirthDate(DateTime date) => throw UnimplementedError();
+  Future<AppUser> saveDetails({required String name, required DateTime birthDate}) =>
+      throw UnimplementedError();
 
   @override
   Future<AppUser> saveBirthTime(String? time) => throw UnimplementedError();
+
+  @override
+  Future<AppUser> saveMarketingOptOut(bool optOut) => throw UnimplementedError();
 
   @override
   Future<void> signOut() => throw UnimplementedError();

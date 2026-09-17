@@ -15,6 +15,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 import { serviceClient } from "../_shared/db.ts";
 import { configureFacebookCapi } from "../_shared/facebook_capi.ts";
 import { configureMixpanel, trackServer } from "../_shared/mixpanel.ts";
+import { configureNotifications } from "../_shared/notify.ts";
 import {
   asSubscriptionRow,
   recordDispute,
@@ -96,6 +97,7 @@ Deno.serve(async (req) => {
   const db = serviceClient();
   const config = await loadConfig(db);
   configureMixpanel(config, "cashfree-webhook");
+  configureNotifications(config, "cashfree-webhook");
   configureFacebookCapi(config, "cashfree-webhook");
 
   // Parsed before the secret is looked up, so that a delivery arriving at a misconfigured

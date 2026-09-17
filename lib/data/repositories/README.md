@@ -9,7 +9,7 @@ line.
 ## Files
 
 - `auth_repository.dart` — Declares: `AuthRepository` (`currentUser`, `sendOtp`, `resendOtp`,
-  `verifyOtp`, `saveName`, `saveBirthDate`, `signOut`), `InvalidOtpException`,
+  `verifyOtp`, `saveDetails`, `saveChatLanguage`, `saveBirthTime`, `signOut`), `InvalidOtpException`,
   `OtpExpiredException`, `OtpSendException`.
 - `palm_repository.dart` — Declares: `PalmRepository` (`read({image, focus})`), `PalmException`
   and its five subclasses: `NoPalmDetected…`, `PalmLimitReached…`, `PalmUnavailable…`,

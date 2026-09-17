@@ -17,21 +17,26 @@ import 'cashfree/upi_app_preference.dart';
 import 'fake/fake_astro_chat.dart';
 import 'fake/fake_auth_repository.dart';
 import 'fake/fake_face_reading.dart';
+import 'fake/fake_kundali_repository.dart';
 import 'fake/fake_palm_reading.dart';
 import 'fake/fake_session.dart';
 import 'fake/fake_subscription_repository.dart';
 import 'fast2sms/fast2sms_auth_repository.dart';
 import 'fast2sms/fast2sms_client.dart';
 import 'firebase/push_messaging.dart';
+import 'local/kundali_store.dart';
 import 'local/reading_image_store.dart';
 import 'local/reading_store.dart';
 import 'local/trial_scan_tracker.dart';
 import 'media/promo_video_source.dart';
 import 'repositories/app_config_repository.dart';
 import 'repositories/auth_repository.dart';
+import 'repositories/cancellation_feedback_repository.dart';
 import 'repositories/chat_repository.dart';
 import 'repositories/face_repository.dart';
+import 'repositories/kundali_repository.dart';
 import 'repositories/palm_repository.dart';
+import 'repositories/place_repository.dart';
 import 'repositories/push_repository.dart';
 import 'repositories/referral_repository.dart';
 import 'repositories/subscription_repository.dart';
@@ -40,9 +45,12 @@ import 'supabase/edge_functions.dart';
 import 'supabase/session_store.dart';
 import 'supabase/supabase_app_config_repository.dart';
 import 'supabase/supabase_auth_repository.dart';
+import 'supabase/supabase_cancellation_feedback_repository.dart';
 import 'supabase/supabase_chat_repository.dart';
 import 'supabase/supabase_face_repository.dart';
+import 'supabase/supabase_kundali_repository.dart';
 import 'supabase/supabase_palm_repository.dart';
+import 'supabase/supabase_place_repository.dart';
 import 'supabase/supabase_push_repository.dart';
 import 'supabase/supabase_referral_repository.dart';
 import 'supabase/supabase_subscription_repository.dart';
@@ -99,7 +107,10 @@ final analyticsBootstrapProvider = FutureProvider<void>((ref) async {
   if (!repository.remoteKeys.contains(mixpanelTokenKey) ||
       !repository.remoteKeys.contains(facebookAppIdKey) ||
       !repository.remoteKeys.contains(chatLanguagesKey) ||
-      !repository.remoteKeys.contains(referralEnabledKey)) {
+      !repository.remoteKeys.contains(referralEnabledKey) ||
+      // The kundali ships dark and is switched on from the dashboard once the build is live. That
+      // switch is exactly a key whose arrival is the event.
+      !repository.remoteKeys.contains(kundaliEnabledKey)) {
     try {
       config = await repository.load(force: true);
     } catch (error) {
@@ -402,6 +413,50 @@ final chatRepositoryProvider = Provider<ChatRepository>((ref) {
 /// The conversation, cached so a cold start paints before the network answers.
 final chatThreadStoreProvider =
     Provider<ChatThreadStore>((ref) => const ChatThreadStore());
+
+// ---------------------------------------------------------------- kundali
+
+/// Casts, checks on and reveals the kundali, through the Edge Function that holds the chart
+/// engine and the Gemini key.
+///
+/// The fake unlocks after seconds rather than a day, so the whole journey can be walked on a
+/// checkout that has never been pointed at a project.
+final kundaliRepositoryProvider = Provider<KundaliRepository>((ref) {
+  if (supabaseReady) {
+    return SupabaseKundaliRepository(
+      SupabaseEdgeFunctions(Supabase.instance.client),
+      ref.watch(sessionStoreProvider),
+    );
+  }
+
+  debugPrint('[kundali] Supabase is not configured; the kundali is canned and unlocks in seconds.');
+  return FakeKundaliRepository();
+});
+
+/// Birth-place search. The Google key lives in `place-search`; there is no direct rung.
+final placeRepositoryProvider = Provider<PlaceRepository>((ref) {
+  if (supabaseReady) {
+    return SupabasePlaceRepository(
+      SupabaseEdgeFunctions(Supabase.instance.client),
+      ref.watch(sessionStoreProvider),
+    );
+  }
+  return const FakePlaceRepository();
+});
+
+final kundaliStoreProvider = Provider<KundaliStore>((ref) => const KundaliStore());
+
+// ---------------------------------------------------------------- cancellation reason
+
+final cancellationFeedbackRepositoryProvider = Provider<CancellationFeedbackRepository>((ref) {
+  if (supabaseReady) {
+    return SupabaseCancellationFeedbackRepository(
+      SupabaseEdgeFunctions(Supabase.instance.client),
+      ref.watch(sessionStoreProvider),
+    );
+  }
+  return const FakeCancellationFeedbackRepository();
+});
 
 // ---------------------------------------------------------------- narration
 

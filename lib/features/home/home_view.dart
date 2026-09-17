@@ -19,12 +19,14 @@ import '../../app/theme/app_typography.dart';
 import '../../data/entitlement.dart';
 import '../../data/firebase/push_messaging.dart';
 import '../../data/providers.dart';
+import '../../data/repositories/app_config_repository.dart';
 import '../../widgets/astral_background.dart';
 import '../../widgets/brand_logo.dart';
 import '../../widgets/promo_carousel.dart';
 import '../../widgets/reading_card.dart';
 import '../../widgets/safe_asset.dart';
 import '../chat/chat_threads_viewmodel.dart';
+import 'kundali_card.dart';
 
 /// The signed-in, paid-for home.
 ///
@@ -209,6 +211,12 @@ class _HomeViewState extends ConsumerState<HomeView> {
                 fallbackIcon: Icons.face_retouching_natural_outlined,
                 onTap: () => _openReading(context, Routes.faceCapture, 'face', 'card'),
               ),
+              // Dark until `kundali_enabled` is switched on from the dashboard, so an installed
+              // build never shows a card for a backend that is not deployed yet.
+              if ((ref.watch(appConfigProvider).valueOrNull ?? shippedAppConfig).configFlag(kundaliEnabledKey)) ...[
+                const SizedBox(height: 14),
+                const KundaliCard(),
+              ],
             ],
           ),
         ),

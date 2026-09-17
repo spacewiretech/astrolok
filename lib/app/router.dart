@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../data/models/face_reading.dart';
 import '../data/models/palm_reading.dart';
 import '../features/birth/birth_view.dart';
+import '../features/cancellation/cancellation_reason_view.dart';
 import '../features/chat/chat_view.dart';
 import '../features/face/face_capture_view.dart';
 import '../features/face/face_capture_viewmodel.dart';
@@ -11,6 +12,11 @@ import '../features/face/face_part_view.dart';
 import '../features/face/face_reading_view.dart';
 import '../features/face/face_scan_view.dart';
 import '../features/home/home_view.dart';
+import '../features/kundali/kundali_form_view.dart';
+import '../features/kundali/kundali_gate_view.dart';
+import '../features/kundali/kundali_report_view.dart';
+import '../features/kundali/kundali_waiting_view.dart';
+import '../features/language/language_view.dart';
 import '../features/palm/palm_capture_view.dart';
 import '../features/palm/palm_capture_viewmodel.dart';
 import '../features/palm/palm_line_view.dart';
@@ -32,13 +38,18 @@ import 'entitlement_gate.dart';
 abstract final class Routes {
   static const splash = '/';
 
-  /// The three onboarding steps share one screen — a sliding hero over a bottom sheet whose
+  /// The phone and OTP steps share one screen — a sliding hero over a bottom sheet whose
   /// contents change — so they share one route and carry the step in a query parameter.
   /// Use [onboardingAt] to build one.
   static const onboarding = '/onboarding';
 
-  static const birth = '/birth';
+  /// Which language Astro answers in. After OTP, before the paywall.
+  static const language = '/language';
+
   static const subscribe = '/subscribe';
+
+  /// Name and date of birth, on one screen, after payment.
+  static const birth = '/birth';
 
   /// `:outcome` is a [PaymentOutcome] slug. Use [paymentStatusFor] to build one.
   static const paymentStatus = '/payment-status/:outcome';
@@ -89,6 +100,19 @@ abstract final class Routes {
   /// straight to a screen would walk them past the session gate.
   static const invite = '/profile/invite';
 
+  /// The kundali. `/kundali` decides between the form, the wait and the reveal — it is what the Home
+  /// card falls back to and what a push opens. The other three are the screens themselves.
+  static const kundali = '/kundali';
+  static const kundaliNew = '/kundali/new';
+  static const kundaliWaiting = '/kundali/waiting';
+  static const kundaliReport = '/kundali/report';
+
+  /// Why a subscription was cancelled. Opened by the `mid_cancel` push.
+  static const leaving = '/leaving';
+
+  /// The form, with `?edit=1` when it re-casts an existing kundali.
+  static String kundaliForm({bool edit = false}) => edit ? '$kundaliNew?edit=1' : kundaliNew;
+
   static String onboardingAt(OnboardingStep step) => '$onboarding?step=${step.name}';
 
   static String paymentStatusFor(PaymentOutcome outcome) =>
@@ -111,9 +135,9 @@ abstract final class Routes {
 extension SplashDestinationRoute on SplashDestination {
   String get route => switch (this) {
         SplashDestination.onboarding => Routes.onboarding,
-        SplashDestination.name => Routes.onboardingAt(OnboardingStep.name),
-        SplashDestination.birth => Routes.birth,
+        SplashDestination.language => Routes.language,
         SplashDestination.subscribe => Routes.subscribe,
+        SplashDestination.birth => Routes.birth,
         SplashDestination.home => Routes.home,
       };
 }
@@ -137,10 +161,17 @@ final appRouter = GoRouter(
     ),
 
     // Before the paywall and therefore ungated: the user is not entitled yet, and wrapping this
-    // would bounce them to /subscribe before they could give the date the readings need.
-    GoRoute(path: Routes.birth, builder: (context, state) => const BirthView()),
+    // would bounce them to /subscribe before they could choose.
+    GoRoute(path: Routes.language, builder: (context, state) => const LanguageView()),
 
     GoRoute(path: Routes.subscribe, builder: (context, state) => const SubscriptionView()),
+
+    // After the paywall, but still ungated. Straight after checkout the app is holding the user
+    // from before the payment — the paywall does not refresh it — so a gate here would read them
+    // as unentitled and bounce them to the paywall they just paid at. The screen's save answers
+    // with the fresh server user and routes from that, so an unpaid account still ends up on
+    // /subscribe, and Home is gated regardless.
+    GoRoute(path: Routes.birth, builder: (context, state) => const BirthView()),
 
     // Ungated: a failed or pending payment is precisely the case where the user is not
     // entitled, so wrapping this in EntitlementGate would bounce them straight back to the
@@ -245,6 +276,37 @@ final appRouter = GoRouter(
     GoRoute(
       path: Routes.invite,
       builder: (context, state) => const EntitlementGate(child: ReferralView()),
+    ),
+
+    // The kundali. Gated like the readings: casting one writes a reading that costs money, and the
+    // server refuses every action for a lapsed account anyway.
+    GoRoute(
+      path: Routes.kundali,
+      builder: (context, state) => const EntitlementGate(child: KundaliGateView()),
+    ),
+    GoRoute(
+      path: Routes.kundaliNew,
+      builder: (context, state) => EntitlementGate(
+        child: KundaliFormView(edit: state.uri.queryParameters['edit'] == '1'),
+      ),
+    ),
+    GoRoute(
+      path: Routes.kundaliWaiting,
+      builder: (context, state) => const EntitlementGate(child: KundaliWaitingView()),
+    ),
+    GoRoute(
+      path: Routes.kundaliReport,
+      builder: (context, state) => const EntitlementGate(child: KundaliReportView()),
+    ),
+
+    // UNGATED, like /payment-status and for a sharper reason: a trial user who cancels loses access
+    // the same minute, and this is the screen that asks them why. Behind EntitlementGate it would
+    // bounce exactly the person it exists for to the paywall.
+    GoRoute(
+      path: Routes.leaving,
+      builder: (context, state) => CancellationReasonView(
+        notificationId: state.uri.queryParameters['nid'],
+      ),
     ),
 
     GoRoute(

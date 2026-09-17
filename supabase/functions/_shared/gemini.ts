@@ -285,6 +285,22 @@ const CHAT_BUDGET: Budget = {
 };
 
 /**
+ * A kundali report: a long structured document, written by the background worker.
+ *
+ * Nobody is watching a progress bar — the report is revealed a day later — so it gets the most
+ * patience of the three: a larger token budget and a minute for the first attempt. The deadline
+ * still has to fit inside the worker's own wall-clock budget, which is why the retry window is
+ * bounded rather than open.
+ */
+const REPORT_BUDGET: Budget = {
+  firstTokens: 8192,
+  retryTokens: 12288,
+  timeoutMs: 60_000,
+  retryTimeoutMs: 45_000,
+  retryDeadlineMs: 70_000,
+};
+
+/**
  * The call, the retry, and the rules for when a retry is worth making.
  *
  * Shared by both entry points so the policy exists once: a bigger token cap after a truncation,
@@ -392,6 +408,21 @@ export function converse(
   ];
 
   return send(settings, contents, request.systemPrompt, request.schema, CHAT_BUDGET);
+}
+
+export interface DocumentRequest {
+  systemPrompt: string;
+  userPrompt: string;
+  schema: unknown;
+}
+
+/** One structured document from text alone — no image, no history. The kundali report. */
+export function generateJson(
+  settings: GeminiSettings,
+  request: DocumentRequest,
+): Promise<GeminiRawResult> {
+  const contents = [{ role: "user", parts: [{ text: request.userPrompt }] }];
+  return send(settings, contents, request.systemPrompt, request.schema, REPORT_BUDGET);
 }
 
 // ---------------------------------------------------------------- shared normalising

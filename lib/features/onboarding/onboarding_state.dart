@@ -4,33 +4,31 @@ import '../../data/fast2sms/fast2sms_client.dart';
 
 /// Which sheet the single onboarding screen is showing.
 ///
-/// The three Figma frames are one screen: the hero at the top slides while only the bottom
-/// sheet swaps, so this is a step within a screen rather than three routes.
+/// The Figma frames are one screen: the hero at the top slides while only the bottom sheet
+/// swaps, so this is a step within a screen rather than two routes.
 enum OnboardingStep {
   phone,
-  otp,
-  name;
+  otp;
 
   /// Parses the `?step=` query parameter.
   ///
   /// Anything unrecognised falls back to [phone] — the only step that is always reachable,
-  /// since the later two need a number already entered.
+  /// since the OTP step needs a number already entered. That includes `name`, which was a step
+  /// here until the name moved after payment.
   static OnboardingStep parse(String? raw) => switch (raw) {
         'otp' => OnboardingStep.otp,
-        'name' => OnboardingStep.name,
         _ => OnboardingStep.phone,
       };
 }
 
-/// The three onboarding steps share one state object because the phone number entered in
-/// step 1 is what step 2 verifies.
+/// The onboarding steps share one state object because the phone number entered in step 1 is
+/// what step 2 verifies.
 @immutable
 class OnboardingState {
   const OnboardingState({
     this.step = OnboardingStep.phone,
     this.phone = '',
     this.code = '',
-    this.name = '',
     this.busy = false,
     this.error,
     this.attemptsLeft = maxAttempts,
@@ -43,7 +41,6 @@ class OnboardingState {
 
   final String phone;
   final String code;
-  final String name;
   final bool busy;
   final String? error;
 
@@ -79,8 +76,6 @@ class OnboardingState {
 
   bool get canVerify => code.length == otpLength && !busy && !outOfAttempts;
 
-  bool get canSaveName => name.trim().isNotEmpty && !busy;
-
   Duration get resendIn {
     if (resendAvailableAt == null) return Duration.zero;
     final remaining = resendAvailableAt!.difference(now ?? DateTime.now());
@@ -101,7 +96,6 @@ class OnboardingState {
     OnboardingStep? step,
     String? phone,
     String? code,
-    String? name,
     bool? busy,
     String? error,
     bool clearError = false,
@@ -115,7 +109,6 @@ class OnboardingState {
       step: step ?? this.step,
       phone: phone ?? this.phone,
       code: code ?? this.code,
-      name: name ?? this.name,
       busy: busy ?? this.busy,
       error: clearError ? null : (error ?? this.error),
       attemptsLeft: attemptsLeft ?? this.attemptsLeft,
@@ -129,7 +122,6 @@ class OnboardingState {
   OnboardingState clearingOtpSession() => OnboardingState(
         step: step,
         phone: phone,
-        name: name,
         busy: busy,
       );
 }

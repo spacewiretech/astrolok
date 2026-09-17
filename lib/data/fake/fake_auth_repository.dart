@@ -34,19 +34,12 @@ class FakeAuthRepository implements AuthRepository {
   }
 
   @override
-  Future<AppUser> saveName(String name) async {
-    await FakeSession.latency();
-    final user = _current().copyWith(name: name.trim());
-    _session.user = user;
-    return user;
-  }
-
-  @override
-  Future<AppUser> saveBirthDate(DateTime date) async {
+  Future<AppUser> saveDetails({required String name, required DateTime birthDate}) async {
     await FakeSession.latency();
     final user = _current().copyWith(
+      name: name.trim(),
       // Normalised to midnight, matching what a Postgres `date` round-trips as.
-      birthDate: DateTime(date.year, date.month, date.day),
+      birthDate: DateTime(birthDate.year, birthDate.month, birthDate.day),
     );
     _session.user = user;
     return user;
@@ -76,6 +69,14 @@ class FakeAuthRepository implements AuthRepository {
       birthTime: trimmed,
       clearBirthTime: trimmed == null || trimmed.isEmpty,
     );
+    _session.user = user;
+    return user;
+  }
+
+  @override
+  Future<AppUser> saveMarketingOptOut(bool optOut) async {
+    await FakeSession.latency();
+    final user = _current().copyWith(pushMarketingOptOut: optOut);
     _session.user = user;
     return user;
   }

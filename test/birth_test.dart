@@ -48,10 +48,18 @@ void main() {
       expect(BirthState(day: 1, month: 1, year: nextYear).date, isNull);
     });
 
-    test('canSave follows date, and is blocked while busy', () {
-      expect(const BirthState(day: 4, month: 7, year: 2001).canSave, isTrue);
-      expect(const BirthState(day: 31, month: 2, year: 2001).canSave, isFalse);
-      expect(const BirthState(day: 4, month: 7, year: 2001, busy: true).canSave, isFalse);
+    test('canSave needs a name and a real date, and is blocked while busy', () {
+      expect(const BirthState(name: 'Asha', day: 4, month: 7, year: 2001).canSave, isTrue);
+      expect(const BirthState(name: 'Asha', day: 31, month: 2, year: 2001).canSave, isFalse);
+      expect(
+        const BirthState(name: 'Asha', day: 4, month: 7, year: 2001, busy: true).canSave,
+        isFalse,
+      );
+    });
+
+    test('a blank name blocks saving however good the date is', () {
+      expect(const BirthState(day: 4, month: 7, year: 2001).canSave, isFalse);
+      expect(const BirthState(name: '   ', day: 4, month: 7, year: 2001).canSave, isFalse);
     });
   });
 

@@ -9,7 +9,15 @@ abstract interface class PushRepository {
   /// [platform] is `android` or `ios`. Returns whether the backend accepted it — false with no
   /// session, when the call failed, and on a tier with no backend at all — so the caller tries
   /// again next time rather than remembering a registration that never happened.
-  Future<bool> register({required String token, required String platform});
+  ///
+  /// [appBuild] and [notificationsAuthorized] let the sender skip devices that could not route a
+  /// push or would never show one. Android issues a token whether or not notifications are allowed.
+  Future<bool> register({
+    required String token,
+    required String platform,
+    int? appBuild,
+    bool? notificationsAuthorized,
+  });
 }
 
 /// The implementation used wherever there is no backend to talk to.
@@ -21,5 +29,11 @@ class NoopPushRepository implements PushRepository {
   const NoopPushRepository();
 
   @override
-  Future<bool> register({required String token, required String platform}) async => false;
+  Future<bool> register({
+    required String token,
+    required String platform,
+    int? appBuild,
+    bool? notificationsAuthorized,
+  }) async =>
+      false;
 }

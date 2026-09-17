@@ -3,6 +3,7 @@ import 'dart:io' show Platform;
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../analytics/analytics.dart';
@@ -10,6 +11,7 @@ import '../analytics/analytics_events.dart';
 import '../models/app_user.dart';
 import '../repositories/push_repository.dart';
 import 'firebase_boot.dart';
+import 'push_payload.dart';
 
 /// Runs when a data message arrives while the app is not in the foreground.
 ///
@@ -115,12 +117,26 @@ class FirebasePushPlatform implements PushPlatform {
 /// anything worth being notified about, is the lowest-opt-in placement there is. Home asks, after
 /// the ATT prompt has settled, so the two dialogs never contend.
 class PushMessaging {
-  PushMessaging({PushPlatform? platform, SharedPreferencesAsync? preferences})
-      : _platform = platform ?? const FirebasePushPlatform(),
-        _preferencesOverride = preferences;
+  PushMessaging({
+    PushPlatform? platform,
+    SharedPreferencesAsync? preferences,
+    Future<int?> Function()? appBuild,
+  })  : _platform = platform ?? const FirebasePushPlatform(),
+        _preferencesOverride = preferences,
+        _appBuild = appBuild ?? _installedBuild;
 
   final PushPlatform _platform;
   final SharedPreferencesAsync? _preferencesOverride;
+  final Future<int?> Function() _appBuild;
+
+  /// This install's build number, which the sender compares with `notif_min_app_build`.
+  static Future<int?> _installedBuild() async {
+    try {
+      return int.tryParse((await PackageInfo.fromPlatform()).buildNumber);
+    } catch (_) {
+      return null;
+    }
+  }
 
   late final SharedPreferencesAsync _preferences =
       _preferencesOverride ?? SharedPreferencesAsync();
@@ -134,6 +150,7 @@ class PushMessaging {
   static const _askedKey = 'astrolok.push_permission_asked';
 
   final _opened = StreamController<RemoteMessage>.broadcast();
+  final _received = StreamController<RemoteMessage>.broadcast();
   final _subscriptions = <StreamSubscription<Object?>>[];
 
   bool _started = false;
@@ -160,6 +177,10 @@ class PushMessaging {
   /// one that launched the app is also kept for [takeInitialMessage].
   Stream<RemoteMessage> get opened => _opened.stream;
 
+  /// Pushes that arrived while the app was on screen. The OS shows nothing for these, so the app's
+  /// in-app banner listens here instead.
+  Stream<RemoteMessage> get received => _received.stream;
+
   /// The notification that started this process, handed out once.
   RemoteMessage? takeInitialMessage() {
     final message = _initial;
@@ -175,9 +196,7 @@ class PushMessaging {
 
     try {
       _subscriptions.addAll([
-        _platform.foregroundMessages.listen(
-          (message) => debugPrint('[push] foreground message ${message.messageId}, not shown'),
-        ),
+        _platform.foregroundMessages.listen(_onReceived),
         _platform.openedMessages.listen((message) => _onOpened(message, source: 'background')),
         _platform.tokenRefreshes.listen((_) {
           // The old token is dead on FCM's side; forget that it was registered so the new one is.
@@ -203,6 +222,45 @@ class PushMessaging {
   /// on a user reading a dialog.
   Future<void> ensurePermission() async {
     if (_asked || !firebaseInitialised) return;
+    await _resolvePermission(source: 'home');
+  }
+
+  /// Whether the system prompt could still be shown — iOS has not asked yet, or Android has never
+  /// been asked on this install. False without Firebase, and once the answer is settled either way.
+  ///
+  /// The primer asks this first, so it never explains a dialog that is not coming.
+  Future<bool> canPrompt() async {
+    if (!firebaseInitialised) return false;
+    try {
+      final current = await _platform.currentPermission();
+      return current == AuthorizationStatus.notDetermined ||
+          (_platform.name == 'android' && current == AuthorizationStatus.denied && !await _hasAsked());
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// True when notifications are allowed right now.
+  Future<bool> isAuthorized() async {
+    if (!firebaseInitialised) return false;
+    try {
+      return _isGranted(await _platform.currentPermission());
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// The system prompt, asked because the user tapped something that wants it — the primer's
+  /// Allow, or "Notify me when ready". Returns whether notifications are now allowed.
+  ///
+  /// Unlike [ensurePermission] it asks even if Home already resolved the question this session: a
+  /// tap is a request, and an already-settled answer is simply returned rather than re-prompted.
+  Future<bool> requestFromPrimer({required String source}) async {
+    if (!firebaseInitialised) return false;
+    return _resolvePermission(source: source);
+  }
+
+  Future<bool> _resolvePermission({required String source}) async {
     _asked = true;
 
     try {
@@ -219,22 +277,28 @@ class PushMessaging {
       final status = prompt ? await _platform.requestPermission() : current;
       if (prompt) await _rememberAsked();
 
-      final granted =
-          status == AuthorizationStatus.authorized || status == AuthorizationStatus.provisional;
+      final granted = _isGranted(status);
 
       analytics.track(Ev.pushPermissionResolved, {
         P.status: status.name,
         P.granted: granted,
         P.prompted: prompt,
+        P.source: source,
       });
 
       // On iOS the APNs token often lands around the prompt, so this is a good moment to retry a
-      // registration that found no token earlier.
-      if (granted) await _sync();
+      // registration that found no token earlier. A change in the answer re-registers as well, so
+      // the sender learns the device can now show a push.
+      await _sync();
+      return granted;
     } catch (error) {
       debugPrint('[push] could not resolve notification permission: $error');
+      return false;
     }
   }
+
+  static bool _isGranted(AuthorizationStatus status) =>
+      status == AuthorizationStatus.authorized || status == AuthorizationStatus.provisional;
 
   /// Gives registration somewhere to go. Called by `pushBootstrapProvider`.
   Future<void> attachBackend(PushRepository backend) async {
@@ -277,10 +341,20 @@ class PushMessaging {
       final token = await _platform.token();
       if (token == null) return;
 
-      final key = '$userId|$token';
+      final authorized = _isGranted(await _platform.currentPermission());
+      final build = await _appBuild();
+
+      // The permission is part of the key: turning notifications on in Settings has to reach the
+      // sender on the next resume, or the device stays filtered out as one that cannot show a push.
+      final key = '$userId|$token|$authorized|$build';
       if (_registered == key) return;
 
-      if (await _backend.register(token: token, platform: _platform.name)) {
+      if (await _backend.register(
+        token: token,
+        platform: _platform.name,
+        appBuild: build,
+        notificationsAuthorized: authorized,
+      )) {
         _registered = key;
       }
     } catch (error) {
@@ -289,11 +363,26 @@ class PushMessaging {
   }
 
   void _onOpened(RemoteMessage message, {required String source}) {
+    final payload = PushPayload.fromData(message.data);
     analytics.track(Ev.pushOpened, {
       P.source: source,
       P.messageId: message.messageId,
+      P.campaign: ?payload.campaign,
+      P.notificationId: ?payload.notificationId,
+      P.route: ?payload.route,
     });
     _opened.add(message);
+  }
+
+  void _onReceived(RemoteMessage message) {
+    final payload = PushPayload.fromData(message.data);
+    analytics.track(Ev.pushReceived, {
+      P.messageId: message.messageId,
+      P.campaign: ?payload.campaign,
+      P.notificationId: ?payload.notificationId,
+      P.route: ?payload.route,
+    });
+    _received.add(message);
   }
 
   Future<bool> _hasAsked() async {
@@ -322,6 +411,7 @@ class PushMessaging {
     }
     _subscriptions.clear();
     await _opened.close();
+    await _received.close();
   }
 }
 

@@ -45,6 +45,12 @@ Deno.serve(async (req) => {
       user_id: userId,
       session_token_hash: await hashToken(bearer),
       platform: registration.platform,
+      // Written only when the build reports them, so an older build re-registering never erases what
+      // a newer one said.
+      ...(registration.appBuild !== undefined ? { app_build: registration.appBuild } : {}),
+      ...(registration.notificationsAuthorized !== undefined
+        ? { notifications_authorized: registration.notificationsAuthorized }
+        : {}),
       updated_at: new Date().toISOString(),
     },
     { onConflict: "token" },

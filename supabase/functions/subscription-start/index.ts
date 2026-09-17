@@ -10,6 +10,7 @@ import {
 import { loadConfig } from "../_shared/config.ts";
 import { configureFacebookCapi } from "../_shared/facebook_capi.ts";
 import { configureMixpanel } from "../_shared/mixpanel.ts";
+import { configureNotifications } from "../_shared/notify.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
 import {
@@ -77,6 +78,7 @@ Deno.serve(async (req) => {
 
   const config = await loadConfig(db);
   configureMixpanel(config, "subscription-start");
+  configureNotifications(config, "subscription-start");
   configureFacebookCapi(config, "subscription-start");
   const graceHours = graceHoursFrom(config);
 
@@ -112,13 +114,14 @@ Deno.serve(async (req) => {
     });
   }
 
-  if (!user.name || !user.name.trim()) {
-    return fail("invalid_request", "Please add your name before subscribing.", 400);
-  }
-
+  // The name is asked after checkout now — the app reaches the paywall on a phone number and a
+  // language — so a first subscription normally arrives without one. Cashfree still wants a
+  // non-empty `customer_name`, and nothing it is used for is shown to the subscriber, so a
+  // placeholder stands in rather than refusing the payment.
+  //
   // Held rather than re-read off `user`, which the reconcile below may reassign — and a name
-  // checked on one row is not a name checked on another.
-  const customerName = user.name.trim();
+  // taken from one row is not a name taken from another.
+  const customerName = user.name?.trim() || "Customer";
 
   // Resume rather than duplicate: a double tap, or a checkout the user backgrounded and came
   // back to, must reuse the mandate it already opened.

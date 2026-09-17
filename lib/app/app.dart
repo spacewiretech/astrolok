@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../data/firebase/push_messaging.dart';
+import '../data/kundali_summary.dart';
 import '../data/providers.dart';
+import '../widgets/push_banner.dart';
+import 'push_navigation.dart';
 import 'router.dart';
 import 'theme/app_theme.dart';
 
@@ -22,11 +26,25 @@ class AstrolokApp extends ConsumerWidget {
     // waits for the repositories rather than for boot.
     ref.watch(pushBootstrapProvider);
 
+    // Routes tapped pushes. Held for the life of the app, so a tap that arrives while it runs is
+    // never dropped for want of a listener.
+    final pushNavigator = ref.watch(pushNavigatorProvider);
+
     return MaterialApp.router(
       title: 'Astrolok',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       routerConfig: appRouter,
+      builder: (context, child) => PushBannerHost(
+        messages: pushMessaging.received,
+        onTap: pushNavigator.handle,
+        onReceived: (payload) {
+          if (payload.route == Routes.kundali) {
+            ref.read(kundaliSummaryProvider.notifier).refresh(force: true);
+          }
+        },
+        child: child ?? const SizedBox.shrink(),
+      ),
     );
   }
 }

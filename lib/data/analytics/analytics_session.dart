@@ -45,9 +45,28 @@ class AnalyticsSession {
   /// long the *session* has run.
   int get _sessionSeconds => DateTime.now().difference(_sessionStartedAt).inSeconds;
 
+  /// The push that brought the user into this session, if one did.
+  ///
+  /// In memory and on every event rather than a Mixpanel super property: super properties persist
+  /// on disk and would still be attributing tomorrow's organic visit to today's push. Cleared when a
+  /// new session starts. This is what turns "Notification Sent → Push Opened" into an outcome — a
+  /// `Kundali Viewed` or `Subscribe Tapped` carrying the campaign that caused it.
+  String? _pushCampaign;
+  String? _pushNotificationId;
+
+  void attributePush({String? campaign, String? notificationId}) {
+    _pushCampaign = campaign;
+    _pushNotificationId = notificationId;
+  }
+
   /// Merged into every event alongside the navigator observer's properties.
-  Map<String, Object?> contextProperties() =>
-      _sessionId.isEmpty ? const {} : {P.sessionId: _sessionId};
+  Map<String, Object?> contextProperties() => _sessionId.isEmpty
+      ? const {}
+      : {
+          P.sessionId: _sessionId,
+          P.pushCampaign: ?_pushCampaign,
+          P.pushNotificationId: ?_pushNotificationId,
+        };
 
   /// Resolves the session, emits `App Launched`, and starts listening for lifecycle changes.
   ///
@@ -118,6 +137,8 @@ class AnalyticsSession {
   }
 
   void _startSession() {
+    _pushCampaign = null;
+    _pushNotificationId = null;
     _sessionId = _mintId();
     _sessionStartedAt = DateTime.now();
     _prefs?.setString(_sessionIdKey, _sessionId);

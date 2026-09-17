@@ -20,6 +20,19 @@ abstract final class Img {
 
   static const onboardHero = [onboard1, onboard2, onboard3];
 
+  /// The language picker's card art: the landmark and its wash only, with no text or check —
+  /// those are drawn on top so the selection can animate. The design's cards are 343x244.
+  ///
+  /// Not exported yet; each card falls back to a gradient in the same tint until they are.
+  /// Hinglish has no artwork in the design and borrows Hindi's.
+  static const langEnglish = '$_base/lang_english.png';
+  static const langHindi = '$_base/lang_hindi.png';
+  static const langHinglish = '$_base/lang_hinglish.png';
+  static const langTelugu = '$_base/lang_telugu.png';
+  static const langTamil = '$_base/lang_tamil.png';
+  static const langKannada = '$_base/lang_kannada.png';
+  static const langMalayalam = '$_base/lang_malayalam.png';
+
   /// Home's promo cards, exported flattened — artwork, heading and button are all pixels, so
   /// each card carries its own Semantics label. All three are 712x346, which is the aspect
   /// [PromoCarousel] lays the strip out at.
@@ -32,6 +45,10 @@ abstract final class Img {
   static const readingChat = '$_base/reading_chat.png';
   static const readingPalm = '$_base/reading_palm.png';
   static const readingFace = '$_base/reading_face.png';
+
+  /// The scroll with the chart on it, for the Kundali row. Not exported yet; the row shows an icon
+  /// until it is.
+  static const readingKundali = '$_base/reading_kundali.png';
 
   /// Shown in the paywall's video card until the player is ready, and instead of it when
   /// `paywall_video_url` is empty. Not yet exported.

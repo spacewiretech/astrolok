@@ -69,7 +69,7 @@ Deno.serve(async (req) => {
   // a hardcoded enum here would mean adding one needed a deploy after all.
   const config = await loadConfig(db);
 
-  const update: Record<string, string | null> = {};
+  const update: Record<string, string | boolean | null> = {};
 
   if ("name" in body) {
     const name = body.name;
@@ -129,6 +129,15 @@ Deno.serve(async (req) => {
     } else {
       return fail("invalid_request", "That language is not available.", 400);
     }
+  }
+
+  // Profile → "Offers & reminders". True turns marketing pushes off; the transactional ones — a
+  // failed autopay, a kundali that is ready — still arrive.
+  if ("push_marketing_opt_out" in body) {
+    if (typeof body.push_marketing_opt_out !== "boolean") {
+      return fail("invalid_request", "Malformed request.", 400);
+    }
+    update.push_marketing_opt_out = body.push_marketing_opt_out;
   }
 
   if (Object.keys(update).length === 0) {

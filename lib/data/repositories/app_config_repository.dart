@@ -86,6 +86,25 @@ const referralEnabledKey = 'referral_enabled';
 /// carries the hash; while false, the consent sheet works with the SMS exactly as it is.
 const smsRetrieverEnabledKey = 'sms_retriever_enabled';
 
+/// Shows the Kundali card on Home. Off until the build that carries the feature is live, then
+/// switched on from the dashboard — which is why it is also on the forced-refresh line in
+/// `providers.dart`.
+const kundaliEnabledKey = 'kundali_enabled';
+
+/// Hours between asking for a kundali and its reveal. The server's copy is the one that counts;
+/// this only words the promise on the form before a summary exists.
+const kundaliUnlockHoursKey = 'kundali_unlock_hours';
+
+/// Birth-place search. False shows the form's "search unavailable" message instead of a field
+/// that would only ever fail.
+const placeSearchEnabledKey = 'place_search_enabled';
+
+/// The in-app notification primer, after the language pick and on the kundali waiting screen.
+const pushPrimerEnabledKey = 'push_primer_enabled';
+
+/// The why-are-you-leaving screen a `mid_cancel` push opens.
+const cancellationFeedbackEnabledKey = 'cancellation_feedback_enabled';
+
 /// Values the app falls back to when config has never been fetched and there is no network.
 ///
 /// A cold start must never block on the network, so these have to be good enough to run on.
@@ -143,7 +162,10 @@ const defaultAppConfig = <String, String>{
   //
   // Defaulted rather than left blank so the picker works on a cold start. Blanking the row in
   // the dashboard is the off switch: an empty list hides the row entirely.
-  chatLanguagesKey: 'Hinglish,English,Hindi',
+  //
+  // The seven the onboarding picker has cards for. The picker draws only what this list offers,
+  // so until config resolves, a cold start shows all of them.
+  chatLanguagesKey: 'Hinglish,English,Hindi,Telugu,Tamil,Kannada,Malayalam',
   chatLanguageDefaultKey: 'Hinglish',
   // Referral invites. Defaulted on, because the backend is the real switch — with no
   // `referral_codes` row nothing can be claimed anyway, and a client that defaulted this off
@@ -156,6 +178,12 @@ const defaultAppConfig = <String, String>{
   // Off until the Fast2SMS template ends with the app's signing hash — see [smsRetrieverEnabledKey].
   // Defaulting it on would leave a cold start with no cached config autofilling nothing at all.
   smsRetrieverEnabledKey: 'false',
+  // Dark by default: an installed build must not show a card for a backend that is not deployed.
+  kundaliEnabledKey: 'false',
+  kundaliUnlockHoursKey: '24',
+  placeSearchEnabledKey: 'true',
+  pushPrimerEnabledKey: 'true',
+  cancellationFeedbackEnabledKey: 'true',
 };
 
 /// Typed reads over the raw key/value map, so a bad or missing value can never crash a screen.

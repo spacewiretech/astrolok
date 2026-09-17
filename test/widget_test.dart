@@ -19,7 +19,6 @@ void main() {
       const state = OnboardingState(
         phone: '9876543210',
         code: '123456',
-        name: 'Asha',
         attemptsLeft: 2,
         resendsUsed: 3,
       );
@@ -28,8 +27,8 @@ void main() {
       expect(cleared.code, isEmpty);
       expect(cleared.attemptsLeft, OnboardingState.maxAttempts);
       expect(cleared.resendsUsed, 0);
-      // The name survives — it was not part of the OTP session.
-      expect(cleared.name, 'Asha');
+      // The number survives — it is what the next code will be sent to.
+      expect(cleared.phone, '9876543210');
     });
 
     test('the resend countdown is derived from wall-clock, not from ticks', () {
@@ -68,15 +67,16 @@ void main() {
   group('OnboardingStep', () {
     test('parses the step query parameter', () {
       expect(OnboardingStep.parse('otp'), OnboardingStep.otp);
-      expect(OnboardingStep.parse('name'), OnboardingStep.name);
       expect(OnboardingStep.parse('phone'), OnboardingStep.phone);
     });
 
     test('falls back to phone, the only always-reachable step', () {
-      // The later steps need a number already entered, so an unrecognised value must not land
-      // on a sheet that cannot function.
+      // The OTP step needs a number already entered, so an unrecognised value must not land on a
+      // sheet that cannot function.
       expect(OnboardingStep.parse(null), OnboardingStep.phone);
       expect(OnboardingStep.parse('nonsense'), OnboardingStep.phone);
+      // The name was a step here until it moved after payment.
+      expect(OnboardingStep.parse('name'), OnboardingStep.phone);
     });
   });
 

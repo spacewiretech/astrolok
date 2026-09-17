@@ -233,7 +233,7 @@ void main() {
       // Absence is not the off switch — a cold start with no config must still offer a picker.
       expect(
         <String, String>{}.configList(chatLanguagesKey),
-        ['Hinglish', 'English', 'Hindi'],
+        ['Hinglish', 'English', 'Hindi', 'Telugu', 'Tamil', 'Kannada', 'Malayalam'],
       );
     });
   });

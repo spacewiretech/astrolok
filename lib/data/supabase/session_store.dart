@@ -4,6 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/app_user.dart';
 import '../models/birth_chart.dart';
+import '../models/birth_place.dart';
 
 /// Holds the session token issued by `verify-otp`.
 ///
@@ -54,6 +55,9 @@ class SessionStore {
           // Server shape too. The paywall prices itself from this, so an offline relaunch must not
           // fall back to the configured price for an account on the other side of the split.
           'plan': user.plan?.toJson(),
+          // Flattened in the user payload's own keys, so the kundali form prefills offline too.
+          ...?user.birthPlace?.toUserJson(),
+          'pushMarketingOptOut': user.pushMarketingOptOut,
         }),
       );
 
@@ -99,6 +103,10 @@ class SessionStore {
         // Absent in a cache written before the price split, where null — the configured price — is
         // the right answer. Not a reason to bump `_version` either.
         plan: UserPlan.fromServer(map['plan']),
+        // Both absent in a cache written before the kundali, where "no place" and "not opted out"
+        // are the honest answers. Not a reason to bump `_version`.
+        birthPlace: BirthPlace.fromUserJson(map),
+        pushMarketingOptOut: map['pushMarketingOptOut'] == true,
       ).recomputeOffline();
     } catch (_) {
       // A cache written by an older build is not worth crashing over.

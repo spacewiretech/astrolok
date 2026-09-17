@@ -56,11 +56,11 @@ onboarding step agree about where a given user belongs.
 One function decides, in `lib/features/splash/splash_viewmodel.dart`:
 
 ```
-!signedIn      -> onboarding
-!hasName       -> onboarding (name step)
-!hasBirthDate  -> birth
-!entitled      -> subscribe
-                  home
+!signedIn                  -> onboarding (phone → OTP)
+!entitled && !hasLanguage  -> language
+!entitled                  -> subscribe
+!hasName || !hasBirthDate  -> birth (name + date of birth, after payment)
+                              home
 ```
 
 Everything past the paywall is wrapped in `EntitlementGate`, which re-checks on mount, on

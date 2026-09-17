@@ -57,7 +57,13 @@ export function fail(
     // A referral code that is malformed or names nobody. Terminal, like `not_found`: the app
     // discards the pending referral rather than retrying, because no number of retries will make
     // a code that does not exist start existing.
-    | "invalid_code",
+    | "invalid_code"
+    // The kundali exists but is not revealed yet, or has not been written. The app shows the
+    // waiting screen rather than an error.
+    | "not_ready"
+    // Place search is misconfigured, over quota, or Google is unreachable. The app lets the user
+    // try again; the reason stays in the logs.
+    | "place_unavailable",
   message: string,
   status = 400,
 ): Response {

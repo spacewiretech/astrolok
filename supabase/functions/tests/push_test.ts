@@ -51,3 +51,20 @@ Deno.test("anything that is not an object carrying two strings is refused", () =
   assertEquals(parsePushRegistration({ token: 12345, platform: "ios" }), null);
   assertEquals(parsePushRegistration({ token: TOKEN, platform: 1 }), null);
 });
+
+Deno.test("a newer build reports its build number and whether notifications can show", () => {
+  assertEquals(
+    parsePushRegistration({ token: TOKEN, platform: "android", app_build: 9, notifications_authorized: false }),
+    { token: TOKEN, platform: "android", appBuild: 9, notificationsAuthorized: false },
+  );
+});
+
+Deno.test("an older build sends neither, and malformed values are dropped rather than refused", () => {
+  assertEquals(parsePushRegistration({ token: TOKEN, platform: "ios" }), { token: TOKEN, platform: "ios" });
+  assertEquals(
+    parsePushRegistration({ token: TOKEN, platform: "ios", app_build: "9", notifications_authorized: "yes" }),
+    { token: TOKEN, platform: "ios" },
+  );
+  assertEquals(parsePushRegistration({ token: TOKEN, platform: "ios", app_build: -1 }), { token: TOKEN, platform: "ios" });
+  assertEquals(parsePushRegistration({ token: TOKEN, platform: "ios", app_build: 1.5 }), { token: TOKEN, platform: "ios" });
+});

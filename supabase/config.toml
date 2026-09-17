@@ -80,3 +80,25 @@ verify_jwt = false
 # sign-out and expiry remove it by cascade.
 [functions.push-token]
 verify_jwt = false
+
+# Kundali. place-search proxies Google Places so the key stays server-side; kundali requires a
+# bearer session token and re-checks entitlement. Both are metered per user.
+[functions.place-search]
+verify_jwt = false
+
+[functions.kundali]
+verify_jwt = false
+
+# Called by pg_cron every five minutes, authenticated with x-cron-secret (app_config.reconcile_secret).
+[functions.kundali-worker]
+verify_jwt = false
+
+# Push notifications. notification-dispatch is called by pg_cron every five minutes (and by an
+# operator for dry_run / send_test), authenticated with x-cron-secret.
+[functions.notification-dispatch]
+verify_jwt = false
+
+# The why-are-you-leaving answer. Bearer session token only, no entitlement check: a trial user who
+# cancels loses access the same minute.
+[functions.cancellation-feedback]
+verify_jwt = false

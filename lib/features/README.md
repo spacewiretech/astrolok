@@ -8,15 +8,19 @@ One folder per screen or flow. Container only — every file lives in a subfolde
 
 - `splash/` — resolves the stored session and decides where the user belongs. **The onboarding
   gate.**
-- `onboarding/` — phone, OTP and name, as one screen with a swapping bottom sheet.
-- `birth/` — date of birth, between onboarding and the paywall.
+- `onboarding/` — phone and OTP, as one screen with a swapping bottom sheet.
+- `language/` — which language Astro answers in, between OTP and the paywall.
 - `subscription/` — the paywall, the Cashfree UPI mandate, and the entitlement polling.
 - `payment_status/` — where checkout lands; three-valued, `pending` included.
+- `birth/` — name and date of birth on one screen, after payment.
 - `home/` — the signed-in home screen. View only.
 - `palm/` — palm reading: capture → scan → reading → line detail.
 - `face/` — face reading, a file-for-file mirror of `palm/`.
 - `chat/` — the Astro conversation: one route, many threads.
-- `profile/` — account menu, saved readings, Astro's memory.
+- `profile/` — account menu, saved readings, Astro's memory, "Offers & reminders".
+- `kundali/` — the birth chart: form (Google place search) → a 24-hour wait → the report and its
+  PDF. `/kundali` is the gate a push or the Home card falls back to.
+- `cancellation/` — "Why are you leaving?", opened by the `mid_cancel` push. **Ungated.**
 
 ## Notes
 

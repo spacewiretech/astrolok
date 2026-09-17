@@ -385,6 +385,7 @@ void _bootstrapTests() {
           // the bootstrap re-fetches, and would otherwise mask what this test is asserting.
           chatLanguagesKey: 'Hinglish',
           referralEnabledKey: 'true',
+          kundaliEnabledKey: 'false',
         },
         {
           'env': 'production',
@@ -392,6 +393,7 @@ void _bootstrapTests() {
           facebookAppIdKey: '',
           chatLanguagesKey: 'Hinglish',
           referralEnabledKey: 'true',
+          kundaliEnabledKey: 'false',
         },
       );
 
@@ -408,6 +410,7 @@ void _bootstrapTests() {
           facebookAppIdKey: '123',
           chatLanguagesKey: 'Hinglish,English,Hindi',
           referralEnabledKey: 'true',
+          kundaliEnabledKey: 'false',
         },
         {
           'env': 'production',
@@ -415,6 +418,7 @@ void _bootstrapTests() {
           facebookAppIdKey: '123',
           chatLanguagesKey: 'Hinglish,English,Hindi',
           referralEnabledKey: 'true',
+          kundaliEnabledKey: 'false',
         },
       );
 
@@ -459,6 +463,33 @@ void _bootstrapTests() {
           facebookAppIdKey: '123',
           chatLanguagesKey: 'Hinglish',
           referralEnabledKey: 'true',
+        },
+      );
+
+      await _runBootstrap(config);
+
+      expect(config.calls, [false, true], reason: 'cached read, then a forced one');
+    });
+
+    test('a cache that predates the kundali switch is refreshed', () async {
+      // The kundali ships dark and is switched on from the dashboard once the build is live. An
+      // install that cached before the row existed would otherwise keep the card hidden for six
+      // hours after launch day.
+      final config = _RecordingConfig(
+        {
+          'env': 'production',
+          mixpanelTokenKey: 'tok',
+          facebookAppIdKey: '123',
+          chatLanguagesKey: 'Hinglish',
+          referralEnabledKey: 'true',
+        },
+        {
+          'env': 'production',
+          mixpanelTokenKey: 'tok',
+          facebookAppIdKey: '123',
+          chatLanguagesKey: 'Hinglish',
+          referralEnabledKey: 'true',
+          kundaliEnabledKey: 'true',
         },
       );
 

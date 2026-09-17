@@ -15,15 +15,16 @@ import 'router.dart';
 ///    reported as a property rather than as three separate screens. The same is true of the
 ///    `:id`, `:line` and `:part` segments in the reading routes — one `Palm Reading` screen with
 ///    a `reading_id` property, not one screen per reading.
-///  * `/onboarding` is a single route whose three steps are a `?step=` query parameter, so phone,
-///    OTP and name are one screen here. The step transitions are covered by the explicit
-///    onboarding events instead, which carry far more than a screen view could.
+///  * `/onboarding` is a single route whose two steps are a `?step=` query parameter, so phone
+///    and OTP are one screen here. The step transition is covered by the explicit onboarding
+///    events instead, which carry far more than a screen view could.
 ///  * the reading detail routes are nested, so their patterns are the full paths.
 const _screenNames = <String, String>{
   Routes.splash: 'Splash',
   Routes.onboarding: 'Onboarding',
-  Routes.birth: 'Birth Date',
+  Routes.language: 'Language',
   Routes.subscribe: 'Paywall',
+  Routes.birth: 'Name & Birth Date',
   Routes.paymentStatus: 'Payment Status',
   Routes.home: 'Home',
   Routes.palmCapture: 'Palm Capture',
@@ -38,6 +39,11 @@ const _screenNames = <String, String>{
   Routes.profile: 'Profile',
   Routes.downloads: 'Downloads',
   Routes.memory: 'Astro Memory',
+  Routes.kundali: 'Kundali',
+  Routes.kundaliNew: 'Kundali Form',
+  Routes.kundaliWaiting: 'Kundali Waiting',
+  Routes.kundaliReport: 'Kundali Report',
+  Routes.leaving: 'Cancellation Reason',
 };
 
 /// Names for the surfaces that are routes but not screens.

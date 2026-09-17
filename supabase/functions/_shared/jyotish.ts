@@ -23,13 +23,22 @@
 const DEG = Math.PI / 180;
 
 /** Normalises to [0, 360). */
-function wrap360(degrees: number): number {
+export function wrap360(degrees: number): number {
   const x = degrees % 360;
   return x < 0 ? x + 360 : x;
 }
 
 function sin(degrees: number): number {
   return Math.sin(degrees * DEG);
+}
+
+function cos(degrees: number): number {
+  return Math.cos(degrees * DEG);
+}
+
+/** atan2 in degrees, wrapped to [0, 360). */
+function atan2d(y: number, x: number): number {
+  return wrap360(Math.atan2(y, x) / DEG);
 }
 
 // ---------------------------------------------------------------- time
@@ -77,7 +86,7 @@ export function julianDay(
 }
 
 /** Julian centuries from J2000.0, the argument every series below is written in. */
-function centuries(jd: number): number {
+export function centuries(jd: number): number {
   return (jd - 2451545.0) / 36525;
 }
 
@@ -248,6 +257,175 @@ export function toSidereal(tropicalLongitude: number, jd: number): number {
   return wrap360(tropicalLongitude - ayanamsa(jd));
 }
 
+// ---------------------------------------------------------------- the sky at a place
+//
+// Everything above is enough for the chat, which only ever needs the Moon and the Sun. A full
+// kundali needs the rest of the grahas and the lagna, and the lagna needs a place as well as a
+// moment. `kundali_chart.ts` assembles these; they live here so the astronomy stays in one file.
+
+/** Mean obliquity of the ecliptic, in degrees. Meeus 22.2. */
+export function meanObliquity(jd: number): number {
+  const t = centuries(jd);
+  return 23.4392911 - (46.8150 * t + 0.00059 * t * t - 0.001813 * t * t * t) / 3600;
+}
+
+/**
+ * Mean sidereal time at Greenwich, in degrees, for a Julian Day in UT. Meeus 12.4.
+ *
+ * Mean rather than apparent: the difference is nutation in right ascension, never more than about
+ * a second of time, and the lagna it feeds moves a degree every four minutes.
+ */
+export function greenwichSiderealTime(jd: number): number {
+  const t = centuries(jd);
+  return wrap360(
+    280.46061837 + 360.98564736629 * (jd - 2451545.0) + 0.000387933 * t * t -
+      t * t * t / 38710000,
+  );
+}
+
+/**
+ * Longitude of the Moon's mean ascending node — Rahu — in degrees, tropical. Meeus 47.7.
+ *
+ * The mean node rather than the true one, which is what the Lahiri ephemeris and most Indian
+ * almanacs print. The two never differ by more than about a degree and a half. Ketu is always the
+ * point opposite.
+ */
+export function meanRahu(jd: number): number {
+  const t = centuries(jd);
+  return wrap360(
+    125.0445479 - 1934.1362891 * t + 0.0020754 * t * t + t * t * t / 467441 -
+      t * t * t * t / 60616000,
+  );
+}
+
+/**
+ * The tropical ascendant — the point of the ecliptic rising on the eastern horizon — in degrees.
+ *
+ * `longitudeEast` is degrees east of Greenwich. Latitude is clamped inside the polar circles,
+ * where for part of every day no single point of the ecliptic is rising and the formula stops
+ * meaning anything; nobody this app will ever chart was born there.
+ */
+export function ascendant(jd: number, latitude: number, longitudeEast: number): number {
+  const ramc = wrap360(greenwichSiderealTime(jd) + longitudeEast);
+  const eps = meanObliquity(jd);
+  const phi = Math.max(-66, Math.min(66, latitude));
+  return atan2d(cos(ramc), -(sin(ramc) * cos(eps) + Math.tan(phi * DEG) * sin(eps)));
+}
+
+export type Graha = "mercury" | "venus" | "mars" | "jupiter" | "saturn";
+
+/**
+ * Low-precision orbital elements, from Paul Schlyter's "How to compute planetary positions".
+ *
+ * Each is `[base, rate per day]` for d = days from 2000 Jan 0.0. N and w already carry precession,
+ * so the longitudes come out referred to the equinox of date — tropical, ready for [toSidereal].
+ *
+ * Chosen over the JPL approximate-elements table, whose Jupiter and Saturn drift by several
+ * arcminutes, and over full VSOP87, which is thousands of terms. With the perturbations in
+ * [planetLongitude] these land within an arcminute or two: fine enough for a sign, a nakshatra and
+ * a house, and the house is what a kundali is read from.
+ */
+const ELEMENTS: Record<
+  Graha | "sun",
+  { N: [number, number]; i: [number, number]; w: [number, number]; a: number; e: [number, number]; M: [number, number] }
+> = {
+  sun: { N: [0, 0], i: [0, 0], w: [282.9404, 4.70935e-5], a: 1, e: [0.016709, -1.151e-9], M: [356.0470, 0.9856002585] },
+  mercury: { N: [48.3313, 3.24587e-5], i: [7.0047, 5.00e-8], w: [29.1241, 1.01444e-5], a: 0.387098, e: [0.205635, 5.59e-10], M: [168.6562, 4.0923344368] },
+  venus: { N: [76.6799, 2.46590e-5], i: [3.3946, 2.75e-8], w: [54.8910, 1.38374e-5], a: 0.723330, e: [0.006773, -1.302e-9], M: [48.0052, 1.6021302244] },
+  mars: { N: [49.5574, 2.11081e-5], i: [1.8497, -1.78e-8], w: [286.5016, 2.92961e-5], a: 1.523688, e: [0.093405, 2.516e-9], M: [18.6021, 0.5240207766] },
+  jupiter: { N: [100.4542, 2.76854e-5], i: [1.3030, -1.557e-7], w: [273.8777, 1.64505e-5], a: 5.20256, e: [0.048498, 4.469e-9], M: [19.8950, 0.0830853001] },
+  saturn: { N: [113.6634, 2.38980e-5], i: [2.4886, -1.081e-7], w: [339.3939, 2.97661e-5], a: 9.55475, e: [0.055546, -9.499e-9], M: [316.9670, 0.0334442282] },
+};
+
+/** A position in the plane of its own orbit: distance and true anomaly plus perihelion. */
+function orbitalPosition(body: Graha | "sun", d: number) {
+  const el = ELEMENTS[body];
+  const at = ([base, rate]: [number, number]) => base + rate * d;
+  const N = at(el.N);
+  const i = at(el.i);
+  const w = at(el.w);
+  const e = at(el.e);
+  const M = wrap360(at(el.M));
+
+  // Kepler's equation, iterated. Mercury's eccentricity is the largest here and still converges in
+  // a handful of steps.
+  let E = M + (e / DEG) * sin(M) * (1 + e * cos(M));
+  for (let step = 0; step < 10; step++) {
+    const next = E - (E - (e / DEG) * sin(E) - M) / (1 - e * cos(E));
+    if (Math.abs(next - E) < 1e-6) {
+      E = next;
+      break;
+    }
+    E = next;
+  }
+
+  const xv = el.a * (cos(E) - e);
+  const yv = el.a * Math.sqrt(1 - e * e) * sin(E);
+  return { N, i, w, M, v: atan2d(yv, xv), r: Math.hypot(xv, yv) };
+}
+
+/**
+ * A graha's geocentric ecliptic longitude, tropical, in degrees, for a Julian Day in UT.
+ *
+ * Heliocentric from [ELEMENTS], corrected for the mutual pull of Jupiter and Saturn — the two
+ * large terms that otherwise leave Saturn nearly a degree out — then moved to the Earth by adding
+ * the Sun's position. Light-time is ignored; it never shifts a longitude by more than a fraction
+ * of an arcminute.
+ */
+export function planetLongitude(planet: Graha, jd: number): number {
+  const d = jd - 2451543.5;
+  const p = orbitalPosition(planet, d);
+
+  const u = p.v + p.w;
+  const xh = p.r * (cos(p.N) * cos(u) - sin(p.N) * sin(u) * cos(p.i));
+  const yh = p.r * (sin(p.N) * cos(u) + cos(p.N) * sin(u) * cos(p.i));
+  const zh = p.r * sin(u) * sin(p.i);
+
+  let lon = atan2d(yh, xh);
+  let lat = Math.atan2(zh, Math.hypot(xh, yh)) / DEG;
+
+  if (planet === "jupiter" || planet === "saturn") {
+    const mj = wrap360(ELEMENTS.jupiter.M[0] + ELEMENTS.jupiter.M[1] * d);
+    const ms = wrap360(ELEMENTS.saturn.M[0] + ELEMENTS.saturn.M[1] * d);
+    if (planet === "jupiter") {
+      lon += -0.332 * sin(2 * mj - 5 * ms - 67.6) -
+        0.056 * sin(2 * mj - 2 * ms + 21) +
+        0.042 * sin(3 * mj - 5 * ms + 21) -
+        0.036 * sin(mj - 2 * ms) +
+        0.022 * cos(mj - ms) +
+        0.023 * sin(2 * mj - 3 * ms + 52) -
+        0.016 * sin(mj - 5 * ms - 69);
+    } else {
+      lon += 0.812 * sin(2 * mj - 5 * ms - 67.6) -
+        0.229 * cos(2 * mj - 4 * ms - 2) +
+        0.119 * sin(mj - 2 * ms - 3) +
+        0.046 * sin(2 * mj - 6 * ms - 69) +
+        0.014 * sin(mj - 3 * ms + 32);
+      lat += -0.020 * cos(2 * mj - 4 * ms - 2) + 0.018 * sin(2 * mj - 6 * ms - 49);
+    }
+  }
+
+  const x = p.r * cos(lon) * cos(lat);
+  const y = p.r * sin(lon) * cos(lat);
+
+  // The Sun as seen from the Earth, in the same low-precision frame, so the two cancel cleanly.
+  const s = orbitalPosition("sun", d);
+  const sunLon = wrap360(s.v + s.w);
+
+  return atan2d(y + s.r * sin(sunLon), x + s.r * cos(sunLon));
+}
+
+/**
+ * Whether a body is moving backwards along the ecliptic at [jd]: a central difference across a
+ * day. A station, where the speed is momentarily zero, reads as direct.
+ */
+export function isRetrograde(longitudeAt: (jd: number) => number, jd: number): boolean {
+  let delta = longitudeAt(jd + 0.5) - longitudeAt(jd - 0.5);
+  if (delta > 180) delta -= 360;
+  if (delta < -180) delta += 360;
+  return delta < 0;
+}
+
 // ---------------------------------------------------------------- the names
 
 /** The twelve rashis, in order from 0° sidereal. */
@@ -314,7 +492,7 @@ export const NAKSHATRAS = [
 ] as const;
 
 /** One nakshatra: 360 / 27. */
-const NAKSHATRA_SPAN = 360 / 27;
+export const NAKSHATRA_SPAN = 360 / 27;
 
 /**
  * The names a rashi actually goes by, as people type them.
@@ -468,6 +646,38 @@ export function vimshottariDasha(
   return null;
 }
 
+/** One Mahadasha as a span of Julian Days. */
+export interface DashaPeriod {
+  lord: string;
+  startJd: number;
+  endJd: number;
+}
+
+/**
+ * The nine Mahadashas from birth: the opening one (already partly spent at birth, so its start is
+ * before [birthJd]) and the eight that follow it.
+ *
+ * Dates, unlike [vimshottariDasha]. This feeds the kundali's timeline table, which is computed
+ * fact printed beside the chart — never the model's prompt, which still only ever sees phases.
+ */
+export function mahadashaSequence(moonSidereal: number, birthJd: number): DashaPeriod[] {
+  if (![moonSidereal, birthJd].every(Number.isFinite)) return [];
+
+  const longitude = wrap360(moonSidereal);
+  let lord = Math.floor(longitude / NAKSHATRA_SPAN) % 9;
+  const travelled = (longitude % NAKSHATRA_SPAN) / NAKSHATRA_SPAN;
+  let start = birthJd - travelled * DASHA_LORDS[lord][1] * DASHA_YEAR_DAYS;
+
+  const periods: DashaPeriod[] = [];
+  for (let step = 0; step < 9; step++) {
+    const end = start + DASHA_LORDS[lord][1] * DASHA_YEAR_DAYS;
+    periods.push({ lord: DASHA_LORDS[lord][0], startJd: start, endJd: end });
+    start = end;
+    lord = (lord + 1) % 9;
+  }
+  return periods;
+}
+
 function phaseOf(fraction: number): DashaPhase {
   if (fraction < 1 / 3) return "early";
   if (fraction < 2 / 3) return "middle";
@@ -551,7 +761,7 @@ export interface BirthDetails {
 const END_OF_DAY = 23 + 59 / 60 + 59 / 3600;
 
 /** Julian Day of a JavaScript instant: the Unix epoch is JD 2440587.5. */
-function julianDayOf(instant: Date): number {
+export function julianDayOf(instant: Date): number {
   return instant.getTime() / 86_400_000 + 2440587.5;
 }
 
@@ -662,7 +872,7 @@ export function chartToJson(chart: Chart | null): Record<string, unknown> | null
 }
 
 /** `HH:MM[:SS]` to fractional hours, or null when it is not a time. */
-function parseClock(raw: string | null | undefined): number | null {
+export function parseClock(raw: string | null | undefined): number | null {
   const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(raw?.trim() ?? "");
   if (!match) return null;
 

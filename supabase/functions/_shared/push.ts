@@ -8,6 +8,16 @@ export type PushPlatform = "android" | "ios";
 export interface PushRegistration {
   token: string;
   platform: PushPlatform;
+  /**
+   * The app build that registered. Absent from builds older than the notification sender, which
+   * cannot route a push; the sender only targets builds at or above `notif_min_app_build`.
+   */
+  appBuild?: number;
+  /**
+   * Whether the OS will actually show a notification. Android issues a token either way, so without
+   * this a token is not evidence that anyone will see anything.
+   */
+  notificationsAuthorized?: boolean;
 }
 
 /**
@@ -26,7 +36,7 @@ const PLATFORMS: ReadonlySet<string> = new Set(["android", "ios"]);
  */
 export function parsePushRegistration(body: unknown): PushRegistration | null {
   if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
-  const { token, platform } = body as Record<string, unknown>;
+  const { token, platform, app_build, notifications_authorized } = body as Record<string, unknown>;
 
   if (typeof token !== "string" || typeof platform !== "string") return null;
 
@@ -40,5 +50,16 @@ export function parsePushRegistration(body: unknown): PushRegistration | null {
   const normalised = platform.trim().toLowerCase();
   if (!PLATFORMS.has(normalised)) return null;
 
-  return { token: trimmed, platform: normalised as PushPlatform };
+  const registration: PushRegistration = { token: trimmed, platform: normalised as PushPlatform };
+
+  // Both optional, and only kept when well-formed: an old build sends neither, and a malformed value
+  // must not cost the device its registration.
+  if (typeof app_build === "number" && Number.isInteger(app_build) && app_build >= 0 && app_build < 1_000_000_000) {
+    registration.appBuild = app_build;
+  }
+  if (typeof notifications_authorized === "boolean") {
+    registration.notificationsAuthorized = notifications_authorized;
+  }
+
+  return registration;
 }

@@ -47,6 +47,16 @@ export interface UserRow {
   birth_time?: string | null;
   birth_place?: string | null;
 
+  /// Set by the kundali form, from a Google place: the id is kept indefinitely, the coordinates only
+  /// for Google's caching window (`purge_expired` clears them), and the zone is an IANA id.
+  birth_place_id?: string | null;
+  birth_lat?: number | null;
+  birth_lng?: number | null;
+  birth_tz?: string | null;
+
+  /// Profile → "Offers & reminders" off. Marketing pushes skip the account; transactional ones do not.
+  push_marketing_opt_out?: boolean | null;
+
   /// Which language the chat answers in. Null means the configured default; `chat_language.ts`
   /// resolves it, because a language retired from `app_config` must not keep being honoured.
   language?: string | null;
@@ -77,7 +87,8 @@ export interface UserRow {
  * every trial user as unentitled — or `dob`, which would loop the birth step forever.
  */
 export const USER_COLUMNS =
-  "user_id, mobile_no, name, dob, birth_time, birth_place, language, creation_time, payment_type, " +
+  "user_id, mobile_no, name, dob, birth_time, birth_place, birth_place_id, birth_lat, birth_lng, " +
+  "birth_tz, push_marketing_opt_out, language, creation_time, payment_type, " +
   "trial_ends_at, current_period_end, active_subscription_id, trial_started_at, " +
   "subscription_started_at, cancelled_at, billing_state, plan_variant";
 
@@ -186,6 +197,13 @@ export function entitlementPayload(
     // see that it was heard.
     birth_time: user.birth_time ?? null,
     birth_place: user.birth_place ?? null,
+    // So the kundali form opens already filled in. The coordinates are null once they age out of
+    // Google's caching window; the form then re-resolves the place id rather than asking again.
+    birth_place_id: user.birth_place_id ?? null,
+    birth_lat: user.birth_lat ?? null,
+    birth_lng: user.birth_lng ?? null,
+    birth_tz: user.birth_tz ?? null,
+    push_marketing_opt_out: user.push_marketing_opt_out ?? false,
     // Null here means "never chosen", which the Profile picker shows as the configured default.
     // Sent unresolved on purpose: resolving it would make a user who has chosen nothing
     // indistinguishable from one who chose the default, and the two behave differently the day

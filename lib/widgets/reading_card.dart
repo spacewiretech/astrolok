@@ -14,6 +14,7 @@ class ReadingCard extends StatelessWidget {
     required this.subtitle,
     required this.onTap,
     this.fallbackIcon = Icons.auto_awesome_outlined,
+    this.badge,
   });
 
   final String image;
@@ -23,6 +24,9 @@ class ReadingCard extends StatelessWidget {
 
   /// Stands in until the thumbnail is exported.
   final IconData fallbackIcon;
+
+  /// A small status pill beside the title — the Kundali card's "Ready".
+  final Widget? badge;
 
   @override
   Widget build(BuildContext context) {
@@ -58,7 +62,15 @@ class ReadingCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(title, style: AppText.title),
+                      if (badge == null)
+                        Text(title, style: AppText.title)
+                      else
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [Text(title, style: AppText.title), badge!],
+                        ),
                       const SizedBox(height: 3),
                       Text(subtitle, style: AppText.meta),
                     ],

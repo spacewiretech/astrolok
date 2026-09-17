@@ -6,39 +6,59 @@ import '../../data/models/app_user.dart';
 import '../../data/providers.dart';
 
 /// Where the app should land once the splash has resolved the stored session.
-enum SplashDestination { onboarding, name, birth, subscribe, home }
+enum SplashDestination { onboarding, language, subscribe, birth, home }
 
 /// Where onboarding resumes for a user in this state.
 ///
 /// Every step that ends holding a fresh [AppUser] routes through here, so the splash, the OTP
-/// step, the name step and the birth step cannot disagree about where the same user belongs.
-/// Routing by step order instead is what sends a returning subscriber back to the paywall they
-/// already paid at.
+/// step, the language step and the name-and-birth step cannot disagree about where the same user
+/// belongs. Routing by step order instead is what sends a returning subscriber back to the paywall
+/// they already paid at.
 SplashDestination destinationForSession({
   required bool signedIn,
+  required bool entitled,
+  required bool hasLanguage,
   required bool hasName,
   required bool hasBirthDate,
-  required bool entitled,
 }) {
   if (!signedIn) return SplashDestination.onboarding;
-  if (!hasName) return SplashDestination.name;
-  // Asked before the paywall, because the birth date is what the app is selling readings on —
-  // collecting it after payment would mean charging someone before knowing whether they will
-  // hand it over.
-  if (!hasBirthDate) return SplashDestination.birth;
   // Entitlement is computed by the server from payment_type plus the trial and period dates —
   // a trial that has lapsed lands here exactly like an account that never paid.
-  if (!entitled) return SplashDestination.subscribe;
+  if (!entitled) {
+    // The language is the one thing asked before the paywall: it is what the paywall's promise
+    // of readings is going to be written in, and it is one tap. Only for someone who has never
+    // chosen — a subscriber who never picked keeps following the configured default and is never
+    // stopped to be asked.
+    return hasLanguage ? SplashDestination.subscribe : SplashDestination.language;
+  }
+  // Name and birth date come after payment, so nothing stands between a new account and the
+  // paywall but the language. Readings still need the date, so a paid account without it is held
+  // here rather than let into Home.
+  if (!hasName || !hasBirthDate) return SplashDestination.birth;
   return SplashDestination.home;
 }
 
 /// [destinationForSession] for a resolved [user].
 SplashDestination destinationForUser(AppUser? user) => destinationForSession(
       signedIn: user != null,
+      entitled: user?.entitled ?? false,
+      hasLanguage: user?.chatLanguage != null,
       hasName: user?.hasName ?? false,
       hasBirthDate: user?.hasBirthDate ?? false,
-      entitled: user?.entitled ?? false,
     );
+
+/// Where a completed checkout goes: the name-and-birth step when either is missing, else Home.
+///
+/// Deliberately blind to [AppUser.entitled]. The paywall confirms a payment without refreshing
+/// `entitlementProvider`, so the user held there straight after checkout still reads as
+/// unentitled, and [destinationForUser] would send them back to the paywall they just paid at.
+/// Name and birth date are never set before payment, so the cached user has those right. Anyone
+/// whose payment did not really land is caught by the birth step's save, which routes from the
+/// fresh server user, or by the gate on Home.
+SplashDestination destinationAfterPayment(AppUser? user) =>
+    (user?.hasName ?? false) && (user?.hasBirthDate ?? false)
+        ? SplashDestination.home
+        : SplashDestination.birth;
 
 final splashDestinationProvider = FutureProvider.autoDispose<SplashDestination>((ref) async {
   final startedAt = DateTime.now();
@@ -55,6 +75,7 @@ final splashDestinationProvider = FutureProvider.autoDispose<SplashDestination>(
     P.destination: destination.name,
     P.isSignedIn: user != null,
     P.entitled: user?.entitled ?? false,
+    P.hasLanguage: user?.chatLanguage != null,
     P.hasName: user?.hasName ?? false,
     P.hasBirthDate: user?.hasBirthDate ?? false,
     P.paymentType: user?.paymentType.name,

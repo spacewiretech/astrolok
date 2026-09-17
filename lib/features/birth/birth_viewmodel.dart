@@ -7,14 +7,15 @@ import '../../data/providers.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../splash/splash_viewmodel.dart';
 
-/// Day, month and year as three independent picks.
+/// The name, and the date of birth as day, month and year picked independently.
 ///
-/// Held as nullable ints rather than a [DateTime] because the three wheels are filled in any
-/// order, and 31 + February is a perfectly ordinary intermediate state that must not be
+/// The date is held as nullable ints rather than a [DateTime] because the three wheels are filled
+/// in any order, and 31 + February is a perfectly ordinary intermediate state that must not be
 /// silently rolled forward into 3 March.
 @immutable
 class BirthState {
   const BirthState({
+    this.name = '',
     this.day,
     this.month,
     this.year,
@@ -22,6 +23,7 @@ class BirthState {
     this.error,
   });
 
+  final String name;
   final int? day;
   final int? month;
   final int? year;
@@ -66,9 +68,12 @@ class BirthState {
     return parsed;
   }
 
-  bool get canSave => date != null && !busy;
+  bool get hasName => name.trim().isNotEmpty;
+
+  bool get canSave => hasName && date != null && !busy;
 
   BirthState copyWith({
+    String? name,
     int? day,
     int? month,
     int? year,
@@ -77,6 +82,7 @@ class BirthState {
     bool clearError = false,
   }) {
     return BirthState(
+      name: name ?? this.name,
       day: day ?? this.day,
       month: month ?? this.month,
       year: year ?? this.year,
@@ -97,13 +103,32 @@ class BirthViewModel extends Notifier<BirthState> {
 
   @override
   BirthState build() {
-    // Prefilled when the user already has a date — reaching this screen again after a back
-    // navigation should not reset their answer.
-    final existing = ref.read(entitlementProvider)?.birthDate;
+    // Prefilled with whatever the account already has — someone who gave a name before this
+    // screen existed, or who reaches it again after a relaunch, should not be asked twice.
+    final user = ref.read(entitlementProvider);
+    final name = user?.name.trim() ?? '';
+    final existing = user?.birthDate;
     if (existing == null) {
-      return const BirthState(day: 1, month: 1, year: _defaultYear);
+      return BirthState(name: name, day: 1, month: 1, year: _defaultYear);
     }
-    return BirthState(day: existing.day, month: existing.month, year: existing.year);
+    return BirthState(
+      name: name,
+      day: existing.day,
+      month: existing.month,
+      year: existing.year,
+    );
+  }
+
+  bool _nameStarted = false;
+
+  void setName(String value) {
+    if (value == state.name) return;
+    // Once, on the first character: the numerator for the drop-off between arriving and typing.
+    if (value.isNotEmpty && !_nameStarted) {
+      _nameStarted = true;
+      ref.read(analyticsProvider).track(Ev.nameEntryStarted);
+    }
+    state = state.copyWith(name: value, clearError: true);
   }
 
   /// Wheels the user has moved, so engagement with the picker is reported once per wheel rather
@@ -148,14 +173,24 @@ class BirthViewModel extends Notifier<BirthState> {
     state = next;
   }
 
-  /// Saves the date and reports where the flow resumes, or null if it stays put.
+  /// Saves the name and date and reports where the flow resumes, or null if it stays put.
+  ///
+  /// The destination comes from the user the server answers with, not the one held before the
+  /// save. This screen follows checkout, where the held user can still be the unentitled one from
+  /// before the payment, and the fresh one is what says whether the payment really landed.
   Future<SplashDestination?> save() async {
     final date = state.date;
-    if (date == null || state.busy) return null;
+    if (date == null || !state.canSave) return null;
+
+    // The length rather than the name: it distinguishes a real name from a single character
+    // someone typed to get past the field, without collecting the name itself as an event.
+    ref.read(analyticsProvider).track(Ev.nameSubmitted, {P.nameLength: state.name.trim().length});
 
     state = state.copyWith(busy: true, clearError: true);
     try {
-      final user = await ref.read(authRepositoryProvider).saveBirthDate(date);
+      final user = await ref
+          .read(authRepositoryProvider)
+          .saveDetails(name: state.name, birthDate: date);
       ref.read(entitlementProvider.notifier).set(user);
       state = state.copyWith(busy: false);
       final destination = destinationForUser(user);
@@ -175,10 +210,10 @@ class BirthViewModel extends Notifier<BirthState> {
       ref.read(analyticsProvider).track(Ev.birthSaveFailed, {P.message: e.message});
       return null;
     } catch (error) {
-      debugPrint('[birth] could not save the date of birth: $error');
+      debugPrint('[birth] could not save the name and date of birth: $error');
       state = state.copyWith(
         busy: false,
-        error: 'Could not save your date of birth. Please try again.',
+        error: 'Could not save your details. Please try again.',
       );
       ref.read(analyticsProvider).track(Ev.birthSaveFailed, {P.error: error.toString()});
       return null;

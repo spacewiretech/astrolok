@@ -10,12 +10,14 @@ Run with `flutter test` (the root README quotes 246 tests, 52 of them the websit
 **Onboarding and account**
 - `widget_test.dart` — `OnboardingState`: Indian mobile validation, code invalidation when the
   number changes, the wall-clock resend countdown.
-- `onboarding_gate_test.dart` — `destinationForSession` routing: signed-out → onboarding, name
-  step, birth date, paywall.
+- `onboarding_gate_test.dart` — `destinationForSession` routing: signed-out → onboarding,
+  language, paywall, then name and birth date after payment; `destinationAfterPayment`.
+- `language_viewmodel_test.dart` — the language pick: saves, installs the fresh user, fires
+  `Signup Completed` once, and stays put on a failed save.
 - `field_focus_test.dart` — autofocus and focus rings across the `AnimatedSwitcher`-swapped
   onboarding sheets.
 - `birth_test.dart` — `BirthState` date math: days-in-month, leap years, 29 Feb before a year is
-  chosen.
+  chosen; saving needs a name.
 
 **Money**
 - `entitlement_test.dart` — `AppUser.recomputeOffline`: client-side trial / grace / `none` rules.
@@ -61,6 +63,18 @@ Run with `flutter test` (the root README quotes 246 tests, 52 of them the websit
 - `push_messaging_test.dart` — the notification prompt (once per install on Android, never
   re-asked on iOS), token registration once per token and account, and tap reporting. Firebase
   is stood in by a `PushPlatform` fake.
+- `kundali_parse_test.dart` — the kundali summary, chart (a real engine-cast one) and report; the
+  countdown on the **server** clock; the reading stage only ticking off when the server says ready.
+- `kundali_error_test.dart` — kundali, place-search and cancellation-feedback error mapping
+  (`not_ready` is the reveal lock), and the fake tier's whole journey.
+- `kundali_screens_test.dart` — form, waiting and report screens and the cancellation screen on
+  small and tall phones; the Home card's three states; the form and cancellation view models.
+- `north_indian_chart_test.dart` — house geometry (house 1 top, anticlockwise) and every graha drawn.
+- `kundali_pdf_test.dart` — the report builds and paginates at the server's clamp limits, and every
+  run of model text is listed for Indic rasterisation.
+- `place_search_field_test.dart` — debounce, and one Places session token per search and pick.
+- `push_navigation_test.dart` — where a tapped push goes: the route allowlist, signed out, lapsed,
+  onboarding unfinished, and `/leaving` always opening.
 - `asset_fallback_test.dart` — missing image/SVG fallbacks, so screens lay out correctly before
   the artwork exists.
 - `website_test.dart` — the marketing site: headline and price, reading names, "Chat with Astro

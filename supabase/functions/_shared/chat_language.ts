@@ -7,8 +7,8 @@
  * at the bottom of [languageInstruction]: the dashboard is the source of truth, and this module
  * is what makes trusting it safe.
  *
- * Chat only. Palm and face still write in Roman letters, because their PDF export and read-aloud
- * voice cannot render anything else — see `PANDIT_VOICE` in `pandit.ts`.
+ * Chat, palm and face all write in it: the readings take their voice from `panditVoice` in
+ * `pandit.ts`, which swaps its Roman-letters rule for this block once a language is set.
  */
 
 import { AppConfig, configSetting } from "./config.ts";
@@ -24,8 +24,19 @@ export const DEFAULT_LANGUAGE_KEY = "chat_language_default";
  *
  * Not an empty list: an unconfigured project must still answer someone, and answering in the
  * language the app was built for beats answering in whatever the model felt like.
+ *
+ * The same seven the onboarding picker draws cards for, so a project missing the row still accepts
+ * every card. Kept in step with `shippedAppConfig` in the app's `app_config_repository.dart`.
  */
-export const BUILT_IN_LANGUAGES = ["Hinglish", "English", "Hindi"] as const;
+export const BUILT_IN_LANGUAGES = [
+  "Hinglish",
+  "English",
+  "Hindi",
+  "Telugu",
+  "Tamil",
+  "Kannada",
+  "Malayalam",
+] as const;
 
 /** A name long enough to be real and short enough not to be a paragraph smuggled into a cell. */
 const MAX_NAME_LENGTH = 40;

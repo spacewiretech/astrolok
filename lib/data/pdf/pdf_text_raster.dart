@@ -91,6 +91,48 @@ Future<Map<String, PdfRaster>> rasteriseReading(ReadingPdfRequest request) async
   return rasters;
 }
 
+/// One run of text another document wants drawn — the kundali report's paragraphs.
+///
+/// The same contract as the palm and face blocks: [size] and [width] must be exactly what the
+/// composition sets the text at, because [rasterKey] is computed from them on both sides.
+@immutable
+class PdfTextRun {
+  const PdfTextRun(this.text, {required this.size, this.width = pdfContentWidth, this.heavy = false, this.colour = _body, this.height = 1.45});
+
+  final String text;
+  final double size;
+  final double width;
+  final bool heavy;
+  final int colour;
+  final double height;
+}
+
+/// [runs], drawn — or an empty map when none of them needs shaping, which leaves the document as
+/// real, selectable text. On the UI isolate, like [rasteriseReading].
+Future<Map<String, PdfRaster>> rasteriseRuns(Iterable<PdfTextRun> runs) async {
+  final list = runs.where((run) => run.text.trim().isNotEmpty).toList();
+  if (!list.any((run) => needsShaping(run.text))) return const {};
+
+  final rasters = <String, PdfRaster>{};
+  for (final run in list) {
+    final key = rasterKey(run.text, size: run.size, width: run.width);
+    if (rasters.containsKey(key)) continue;
+    try {
+      rasters[key] = await _draw(_Block(
+        text: run.text,
+        size: run.size,
+        colour: run.colour,
+        width: run.width,
+        heavy: run.heavy,
+        height: run.height,
+      ));
+    } catch (error) {
+      debugPrint('[pdf] could not rasterise a run: $error');
+    }
+  }
+  return rasters;
+}
+
 /// Lays [block] out at [rasterScale] and paints it onto a transparent PNG.
 Future<PdfRaster> _draw(_Block block) async {
   final painter = TextPainter(
