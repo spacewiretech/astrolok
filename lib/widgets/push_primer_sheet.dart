@@ -7,7 +7,6 @@ import '../data/analytics/analytics.dart';
 import '../data/analytics/analytics_events.dart';
 import '../data/firebase/push_messaging.dart';
 import 'primary_button.dart';
-
 /// Explains what notifications are for before the system asks, then asks.
 ///
 /// The system prompt can be shown once; a user who has just been told why is far more likely to say
@@ -17,6 +16,7 @@ import 'primary_button.dart';
 ///
 /// Returns whether notifications ended up allowed. Shows nothing, and returns false, when the OS
 /// would not show its prompt anyway.
+
 Future<bool> showPushPrimer(BuildContext context, {required String source}) async {
   if (!await pushMessaging.canPrompt()) return false;
   if (!context.mounted) return false;
@@ -28,6 +28,7 @@ Future<bool> showPushPrimer(BuildContext context, {required String source}) asyn
     routeSettings: const RouteSettings(name: 'push-primer'),
     backgroundColor: AppColors.surface,
     shape: const RoundedRectangleBorder(borderRadius: AppShape.sheetTop),
+    isScrollControlled: true,
     builder: (context) => const _PrimerSheet(),
   );
 

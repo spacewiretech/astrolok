@@ -102,3 +102,23 @@ verify_jwt = false
 # cancels loses access the same minute.
 [functions.cancellation-feedback]
 verify_jwt = false
+
+# Referrals and install attribution. All three take a bearer session token like everything above.
+#
+# Listed here because the CLI's default for a function this file does not mention is
+# `verify_jwt = true`, and that is fatal for this project: Supabase Auth is unused, so the token
+# the app sends is our own opaque session token and not a JWT at all. The gateway rejects it with
+# `UNAUTHORIZED_INVALID_JWT_FORMAT` before the function runs — no log line, no error anywhere on
+# our side, the feature simply records nothing. These three were omitted and were dead in
+# production from launch until 2026-09-18: `referral_codes`, `referrals` and `user_attribution`
+# all held zero rows while `referral_enabled` was true.
+#
+# So: every new function needs a block here in the same change that creates it.
+[functions.referral-code]
+verify_jwt = false
+
+[functions.referral-claim]
+verify_jwt = false
+
+[functions.attribution-report]
+verify_jwt = false
