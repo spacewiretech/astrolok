@@ -10,6 +10,7 @@ import '../data/analytics/analytics_session.dart';
 import '../data/entitlement.dart';
 import '../data/firebase/push_messaging.dart';
 import '../data/firebase/push_payload.dart';
+import '../data/kundali_summary.dart';
 import '../data/models/app_user.dart';
 import '../features/splash/splash_viewmodel.dart';
 import 'router.dart';
@@ -126,9 +127,10 @@ class PushNavigator {
       analyticsSession.attributePush(campaign: payload.campaign, notificationId: payload.notificationId);
     }
 
-    // No kundali refresh here on purpose. `/kundali` opens KundaliGateView, which forces one as its
-    // first act; firing a second from here put two identical status calls in flight against a
-    // session that was still resolving, and whichever lost the race reported knowing nothing.
+    // A push about the kundali is the moment the cached summary is most likely stale.
+    if (payload.route == Routes.kundali) {
+      unawaited(_ref.read(kundaliSummaryProvider.notifier).refresh(force: true));
+    }
 
     if (navigation.dropReason != null) {
       analytics.track(Ev.pushDropped, {
