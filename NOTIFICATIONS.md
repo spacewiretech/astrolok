@@ -231,7 +231,19 @@ Config lives in `app_config`. Current production values:
 | `notif_mid_cancel_max_age_minutes` | `180` |
 | every `notif_<campaign>_enabled` | `true` (all 13 flipped on 2026-09-18) |
 
-`notification-dispatch` takes two operator actions, both needing `x-cron-secret` (= `reconcile_secret`):
+There is a helper for all of this at [supabase/scripts/push.sh](supabase/scripts/push.sh):
+
+```bash
+export CRON_SECRET='…'                                   # app_config.reconcile_secret
+
+./push.sh dry                                            # who would get what, right now
+./push.sh dry dormant
+./push.sh send d53877e5-33d0-4fad-bb13-45328e23ee3b      # one real push to one account
+./push.sh send <user_id> winback_paid
+./push.sh run                                            # run the dispatch without waiting for cron
+```
+
+Or by hand — `notification-dispatch` takes two operator actions, both needing `x-cron-secret` (= `reconcile_secret`):
 
 ```jsonc
 // How many people would get this right now? Sends nothing.
