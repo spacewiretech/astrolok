@@ -53,7 +53,7 @@ Checked in order, at send time, against the live account — not against whateve
 | `billing_issue` | T | Autopay fails, or mandate goes on hold | instant | `/home` or `/subscribe` |
 | `kundali_ready` | T | Kundali unlocks, unopened | — | `/kundali` |
 | `kundali_ready_lapsed` | M | As above, but plan lapsed | — | `/subscribe` |
-| `kundali_halfway` | M | Halfway through the 24h wait | — | `/kundali` |
+| `kundali_halfway` | M | Halfway through the 24h wait | — | `/home` ⚠️ |
 | `kundali_not_opened` | M | Revealed 24h ago, still unopened | — | `/kundali` |
 | `palm_no_face` | M | Read their palm, never their face | 120 min | `/face` |
 | `reading_no_chat` | M | A reading, but no question to Astro | 180 min | `/chat` |
@@ -116,12 +116,18 @@ Doesn't count toward the daily cap. Expires 3 days after unlock.
 
 Not a campaign of its own — it's `kundali_ready` **chosen at send time** when the account has lapsed. Same trigger, different copy, and the tap goes to the paywall instead of the chart. This is why `notif_kundali_ready_enabled` *or* `notif_kundali_ready_lapsed_enabled` being on makes the dispatcher look for candidates.
 
-### `kundali_halfway` — marketing, `/kundali`
+### `kundali_halfway` — marketing, `/home` ⚠️ temporarily
 
 > **Your Kundali is halfway there 🪔**
 > The planets are settling into place. Your birth chart will be revealed soon. Take a peek.
 
 **Fires:** past the midpoint between `requested_at` and `unlock_at`, at least 2 hours before unlock, and they haven't come back to the waiting screen (`waiting_last_viewed_at` is null or within 30 min of requesting). Expires 1 hour before unlock.
+
+⚠️ **Routed to `/home` instead of `/kundali` since 2026-09-20.** `/kundali` opens `KundaliGateView`, which shows the kundali **form** whenever the status call doesn't come back — it cannot tell "this account has no kundali" from "I could not find out", both being a null `KundaliSummary?`. This campaign only selects people who haven't returned to the waiting screen, so every recipient cold-starts the app with the session still resolving, which is exactly when that answer goes missing. They were being offered a re-cast of the chart they were waiting on, which would spend a regeneration.
+
+The app-side fix (a `KundaliRefresh` outcome of found/none/unknown) needs a Play Store release. This route change did not — the route travels in the payload and `/home` is already in `kPushRoutes` on the shipped build. Home shows the same countdown on the kundali card, and tapping it reaches the waiting screen with a summary already in hand.
+
+**Put it back to `/kundali`** once a build that distinguishes the two nulls is live.
 
 ### `kundali_not_opened` — marketing, `/kundali`
 

@@ -68,7 +68,18 @@ export const CAMPAIGNS: Record<CampaignKey, Campaign> = {
   // A variant of `kundali_ready`, chosen at send time for an account whose plan lapsed. Never enqueued
   // under its own name, which is why it is not `scheduled`.
   kundali_ready_lapsed: { kind: "marketing", route: "/subscribe", scheduled: false, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 0 },
-  kundali_halfway: { kind: "marketing", route: "/kundali", scheduled: true, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 0 },
+  // Home rather than `/kundali`, and deliberately so. `/kundali` opens `KundaliGateView`, which
+  // asks the server for the summary and shows the kundali *form* whenever that answer does not
+  // arrive — a failed status call and "this account has no kundali" are the same null to it. The
+  // halfway reminder only goes to people who have not come back to the waiting screen, so every
+  // recipient is cold-starting the app with the session still resolving, which is exactly when
+  // that answer goes missing. They were being offered a re-cast of the chart they were waiting on.
+  //
+  // The app-side fix needs a Play Store release. This does not: the route travels in the push
+  // payload and `/home` is already in `kPushRoutes` on the shipped build. Home carries the kundali
+  // card with the same countdown, and tapping it reaches the waiting screen with a summary already
+  // in hand. Put this back to `/kundali` once the build that tells the two nulls apart is live.
+  kundali_halfway: { kind: "marketing", route: "/home", scheduled: true, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 0 },
   kundali_not_opened: { kind: "marketing", route: "/kundali", scheduled: true, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 0 },
   palm_no_face: { kind: "marketing", route: "/face", scheduled: true, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 120 },
   reading_no_chat: { kind: "marketing", route: "/chat", scheduled: true, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 180 },
