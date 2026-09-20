@@ -64,7 +64,11 @@ export interface Campaign {
 export const CAMPAIGNS: Record<CampaignKey, Campaign> = {
   mid_cancel: { kind: "transactional", route: "/leaving", scheduled: false, bypassQuietHours: true, countsTowardCap: false, defaultDelayMinutes: 0 },
   billing_issue: { kind: "transactional", route: "/home", scheduled: false, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 0 },
-  kundali_ready: { kind: "transactional", route: "/kundali", scheduled: true, bypassQuietHours: false, countsTowardCap: false, defaultDelayMinutes: 0 },
+  // Home, not `/kundali`, for the same reason as `kundali_halfway` below: the gate shows the
+  // kundali form whenever its status call does not come back, and the reveal push is tapped on a
+  // cold start. Home shows the card, which opens the reveal in one more tap. Note `notify.ts`
+  // hardcodes this campaign's route at send time, so that has to agree with this.
+  kundali_ready: { kind: "transactional", route: "/home", scheduled: true, bypassQuietHours: false, countsTowardCap: false, defaultDelayMinutes: 0 },
   // A variant of `kundali_ready`, chosen at send time for an account whose plan lapsed. Never enqueued
   // under its own name, which is why it is not `scheduled`.
   kundali_ready_lapsed: { kind: "marketing", route: "/subscribe", scheduled: false, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 0 },
@@ -80,7 +84,7 @@ export const CAMPAIGNS: Record<CampaignKey, Campaign> = {
   // card with the same countdown, and tapping it reaches the waiting screen with a summary already
   // in hand. Put this back to `/kundali` once the build that tells the two nulls apart is live.
   kundali_halfway: { kind: "marketing", route: "/home", scheduled: true, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 0 },
-  kundali_not_opened: { kind: "marketing", route: "/kundali", scheduled: true, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 0 },
+  kundali_not_opened: { kind: "marketing", route: "/home", scheduled: true, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 0 },
   palm_no_face: { kind: "marketing", route: "/face", scheduled: true, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 120 },
   reading_no_chat: { kind: "marketing", route: "/chat", scheduled: true, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 180 },
   trial_no_reading: { kind: "marketing", route: "/palm", scheduled: true, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 180 },

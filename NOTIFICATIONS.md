@@ -51,10 +51,10 @@ Checked in order, at send time, against the live account — not against whateve
 | --- | --- | --- | --- | --- |
 | `mid_cancel` | T | User cancels their mandate | instant | `/leaving` |
 | `billing_issue` | T | Autopay fails, or mandate goes on hold | instant | `/home` or `/subscribe` |
-| `kundali_ready` | T | Kundali unlocks, unopened | — | `/kundali` |
+| `kundali_ready` | T | Kundali unlocks, unopened | — | `/home` ⚠️ |
 | `kundali_ready_lapsed` | M | As above, but plan lapsed | — | `/subscribe` |
 | `kundali_halfway` | M | Halfway through the 24h wait | — | `/home` ⚠️ |
-| `kundali_not_opened` | M | Revealed 24h ago, still unopened | — | `/kundali` |
+| `kundali_not_opened` | M | Revealed 24h ago, still unopened | — | `/home` ⚠️ |
 | `palm_no_face` | M | Read their palm, never their face | 120 min | `/face` |
 | `reading_no_chat` | M | A reading, but no question to Astro | 180 min | `/chat` |
 | `trial_no_reading` | M | Hours into a trial, nothing read | 180 min | `/palm` |
@@ -98,7 +98,7 @@ Deduped per subscription **per IST day**, so a mandate failing repeatedly asks o
 
 ---
 
-### `kundali_ready` — transactional, `/kundali`
+### `kundali_ready` — transactional, `/home` ⚠️ temporarily
 
 > **✨ Your Kundali is ready**
 > {name}, your stars have been mapped. Tap to reveal your birth chart and life insights.
@@ -108,6 +108,8 @@ Deduped per subscription **per IST day**, so a mandate failing repeatedly asks o
 **Skipped at send if:** superseded, already viewed, or no longer `ready`.
 
 Doesn't count toward the daily cap. Expires 3 days after unlock.
+
+⚠️ **Routed to `/home` since 2026-09-20**, for the reason given under `kundali_halfway` below. The user lands on Home and opens the reveal from the kundali card — one extra tap, instead of being shown the *form* whenever the gate's status call doesn't come back. Note this campaign's route is **hardcoded in `notify.ts`** (`resolveForSend`) as well as set in the registry; both have to agree.
 
 ### `kundali_ready_lapsed` — marketing, `/subscribe`
 
@@ -129,12 +131,14 @@ The app-side fix (a `KundaliRefresh` outcome of found/none/unknown) needs a Play
 
 **Put it back to `/kundali`** once a build that distinguishes the two nulls is live.
 
-### `kundali_not_opened` — marketing, `/kundali`
+### `kundali_not_opened` — marketing, `/home` ⚠️ temporarily
 
 > **Your Kundali is still waiting 🔮**
 > {name}, your birth chart and life insights are ready. Don't miss what your stars say.
 
 **Fires:** revealed 24h–7d ago, `ready`, never opened. Expires after 2 days.
+
+⚠️ **Routed to `/home` since 2026-09-20**, same reason as the two above.
 
 ---
 

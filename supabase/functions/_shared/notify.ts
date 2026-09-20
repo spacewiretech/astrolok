@@ -184,7 +184,9 @@ async function resolveForSend(
     case "kundali_ready_lapsed": {
       const k = await kundali();
       if (!k || k.superseded_at || k.first_viewed_at || k.status !== "ready") return { skip: "no_longer_eligible" };
-      if (entitled) return { campaign: "kundali_ready", route: "/kundali" };
+      // `/home`, not `/kundali`, and it must stay in step with the registry — see the note on
+      // `kundali_ready` there. The lapsed variant is unaffected: `/subscribe` never touches the gate.
+      if (entitled) return { campaign: "kundali_ready", route: "/home" };
       return { campaign: "kundali_ready_lapsed", route: "/subscribe" };
     }
 
