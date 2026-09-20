@@ -90,8 +90,9 @@ class _KundaliWaitingViewState extends ConsumerState<KundaliWaitingView> with Wi
   }
 
   Future<void> _refresh() async {
-    final summary = await ref.read(kundaliSummaryProvider.notifier).refresh(force: true, surface: 'waiting');
+    final result = await ref.read(kundaliSummaryProvider.notifier).refresh(force: true, surface: 'waiting');
     if (!mounted) return;
+    final summary = result.summary;
 
     if (!_reported && summary != null) {
       _reported = true;
@@ -104,17 +105,22 @@ class _KundaliWaitingViewState extends ConsumerState<KundaliWaitingView> with Wi
       });
     }
 
-    switch (summary?.state) {
+    // Nothing was ever asked for, or it was replaced from another device. Only on the server's own
+    // answer — a poll that could not reach it leaves the countdown where it is and tries again.
+    if (result.isNone) {
+      _go(Routes.kundaliNew);
+      return;
+    }
+    if (summary == null) return;
+
+    switch (summary.state) {
       case KundaliState.ready:
         _poll?.cancel();
         _go(Routes.kundaliReport);
-      case null:
-        // Nothing was ever asked for, or it was replaced from another device.
-        if (ref.read(kundaliSummaryProvider).valueOrNull == null) _go(Routes.kundaliNew);
       case KundaliState.delayed:
         // Being written right now — a paying account's, which has no wait — is seconds away, so
         // look often. Past that it is late, and once a minute is plenty.
-        _pollEvery(summary!.isWritingNow() ? _writingPoll : _latePoll);
+        _pollEvery(summary.isWritingNow() ? _writingPoll : _latePoll);
       default:
         break;
     }

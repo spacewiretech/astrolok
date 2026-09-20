@@ -7,6 +7,39 @@ import 'entitlement.dart';
 import 'models/kundali.dart';
 import 'providers.dart';
 
+/// What a refresh learned.
+///
+/// The distinction [none] draws from [unknown] is the whole point of this type. "The server says
+/// this account has no kundali" sends the user to the form; "I could not find out" must not,
+/// because the form invites a re-cast and a re-cast spends one of the account's regenerations.
+/// Before this existed both were a null `KundaliSummary?`, and every caller read the second as the
+/// first — so a push tapped on a cold start, with the session still resolving, offered the form to
+/// someone whose kundali was sitting there half-written.
+enum KundaliRefreshOutcome { found, none, unknown }
+
+@immutable
+class KundaliRefresh {
+  const KundaliRefresh.found(KundaliSummary this.summary) : outcome = KundaliRefreshOutcome.found;
+  const KundaliRefresh.none()
+      : summary = null,
+        outcome = KundaliRefreshOutcome.none;
+  const KundaliRefresh.unknown()
+      : summary = null,
+        outcome = KundaliRefreshOutcome.unknown;
+
+  final KundaliRefreshOutcome outcome;
+
+  /// The summary, when there is one. Null for both [none] and [unknown] — check [outcome], never
+  /// this, to tell those apart.
+  final KundaliSummary? summary;
+
+  /// The server said this account has no live kundali. The only outcome the form belongs on.
+  bool get isNone => outcome == KundaliRefreshOutcome.none;
+
+  /// Could not find out. Show what is cached, or try again — decide nothing on it.
+  bool get isUnknown => outcome == KundaliRefreshOutcome.unknown;
+}
+
 /// The signed-in account's kundali summary, shared by the Home card, the gate and the waiting
 /// screen so all three agree on the countdown.
 ///
@@ -23,19 +56,39 @@ class KundaliSummaryNotifier extends AsyncNotifier<KundaliSummary?> {
   DateTime? _lastRefresh;
   String? _userId;
 
+  /// Whether a null [state] is an answer — the server saying this account has no live kundali —
+  /// rather than simply not having asked yet. Without this the two are indistinguishable, and
+  /// "I don't know" reads as "there is none".
+  bool _answered = false;
+
   @override
   Future<KundaliSummary?> build() async {
     _userId = ref.watch(entitlementProvider.select((user) => user?.id));
     _lastRefresh = null;
+    _answered = false;
     final userId = _userId;
     if (userId == null) return null;
-    return ref.read(kundaliStoreProvider).readSummary(userId);
+    final cached = await ref.read(kundaliStoreProvider).readSummary(userId);
+    // A cached summary is an answer; an empty cache is not.
+    _answered = cached != null;
+    return cached;
+  }
+
+  /// [state] as an outcome: what is known right now, and whether it is known at all.
+  KundaliRefresh get _current {
+    final value = state.valueOrNull;
+    if (value != null) return KundaliRefresh.found(value);
+    return _answered ? const KundaliRefresh.none() : const KundaliRefresh.unknown();
   }
 
   /// Asks the server. [surface] `waiting` also tells it the waiting screen was opened.
-  Future<KundaliSummary?> refresh({bool force = false, String surface = 'home'}) async {
+  ///
+  /// Never reports [KundaliRefresh.none] on a guess: every path that fails to find out — no
+  /// session yet, the account changing mid-flight, a request that threw — reports
+  /// [KundaliRefresh.unknown] instead, so a caller cannot mistake a failure for an empty account.
+  Future<KundaliRefresh> refresh({bool force = false, String surface = 'home'}) async {
     final userId = _userId ?? ref.read(entitlementProvider)?.id;
-    if (userId == null) return null;
+    if (userId == null) return const KundaliRefresh.unknown();
 
     // Let the cached read finish first. Otherwise a screen that refreshes on its first frame can
     // have its fresh answer overwritten a moment later when the slower cache read lands — a
@@ -48,19 +101,24 @@ class KundaliSummaryNotifier extends AsyncNotifier<KundaliSummary?> {
 
     final last = _lastRefresh;
     if (!force && last != null && DateTime.now().difference(last) < _minRefreshGap) {
-      return state.valueOrNull;
+      return _current;
     }
     _lastRefresh = DateTime.now();
 
     try {
       final fresh = await ref.read(kundaliRepositoryProvider).status(surface: surface);
-      if (_userId != userId) return null;
+      // Signed in as someone else while this was in flight: this answer is about the wrong
+      // account, so it is not an answer about this one.
+      if (_userId != userId) return const KundaliRefresh.unknown();
+      _answered = true;
       state = AsyncData(fresh);
       unawaited(ref.read(kundaliStoreProvider).saveSummary(userId, fresh));
-      return fresh;
+      return fresh == null ? const KundaliRefresh.none() : KundaliRefresh.found(fresh);
     } catch (error) {
       debugPrint('[kundali] status refresh failed: $error');
-      return state.valueOrNull;
+      // Keep what was already known. A refresh that could not reach the server says nothing about
+      // whether the account has a kundali, so it must not answer that question.
+      return _current;
     }
   }
 
@@ -72,6 +130,7 @@ class KundaliSummaryNotifier extends AsyncNotifier<KundaliSummary?> {
       // As in [refresh]: the cache read must not land on top of this.
     }
     final userId = _userId ?? ref.read(entitlementProvider)?.id;
+    _answered = true;
     state = AsyncData(summary);
     if (userId != null) unawaited(ref.read(kundaliStoreProvider).saveSummary(userId, summary));
   }
