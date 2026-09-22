@@ -56,9 +56,15 @@ function doPost(e) {
     return reply_({ ok: false, error: 'body is not JSON' });
   }
 
-  var expected = PropertiesService.getScriptProperties().getProperty('METRICS_SECRET');
+  // Both sides are trimmed before comparing. The secret is pasted by hand into two different web
+  // forms — Script Properties here, app_config on the Supabase dashboard — and a long random string
+  // picks up a trailing newline on the way into one of them far more often than not. Untrimmed,
+  // that answers 'bad secret' with nothing to suggest the two values look identical on screen.
+  var expected = String(PropertiesService.getScriptProperties().getProperty('METRICS_SECRET') || '').trim();
   if (!expected) return reply_({ ok: false, error: 'METRICS_SECRET is not set on the script' });
-  if (body.secret !== expected) return reply_({ ok: false, error: 'bad secret' });
+  if (String(body.secret == null ? '' : body.secret).trim() !== expected) {
+    return reply_({ ok: false, error: 'bad secret' });
+  }
 
   if (!body.report_date) return reply_({ ok: false, error: 'no report_date' });
 
