@@ -142,3 +142,10 @@ and run in lexical order.
   the truth. The day still comes from `trial_started_at` (written once, so it cannot double-count)
   but now requires `total_paid_amount > 2`. Cross-checked against `AUTH`/`SUCCESS` rows in
   `subscription_payments`, which agree within ~1%. **No schema change** — function body only.
+- `20260922000003_renewals_by_plan.sql` — adds `renewals_499` / `renewals_299` to
+  `daily_marketing_metrics`, split on `subscriptions.plan_variant` (`plan_499` / `plan_299`) rather
+  than on `plan_id` — ₹499 already spans three plan ids including the legacy account's
+  `id_circle360_499`, so keying on ids would silently report zero after any plan is recreated.
+  `renewals` stays as the total; the halves need not sum to it, since a payment with no
+  `subscription_pk` counts in the total and neither half. **Drops and recreates** the function
+  rather than `create or replace`, which cannot change a return type.

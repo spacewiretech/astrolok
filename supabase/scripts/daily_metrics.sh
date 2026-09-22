@@ -2,8 +2,11 @@
 #
 # Yesterday's marketing numbers, in the order the sheet's columns are in, ready to paste.
 #
-# The same three counts the 09:00 cron job would push — signups, trials started, subscriptions
-# renewed — but printed here instead of posted, for as long as the Apps Script half is not up.
+# The same counts the 09:00 cron job would push — signups, trials started, subscriptions renewed,
+# and that last one split into its ₹499 and ₹299 halves — but printed here instead of posted, for
+# as long as the Apps Script half is not up. The two halves need not sum to the total: a payment
+# with no subscription row behind it counts in the total and in neither half.
+#
 # It calls `public.daily_marketing_metrics` rather than re-deriving the counts, so this and the
 # automatic push can never drift apart: change the definition once, in the migration, and both
 # follow.
@@ -23,7 +26,7 @@
 #   --csv     comma-separated, with a header row
 #
 # Paste into the sheet by selecting the cell under `Date` and hitting paste: a tab-separated row
-# spreads across the four columns on its own, and a range pastes as that many rows.
+# spreads across the six columns on its own, and a range pastes as that many rows.
 #
 # "Yesterday" is a calendar day in Asia/Kolkata and is worked out by the database, not by this
 # machine — so a laptop on the wrong timezone, or on a plane, still gets the day the numbers
@@ -94,7 +97,9 @@ SQL="
 select to_char(m.report_date, 'YYYY-MM-DD') as report_date,
        m.signups,
        m.trials,
-       m.renewals
+       m.renewals,
+       m.renewals_499,
+       m.renewals_299
   from generate_series($FIRST, $LAST, interval '1 day') d
   cross join lateral public.daily_marketing_metrics(d::date) m
  order by m.report_date;
@@ -126,7 +131,7 @@ rows="$(jq -c 'if type == "array" then . else .rows end' < "$out" 2>/dev/null)" 
 n="$(printf '%s' "$rows" | jq 'length')"
 [ "$n" -gt 0 ] || die "no rows came back for $WHEN, which should not happen — the query returns one row per day asked for."
 
-tsv() { printf '%s' "$rows" | jq -r '.[] | [.report_date,.signups,.trials,.renewals] | @tsv'; }
+tsv() { printf '%s' "$rows" | jq -r '.[] | [.report_date,.signups,.trials,.renewals,.renewals_499,.renewals_299] | @tsv'; }
 
 if [ "$COPY" = yes ]; then
   command -v pbcopy >/dev/null 2>&1 || die "--copy needs pbcopy, which is macOS only. Use --tsv and pipe it yourself."
@@ -139,12 +144,12 @@ case "$FORMAT" in
   tsv) tsv ;;
   csv)
     printf '%s' "$rows" | jq -r '
-      (["Date","Signups","Trials","Subscription Renewed"] | @csv),
-      (.[] | [.report_date,.signups,.trials,.renewals] | @csv)'
+      (["Date","Signups","Trials","Subscription Renewed","Renewed 499","Renewed 299"] | @csv),
+      (.[] | [.report_date,.signups,.trials,.renewals,.renewals_499,.renewals_299] | @csv)'
     ;;
   table)
     {
-      printf 'Date\tSignups\tTrials\tSubscription Renewed\n'
+      printf 'Date\tSignups\tTrials\tSubscription Renewed\tRenewed 499\tRenewed 299\n'
       tsv
     } | column -t -s $'\t'
     printf '\n\033[2mPaste-ready:\033[0m\n'

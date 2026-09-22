@@ -45,7 +45,9 @@ var COLUMNS = {
   report_date: 'Date',
   signups: 'Signups',
   trials: 'Trials',
-  renewals: 'Subscription Renewed'
+  renewals: 'Subscription Renewed',
+  renewals_499: 'Renewed 499',
+  renewals_299: 'Renewed 299'
 };
 
 function doPost(e) {
@@ -126,11 +128,14 @@ function writeRow_(body) {
   var row = target >= 0 ? firstDataRow + target : Math.max(lastRow + 1, firstDataRow);
 
   // Written cell by cell rather than as one range, because the columns need not be adjacent and
-  // anything between them belongs to whoever designed the sheet.
+  // anything between them belongs to whoever designed the sheet. Driven off COLUMNS rather than
+  // named one by one, so adding a count is a line in COLUMNS and a header in the sheet.
   writeDate_(sheet.getRange(row, dateCol), body.report_date);
-  sheet.getRange(row, index.signups).setValue(numberOr_(body.signups));
-  sheet.getRange(row, index.trials).setValue(numberOr_(body.trials));
-  sheet.getRange(row, index.renewals).setValue(numberOr_(body.renewals));
+  Object.keys(COLUMNS).forEach(function (field) {
+    if (field !== 'report_date') {
+      sheet.getRange(row, index[field]).setValue(numberOr_(body[field]));
+    }
+  });
 
   return { ok: true, row: row, action: target >= 0 ? 'updated' : 'appended', date: body.report_date };
 }
