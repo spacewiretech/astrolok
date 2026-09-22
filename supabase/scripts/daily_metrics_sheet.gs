@@ -127,7 +127,7 @@ function writeRow_(body) {
 
   // Written cell by cell rather than as one range, because the columns need not be adjacent and
   // anything between them belongs to whoever designed the sheet.
-  sheet.getRange(row, dateCol).setValue(asDate_(body.report_date));
+  writeDate_(sheet.getRange(row, dateCol), body.report_date);
   sheet.getRange(row, index.signups).setValue(numberOr_(body.signups));
   sheet.getRange(row, index.trials).setValue(numberOr_(body.trials));
   sheet.getRange(row, index.renewals).setValue(numberOr_(body.renewals));
@@ -168,14 +168,23 @@ function dateKey_(value, tz) {
 }
 
 /**
- * A real Date rather than the ISO string, so the sheet's own date formatting and any chart or
- * pivot reading the column keep working. Built from the parts: `new Date('2026-09-21')` is
- * parsed as UTC midnight and lands on the 20th for anyone west of London.
+ * The date is handed to the sheet as the plain ISO string and left to the sheet to interpret,
+ * never as a Date built here.
+ *
+ * A Date constructed in Apps Script carries the *script project's* timezone, which is not
+ * necessarily the spreadsheet's — the two are configured in different places and a new project
+ * inherits neither from the other. When they differ, midnight on the 21st in one is still the
+ * 20th in the other, and the row silently lands a day early. That is not hypothetical: it is
+ * exactly how 2026-09-21 first arrived in this sheet labelled 2026-09-20.
+ *
+ * Passing the string sidesteps the question. `yyyy-mm-dd` is read the same way in every locale,
+ * so the sheet stores the day that was actually sent. The number format is set first so that the
+ * value still reads as a date to charts, pivots and sorting — which was the reason for building a
+ * Date in the first place, and is kept.
  */
-function asDate_(iso) {
-  var parts = String(iso).split('-');
-  if (parts.length !== 3) return iso;
-  return new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+function writeDate_(cell, iso) {
+  cell.setNumberFormat('yyyy-mm-dd');
+  cell.setValue(String(iso).trim());
 }
 
 /** Zero is a real answer and must be written; a missing field must not become one. */
