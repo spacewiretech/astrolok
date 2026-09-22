@@ -14,9 +14,9 @@
  *
  * 1. Extensions > Apps Script, paste this in, save.
  * 2. Project Settings > Script Properties: add METRICS_SECRET with a long random value.
- * 3. On a sheet with no header row yet, run `installHeaders` once to write them. It refuses a
- *    row that already has anything on it, so it is safe to run against a sheet someone has
- *    already laid out — that case wants the headers added by hand.
+ * 3. Run `installHeaders` from the editor. It adds whichever headers are missing and leaves the
+ *    rest alone, so it lays out a blank sheet and also appends a column added to COLUMNS later.
+ *    It is run from the editor, not through the web app, so it needs no deployment.
  * 4. Run `setup` once from the editor. It grants the permissions and prints whether the
  *    headers below were all found — do this before deploying, so a typo in COLUMNS surfaces
  *    here rather than as a silently missing column at nine tomorrow morning.
@@ -198,30 +198,45 @@ function numberOr_(v) {
 }
 
 /**
- * Run once, before `setup`, on a sheet whose header row is still blank — it writes the four
- * headers COLUMNS expects. A row with anything already on it is left alone and reported instead,
- * so this cannot overwrite a layout somebody has already built; rearranging or renaming columns
- * afterwards is the sheet owner's business, and COLUMNS is what to keep in step with it.
+ * Adds whichever headers COLUMNS expects and the sheet does not already have. Run it from the
+ * editor on a blank sheet to lay the row out from nothing, and again after adding a count to
+ * COLUMNS to append the new one.
+ *
+ * It only ever writes into empty cells. A header already present is left exactly where it is,
+ * whatever order the sheet keeps its columns in, and a cell with anything in it is never
+ * overwritten — so this is safe to re-run, and safe on a sheet somebody else has laid out.
+ *
+ * An earlier version refused outright if the header row had anything on it at all. That made it
+ * useless for the case it is most needed in — adding a column to a sheet already carrying data —
+ * and left typing the header by hand as the only route, which is where two attempts went astray.
  */
 function installHeaders() {
   var sheet = targetSheet_();
+  var index = headerIndex_(sheet);
   var width = sheet.getLastColumn();
-  var occupied = width
+  var header = width
     ? sheet.getRange(HEADER_ROW, 1, 1, width).getDisplayValues()[0]
-        .filter(function (v) { return normalise_(v) !== ''; })
     : [];
 
-  if (occupied.length) {
-    Logger.log(
-      'Row ' + HEADER_ROW + ' already holds: ' + occupied.join(', ') +
-      '. Nothing written — add the missing headers by hand, or clear the row and re-run.'
-    );
-    return;
-  }
+  var added = [];
+  Object.keys(COLUMNS).forEach(function (field) {
+    if (index[field] !== undefined) return;
 
-  var headers = Object.keys(COLUMNS).map(function (field) { return COLUMNS[field]; });
-  sheet.getRange(HEADER_ROW, 1, 1, headers.length).setValues([headers]);
-  Logger.log('Wrote ' + headers.join(' | ') + ' to row ' + HEADER_ROW + ' of "' + sheet.getName() + '".');
+    // The first cell on the header row holding nothing, appending past the end if there is none.
+    var at = 0;
+    while (at < header.length && normalise_(header[at]) !== '') at++;
+
+    var cell = sheet.getRange(HEADER_ROW, at + 1);
+    cell.setValue(COLUMNS[field]);
+    header[at] = COLUMNS[field];
+    added.push('"' + COLUMNS[field] + '" -> column ' + cell.getA1Notation().replace(/\d+/, ''));
+  });
+
+  Logger.log(
+    added.length
+      ? 'Added ' + added.join(', ') + ' on "' + sheet.getName() + '".'
+      : 'Nothing to add — every header in COLUMNS is already on row ' + HEADER_ROW + '.'
+  );
 }
 
 /**
