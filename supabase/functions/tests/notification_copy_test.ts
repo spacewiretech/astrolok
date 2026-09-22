@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertFalse } from "jsr:@std/assert@1";
 
-import { CAMPAIGN_KEYS } from "../_shared/notification_campaigns.ts";
+import { EVENT_CAMPAIGN_KEYS } from "../_shared/notification_campaigns.ts";
 import { COPY, COPY_LANGUAGES, renderCopy } from "../_shared/notification_copy.ts";
 
 const segmenter = new Intl.Segmenter("en", { granularity: "grapheme" });
@@ -16,7 +16,7 @@ const SCRIPT: Record<string, RegExp> = {
 };
 
 Deno.test("every campaign has copy in all seven languages, fitting a lock screen", () => {
-  for (const campaign of CAMPAIGN_KEYS) {
+  for (const campaign of EVENT_CAMPAIGN_KEYS) {
     for (const language of COPY_LANGUAGES) {
       const copy = COPY[campaign][language];
       assert(copy, `${campaign}/${language}`);
@@ -29,7 +29,7 @@ Deno.test("every campaign has copy in all seven languages, fitting a lock screen
 });
 
 Deno.test("each language is written in its own script; Hinglish and English stay Roman", () => {
-  for (const campaign of CAMPAIGN_KEYS) {
+  for (const campaign of EVENT_CAMPAIGN_KEYS) {
     for (const [language, script] of Object.entries(SCRIPT)) {
       const { title, body } = COPY[campaign][language as keyof typeof SCRIPT & typeof COPY_LANGUAGES[number]];
       assert(script.test(title + body), `${campaign}/${language} is not in its script`);
@@ -42,7 +42,7 @@ Deno.test("each language is written in its own script; Hinglish and English stay
 });
 
 Deno.test("only the {name} placeholder is used, and it always fills or disappears cleanly", () => {
-  for (const campaign of CAMPAIGN_KEYS) {
+  for (const campaign of EVENT_CAMPAIGN_KEYS) {
     for (const language of COPY_LANGUAGES) {
       const { title, body } = COPY[campaign][language];
       assertEquals((title + body).replace(/\{name\}/g, "").includes("{"), false, `${campaign}/${language}`);

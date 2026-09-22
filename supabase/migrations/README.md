@@ -113,6 +113,13 @@ and run in lexical order.
   `users.trial_started_at`, not ₹3 AUTH payments** — that column is written once and never
   overwritten, so a reconcile re-reading an old mandate cannot report the same trial twice.
 
+- `20260923000001_daily_drip.sql` — the daily drip. Rewrites `notification_candidates` with six
+  more branches (one per slot), adds `drip_setting`, `drip_slot_at` and `drip_variant`, four
+  indexes, and nineteen `notif_drip_*` / `notif_daily_*_enabled` config rows. **All seeded off**, and
+  the SQL itself checks `notif_drip_enabled`, so applying it changes nothing until someone turns a
+  slot on. Six pushes a day to `payment_type <> 'active'`, two to `active`; see
+  [NOTIFICATIONS.md](../../NOTIFICATIONS.md#the-daily-drip).
+
 ## Notes
 
 - **Every table holding user data has RLS enabled with zero policies.** The anon key ships

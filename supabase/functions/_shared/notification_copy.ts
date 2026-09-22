@@ -14,7 +14,7 @@
  * Android starts truncating them.
  */
 
-import { CampaignKey } from "./notification_campaigns.ts";
+import { EventCampaignKey } from "./notification_campaigns.ts";
 
 export interface PushCopy {
   title: string;
@@ -24,7 +24,7 @@ export interface PushCopy {
 export const COPY_LANGUAGES = ["english", "hinglish", "hindi", "telugu", "tamil", "kannada", "malayalam"] as const;
 export type CopyLanguage = typeof COPY_LANGUAGES[number];
 
-export const COPY: Record<CampaignKey, Record<CopyLanguage, PushCopy>> = {
+export const COPY: Record<EventCampaignKey, Record<CopyLanguage, PushCopy>> = {
   mid_cancel: {
     english: { title: "Sorry to see you go, {name}", body: "Tell us in one tap what didn't work for you. It helps us make Astrolok better." },
     hinglish: { title: "Aapko jaate dekh dukh hua, {name}", body: "Ek tap mein bataiye kya kami rahi. Isse hum Astrolok ko behtar bana payenge." },
@@ -154,13 +154,17 @@ export const COPY: Record<CampaignKey, Record<CopyLanguage, PushCopy>> = {
 };
 
 /** A first name safe to put on a lock screen: one word, trimmed, never longer than 20 characters. */
-function nameFor(name: string | null | undefined): string | null {
+export function nameFor(name: string | null | undefined): string | null {
   const first = (name ?? "").trim().split(/\s+/)[0] ?? "";
   if (!first) return null;
   return Array.from(first).slice(0, 20).join("");
 }
 
-function fill(template: string, name: string | null): string {
+/**
+ * Fills `{name}`, or takes the sentence apart cleanly when there is none. Shared with `drip_copy.ts`,
+ * which fills its own `{colour}` and `{planet}` first and hands the result through here.
+ */
+export function fill(template: string, name: string | null): string {
   if (name) return template.replaceAll("{name}", name);
 
   // Without a name, the sentence has to read as if it never had one: "{name}, your stars…" becomes
@@ -179,7 +183,7 @@ function fill(template: string, name: string | null): string {
  * the language actually used, which is what `notifications.language` records.
  */
 export function renderCopy(
-  campaign: CampaignKey,
+  campaign: EventCampaignKey,
   language: string | null | undefined,
   { name }: { name?: string | null } = {},
 ): PushCopy & { language: CopyLanguage } {

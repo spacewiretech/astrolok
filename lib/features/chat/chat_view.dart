@@ -28,6 +28,30 @@ import 'chat_state.dart';
 import 'chat_threads_viewmodel.dart';
 import 'chat_viewmodel.dart';
 
+/// A chat screen opened with something already written.
+///
+/// The in-app "Ask Astro" buttons pass a bare [String] to `/chat` and it sends itself, which is right
+/// there: the user tapped a button under a reading they were looking at. A push is not that. It
+/// arrives unasked, up to six times a day, so it fills the composer and waits — see [autoSend], which
+/// the server can turn on later through `notif_drip_chat_autosend` without another release.
+@immutable
+class ChatLaunch {
+  const ChatLaunch({required this.question, this.autoSend = false});
+
+  final String question;
+  final bool autoSend;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ChatLaunch && other.question == question && other.autoSend == autoSend;
+
+  @override
+  int get hashCode => Object.hash(question, autoSend);
+
+  @override
+  String toString() => 'ChatLaunch(${question.length} chars, autoSend: $autoSend)';
+}
+
 /// The conversation with Astro.
 ///
 /// One of several: the drawer holds the rest. Which one is on screen lives in
@@ -35,15 +59,20 @@ import 'chat_viewmodel.dart';
 /// sent yet has no id to put in a URL — see [ChatViewModel] for why rekeying it mid-send would
 /// lose the reply in flight.
 class ChatView extends ConsumerStatefulWidget {
-  const ChatView({super.key, this.opener});
+  const ChatView({super.key, this.launch});
 
-  /// A question to ask on arrival, handed over from wherever the chat was opened.
+  /// A question to arrive with, from wherever the chat was opened.
   ///
   /// This is what makes "Ask Astro about your eyes" land in a conversation already about the
   /// eyes rather than on a blank screen. It always starts a *new* conversation: the question is
   /// about a reading the user is looking at now, and appending it to whatever they last talked
   /// about would bury it.
-  final String? opener;
+  ///
+  /// [ChatLaunch.autoSend] decides whether it is sent or merely written. An in-app "Ask Astro"
+  /// button sends, because the user just tapped it under the reading it is about. A push fills the
+  /// composer and waits: it arrived unasked, and the user should see the question before it costs
+  /// them a turn.
+  final ChatLaunch? launch;
 
   @override
   ConsumerState<ChatView> createState() => _ChatViewState();
@@ -61,7 +90,9 @@ class _ChatViewState extends ConsumerState<ChatView> {
   void initState() {
     super.initState();
 
-    final opener = widget.opener?.trim();
+    final launch = widget.launch;
+    final question = launch?.question.trim();
+    final arrived = question != null && question.isNotEmpty;
 
     // Deferred: both of these touch providers, and doing that during the first build throws
     // "modified a provider while the widget tree was building".
@@ -74,18 +105,30 @@ class _ChatViewState extends ConsumerState<ChatView> {
       final threads = ref.read(chatThreadsProvider);
 
       analytics.track(Ev.chatOpened, {
-        // An opener means the user arrived from a reading's "Ask Astro" with a question already
-        // written, which is a different conversation from one started cold on Home.
-        P.hasOpener: opener != null && opener.isNotEmpty,
-        P.source: opener != null && opener.isNotEmpty ? 'reading' : 'direct',
+        // Arriving with a question written is a different conversation from one started cold on
+        // Home — and a question from a push is different again from one from a reading, because
+        // nobody asked for it.
+        P.hasOpener: arrived,
+        P.source: !arrived
+            ? 'direct'
+            : launch!.autoSend
+                ? 'reading'
+                : 'push',
         P.threadCount: threads.valueOrNull?.length,
       });
 
-      if (opener != null && opener.isNotEmpty) {
-        ref.read(selectedThreadProvider.notifier).state = ChatThread.draftId;
-        ref
-            .read(chatViewModelProvider(ChatThread.draftId).notifier)
-            .send(opener, entry: 'opener');
+      if (!arrived) return;
+
+      ref.read(selectedThreadProvider.notifier).state = ChatThread.draftId;
+      final model = ref.read(chatViewModelProvider(ChatThread.draftId).notifier);
+
+      if (launch!.autoSend) {
+        model.send(question, entry: 'opener');
+      } else {
+        // A push fills the composer and stops there. Sending on arrival would spend a turn and a
+        // Gemini call the user never asked for, six times a day — and start six threads doing it.
+        model.prefill(question);
+        _composerFocus.requestFocus();
       }
     });
   }

@@ -10,6 +10,7 @@ import {
   CAMPAIGNS,
   CampaignKey,
   isCampaignKey,
+  isDripCampaign,
   SCHEDULED_CAMPAIGNS,
 } from "../_shared/notification_campaigns.ts";
 import {
@@ -41,6 +42,21 @@ type Db = ReturnType<typeof serviceClient>;
 
 /** Stop starting new sends after this, so the run fits inside the runtime's wall clock. */
 const RUN_BUDGET_MS = 100_000;
+
+/**
+ * Stop *finding* after this, leaving the rest of the budget to actually send. Without it a slot with
+ * a large segment would spend the whole run filling the queue and deliver none of it.
+ */
+const ENQUEUE_BUDGET_MS = 40_000;
+
+/** Per campaign, per run. The enqueue window is an hour wide so the next run can finish the job. */
+const MAX_ENQUEUE_PASSES = 10;
+
+/** `notif_dispatch_batch`, which was hardcoded at 200 before the drip needed to move more. */
+function batchSize(config: AppConfig): number {
+  const raw = Number(configSetting(config, "notif_dispatch_batch"));
+  return Number.isFinite(raw) && raw >= 1 ? Math.floor(raw) : 200;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -134,24 +150,50 @@ async function run(db: Db, config: AppConfig): Promise<void> {
     const on = configFlag(config, campaignFlagKey(campaign)) ||
       (campaign === "kundali_ready" && configFlag(config, campaignFlagKey("kundali_ready_lapsed")));
     if (!on) continue;
+    // The candidates SQL reads this too and would return nothing, but there is no point spending six
+    // round trips a run to be told so.
+    if (isDripCampaign(campaign) && !configFlag(config, "notif_drip_enabled")) continue;
 
-    const { data, error } = await findCandidates(db, config, campaign, 200);
-    if (error) {
-      console.error(`notification-dispatch: ${campaign} candidates failed`, error);
-      continue;
-    }
+    // A full batch means there were probably more. Ask again — enqueued rows drop out of the next
+    // answer, because the candidates query excludes anything whose `dedupe_key` already exists — until
+    // a pass comes back short or the run is out of time.
+    //
+    // The ceiling on one pass is not `batch`: PostgREST truncates any response at `[api] max_rows`
+    // (1000, `supabase/config.toml`), silently and with no error. That is why this loops rather than
+    // asking for one enormous page, and why a full pass is worth saying out loud in the log.
+    const batch = Math.min(batchSize(config), 1000);
+    let passes = 0;
 
-    for (const candidate of data ?? []) {
-      const id = await enqueue(db, {
-        userId: candidate.user_id,
-        campaign,
-        dedupeKey: candidate.dedupe_key,
-        params: candidate.params ?? {},
-        trigger: "cron",
-        scheduledFor: candidate.scheduled_for,
-        expiresAt: candidate.expires_at,
-      });
-      if (id) enqueued += 1;
+    while (Date.now() < startedAt + ENQUEUE_BUDGET_MS) {
+      const { data, error } = await findCandidates(db, config, campaign, batch);
+      if (error) {
+        console.error(`notification-dispatch: ${campaign} candidates failed`, error);
+        break;
+      }
+
+      const candidates = data ?? [];
+      passes += 1;
+      for (const candidate of candidates) {
+        const id = await enqueue(db, {
+          userId: candidate.user_id,
+          campaign,
+          dedupeKey: candidate.dedupe_key,
+          params: candidate.params ?? {},
+          trigger: "cron",
+          scheduledFor: candidate.scheduled_for,
+          expiresAt: candidate.expires_at,
+        });
+        if (id) enqueued += 1;
+      }
+
+      if (candidates.length < batch) break;
+      if (passes >= MAX_ENQUEUE_PASSES) {
+        // Not an error — the next five-minute run picks the rest up, and the slot's enqueue window is
+        // an hour wide precisely so it can. Logged because a campaign that says this every run has
+        // outgrown the window, and widening `notif_drip_enqueue_window_minutes` is the first lever.
+        console.log(`notification-dispatch: ${campaign} still had candidates after ${passes} passes`);
+        break;
+      }
     }
   }
 

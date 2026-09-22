@@ -382,6 +382,20 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
     if (state.pending != null) state = state.copyWith(clearPending: true);
   }
 
+  /// Puts a question in the composer without sending it.
+  ///
+  /// For a push, which arrives unasked: the user sees what they are about to ask and sends it
+  /// themselves. It rides the same channel a failed turn uses to hand its words back, so the
+  /// composer needs no second way to be filled.
+  ///
+  /// Refuses if anything is already written or in flight — a push that lands while someone is
+  /// mid-sentence must not overwrite them.
+  void prefill(String question) {
+    final text = question.trim();
+    if (text.isEmpty || state.pending != null || state.sending) return;
+    state = state.copyWith(pending: text);
+  }
+
   /// Called once a reply has finished animating in, so it does not do it again on the next
   /// rebuild — a keyboard opening should not replay the last answer.
   void revealed(String id) {

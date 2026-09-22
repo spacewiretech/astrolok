@@ -40,7 +40,7 @@ they are invoked with the anon key, before any session exists — so each valida
 
 - `_shared/` — everything more than one function needs: credentials, the billing state machine,
   the model prompts, the astronomy. Not deployed on its own.
-- `tests/` — `deno test`, 368 tests over the pure logic.
+- `tests/` — `deno test`, 390 tests over the pure logic.
 - One folder per function in the table above.
 
 ## Notes
@@ -58,6 +58,10 @@ they are invoked with the anon key, before any session exists — so each valida
   `fcm_service_account_key` row. The two billing campaigns (`mid_cancel`, `billing_issue`) are
   raised inline from `subscription_sync.ts` the moment Cashfree reports them; the rest by
   `notification-dispatch`. Every campaign ships switched off — see `MIXPANEL_TRACKING_PLAN.md` §9.2.
+- There are two families of campaign and they keep their copy apart. The 14 event campaigns are one
+  sentence each in `_shared/notification_copy.ts`; the 6 daily-drip slots draw from a pool of 26 in
+  `_shared/drip_copy.ts`. `EventCampaignKey` and `DripCampaignKey` split `CampaignKey` between them,
+  so `deno check` refuses a campaign whose copy is in the wrong file or missing a language.
 - **Deploy order for the kundali and notification work:** both `20260917…` migrations first —
   `entitlement.ts` selects columns they add, so a function deployed before them fails every user
   lookup.

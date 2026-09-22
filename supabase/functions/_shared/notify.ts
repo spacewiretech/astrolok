@@ -28,12 +28,27 @@ import {
   campaignFlagKey,
   CAPPED_CAMPAIGNS,
   capDeferral,
+  DRIP_ACTIVE_CAMPAIGNS,
+  DRIP_ROUTES,
+  DripCampaignKey,
+  dripSlotFor,
+  DripState,
+  EventCampaignKey,
   insertIdFor,
+  isDripCampaign,
   istMidnight,
   PushRoute,
   quietHoursDeferral,
 } from "./notification_campaigns.ts";
-import { renderCopy } from "./notification_copy.ts";
+import {
+  DripCopy,
+  DripVariantKey,
+  dripStateOf,
+  dripVariantFor,
+  isDripVariantKey,
+  renderDripCopy,
+} from "./drip_copy.ts";
+import { CopyLanguage, renderCopy } from "./notification_copy.ts";
 
 type Db = SupabaseClient;
 
@@ -88,7 +103,11 @@ export function notificationSettings(config: AppConfig) {
 }
 
 export function campaignEnabled(config: AppConfig, key: CampaignKey): boolean {
-  return configFlag(config, "notifications_enabled") && configFlag(config, campaignFlagKey(key));
+  if (!configFlag(config, "notifications_enabled")) return false;
+  // The drip has a switch of its own, read here and in the candidates SQL, so one key stops all six
+  // at once — both what would be enqueued and whatever is already queued.
+  if (isDripCampaign(key) && !configFlag(config, "notif_drip_enabled")) return false;
+  return configFlag(config, campaignFlagKey(key));
 }
 
 // ---------------------------------------------------------------- enqueue
@@ -129,7 +148,16 @@ export async function enqueue(db: Db, input: EnqueueInput): Promise<string | nul
 
 // ---------------------------------------------------------------- resolution
 
-type Resolution = { campaign: CampaignKey; route: PushRoute } | { skip: string };
+type Resolution =
+  | {
+    campaign: CampaignKey;
+    route: PushRoute;
+    /** Drip rows only: which of the twenty-six sentences, decided here rather than at enqueue. */
+    variant?: DripVariantKey;
+    /** Drip rows only: a graha out of the reader's own chart, for the evening slot. */
+    planet?: string | null;
+  }
+  | { skip: string };
 
 async function exists(query: PromiseLike<{ count: number | null; error: unknown }>): Promise<boolean | null> {
   const { count, error } = await query;
@@ -244,7 +272,131 @@ async function resolveForSend(
 
     case "dormant":
       return entitled ? base : { skip: "no_longer_eligible" };
+
+    case "daily_today":
+    case "daily_palm":
+    case "daily_kundali":
+    case "daily_face":
+    case "daily_chat":
+    case "daily_evening":
+      return await resolveDrip(db, row, user, entitled, config);
   }
+}
+
+/**
+ * Which sentence a drip slot sends, and where it goes — decided here, against the live account.
+ *
+ * The enqueued row carries only the slot, the IST day and a hash. Everything that could have changed
+ * between 09:30 and 10:30 is read now: whether they have since scanned their palm, whether their
+ * plan lapsed, whether the kundali they were waiting for arrived. This is what implements the rule
+ * that a push must never suggest something the reader has already done or cannot do.
+ *
+ * A query that fails is treated as ineligible, like every other campaign here: a push we cannot
+ * justify is a push we do not send.
+ */
+async function resolveDrip(
+  db: Db,
+  row: NotificationRow,
+  user: UserRow,
+  entitled: boolean,
+  config: AppConfig,
+): Promise<Resolution> {
+  const campaign = row.campaign as DripCampaignKey;
+  const entry = dripSlotFor(campaign);
+  if (!entry) return { skip: "no_longer_eligible" };
+
+  const slot = entry.slot;
+  const pick = Number(row.params?.pick ?? 0);
+
+  // The two-versus-six split, re-checked. Someone who subscribed at ten o'clock should not still be
+  // getting the one o'clock push that was enqueued for them at noon.
+  if (!(DRIP_ACTIVE_CAMPAIGNS as readonly string[]).includes(campaign) && user.payment_type === "active") {
+    return { skip: "no_longer_eligible" };
+  }
+
+  // Not entitled. `resolvePushNavigation` bounces this account off `/palm`, `/face`, `/chat` and
+  // `/kundali` onto the paywall, so "thirty seconds and eight lines" would be a price tag four times
+  // a day. The locked pool says something true instead, and gives the day's colour away for nothing.
+  if (!entitled) {
+    return { campaign, route: DRIP_ROUTES[slot].locked, variant: dripVariantFor(slot, "locked", pick) };
+  }
+
+  // Paid, but Home has never opened for them because we still want a name and a birth date.
+  // `onboarding_incomplete` owns this person and is already asking; a second voice does not help.
+  if (!user.name || !user.dob) return { skip: "no_longer_eligible" };
+
+  let state: DripState = "new";
+  let planet: string | null = null;
+
+  switch (slot) {
+    case "palm":
+    case "face": {
+      const table = slot === "palm" ? "palm_readings" : "face_readings";
+      const done = await exists(
+        db.from(table).select("id", { count: "exact", head: true })
+          .eq("user_id", user.user_id).eq("status", "ready"),
+      );
+      if (done === null) return { skip: "no_longer_eligible" };
+      // `ready`, not merely "a row exists": a rejected photo is not a reading anyone can ask about.
+      state = done ? "ask" : "new";
+      break;
+    }
+
+    case "kundali":
+    case "evening": {
+      // With the feature off, Home does not even draw the kundali card, so `/kundali` is a dead end.
+      if (slot === "kundali" && !configFlag(config, "kundali_enabled")) return { skip: "no_longer_eligible" };
+
+      const { data, error } = await db.from("kundalis")
+        .select("status, report")
+        .eq("user_id", user.user_id).is("superseded_at", null).maybeSingle();
+      if (error) return { skip: "no_longer_eligible" };
+
+      const status = typeof data?.status === "string" ? data.status : null;
+      if (status === "ready") {
+        state = "ask";
+        // The evening push names a graha from their own report. Hash-indexed, so it moves day to day;
+        // null if the report is missing or an unexpected shape, and `renderDripCopy` then falls back
+        // to the weekday's lord rather than sending a sentence with a hole in it.
+        const highlights = (data?.report as { highlights?: Array<{ planet?: unknown }> } | null)?.highlights;
+        if (Array.isArray(highlights) && highlights.length > 0) {
+          const chosen = highlights[Math.abs(Math.trunc(pick)) % highlights.length]?.planet;
+          planet = typeof chosen === "string" ? chosen : null;
+        }
+      } else if (status === "queued" || status === "generating") {
+        // `kundali_halfway` already owns this person and is already pushing them about this chart.
+        // Telling them it is uncast while they are watching it being cast is worse than one fewer push.
+        if (slot === "kundali") return { skip: "no_longer_eligible" };
+        state = "new";
+      } else {
+        // No chart at all, or one whose cast failed. Both want the "not cast yet" wording: the rule
+        // is never to ask twice for a chart they *have*, and a failed cast left them without one.
+        state = "new";
+      }
+      break;
+    }
+  }
+
+  return { campaign, route: DRIP_ROUTES[slot][state], variant: dripVariantFor(slot, state, pick), planet };
+}
+
+/**
+ * What `send_test` sends, since it skips [resolveForSend] entirely and a drip row would otherwise
+ * arrive with no variant at all. An operator can name one (`{"variant": "palm_ask_0"}`) or let the
+ * slot's first `new` sentence stand in.
+ */
+function forcedResolution(row: NotificationRow): Resolution {
+  const base = { campaign: row.campaign, route: CAMPAIGNS[row.campaign].route };
+  const entry = dripSlotFor(row.campaign);
+  if (!entry) return base;
+
+  const asked = row.params?.variant;
+  const variant = isDripVariantKey(asked)
+    ? asked
+    : dripVariantFor(entry.slot, "new", Number(row.params?.pick ?? 0));
+  const planet = typeof row.params?.planet === "string" ? row.params.planet : null;
+
+  return { campaign: row.campaign, route: DRIP_ROUTES[entry.slot][dripStateOf(variant)], variant, planet };
 }
 
 // ---------------------------------------------------------------- processing
@@ -274,7 +426,7 @@ export async function processRow(db: Db, config: AppConfig, row: NotificationRow
     const entitled = isEntitled(user, graceHoursFrom(config), now);
 
     const resolution = force
-      ? { campaign: row.campaign, route: CAMPAIGNS[row.campaign].route }
+      ? forcedResolution(row)
       : await resolveForSend(db, row, user, entitled, config);
     if ("skip" in resolution) return await skip(db, row, resolution.skip);
 
@@ -288,21 +440,52 @@ export async function processRow(db: Db, config: AppConfig, row: NotificationRow
 
       if (!campaign.bypassQuietHours) {
         const later = quietHoursDeferral(now, settings.quietStart, settings.quietEnd, Math.floor(Math.random() * 30));
-        if (later) return await defer(db, row, later);
+        if (later) {
+          // Mirror the cap branch below rather than deferring blind. A row whose expiry falls inside
+          // the quiet window was being pushed to 08:00, where it sat competing with the morning's own
+          // claims before dying `stale` anyway. Now it dies at once, and says why.
+          return later.getTime() >= Date.parse(row.expires_at)
+            ? await skip(db, row, "quiet_hours", resolution.campaign)
+            : await defer(db, row, later);
+        }
       }
 
-      if (campaign.countsTowardCap) {
-        const since = new Date(Math.min(istMidnight(now).getTime(), now.getTime() - settings.minGapMinutes * 60_000));
-        const { data: recent } = await db.from("notifications").select("sent_at")
-          .eq("user_id", row.user_id).eq("status", "sent").in("campaign", CAPPED_CAMPAIGNS as string[])
+      // The ceiling, and it is asymmetric on purpose.
+      //
+      // An event row counts itself against the other capped campaigns and against `notif_daily_cap`,
+      // exactly as it did before the drip existed — nothing about the fourteen changes.
+      //
+      // A drip row counts itself against *everything* and against its own per-track total. That way
+      // round: the drip is what yields. If `winback_paid` fires at nine, that is one of the day's six
+      // and the sixth slot is skipped, so six is a real maximum rather than an average. The reverse —
+      // making drip rows count toward `notif_daily_cap` — would have been a quiet disaster:
+      // `billing_issue` and `onboarding_incomplete` are `countsTowardCap: true`, so a non-active
+      // account at six sends would have had "your autopay failed" deferred to tomorrow morning.
+      const drip = isDripCampaign(resolution.campaign);
+      if (campaign.countsTowardCap || drip) {
+        const gapMinutes = drip
+          ? numberSetting(config, "notif_drip_min_gap_minutes", 45)
+          : settings.minGapMinutes;
+        const cap = drip
+          ? (user.payment_type === "active"
+            ? numberSetting(config, "notif_drip_daily_total_active", 2)
+            : numberSetting(config, "notif_drip_daily_total", 6))
+          : settings.dailyCap;
+
+        const since = new Date(Math.min(istMidnight(now).getTime(), now.getTime() - gapMinutes * 60_000));
+        let recentQuery = db.from("notifications").select("sent_at")
+          .eq("user_id", row.user_id).eq("status", "sent")
           .gte("sent_at", since.toISOString()).order("sent_at", { ascending: false }).limit(20);
+        if (!drip) recentQuery = recentQuery.in("campaign", CAPPED_CAMPAIGNS as string[]);
+        const { data: recent } = await recentQuery;
+
         const sentTimes = (recent ?? []).map((r) => new Date(r.sent_at as string));
         const later = capDeferral({
           now,
           sentToday: sentTimes.filter((t) => t >= istMidnight(now)).length,
-          cap: settings.dailyCap,
+          cap,
           lastSentAt: sentTimes[0] ?? null,
-          minGapMinutes: settings.minGapMinutes,
+          minGapMinutes: gapMinutes,
         });
         if (later) {
           return later.getTime() >= Date.parse(row.expires_at)
@@ -326,12 +509,28 @@ export async function processRow(db: Db, config: AppConfig, row: NotificationRow
     const account = serviceAccountFrom(config);
     if (!account) return await fail(db, row, "fcm_not_configured", 0, resolution.campaign);
 
-    const copy = renderCopy(resolution.campaign, resolveLanguage(user.language, config), { name: user.name });
+    const language = resolveLanguage(user.language, config);
+    const copy: DripCopy & { language: CopyLanguage } = resolution.variant
+      ? renderDripCopy(resolution.variant, language, { name: user.name, now, planet: resolution.planet })
+      : renderCopy(resolution.campaign as EventCampaignKey, language, { name: user.name });
+
+    // The variant goes back into `params` so `select params->>'variant', count(*)` answers "which of
+    // the twenty-six actually works" from the table that is already being written, with no new one.
+    // The question rides there too, in the reader's own language — it lands in the chat transcript as
+    // their own words, so an English sentence in a Malayalam thread would be wrong. Builds before 11
+    // ignore both and open a blank chat, which is why none of this needs `notif_min_app_build` moved.
+    const params: Record<string, unknown> = { ...(row.params ?? {}) };
+    if (resolution.variant) params.variant = resolution.variant;
+    if (copy.ask && resolution.route === "/chat") {
+      params.q = copy.ask;
+      params.autosend = configFlag(config, "notif_drip_chat_autosend") ? "1" : "0";
+    }
+
     const data = {
       route: resolution.route,
       campaign: resolution.campaign,
       notification_id: row.id,
-      params: JSON.stringify(row.params ?? {}),
+      params: JSON.stringify(params),
     };
 
     let accessToken = await fcmAccessToken(account);
@@ -370,6 +569,7 @@ export async function processRow(db: Db, config: AppConfig, row: NotificationRow
         language: copy.language,
         title: copy.title,
         body: copy.body,
+        params,
         tokens_attempted: tokens.length,
         tokens_delivered: delivered,
         fcm_message_ids: messageIds,

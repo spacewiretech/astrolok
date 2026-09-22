@@ -6,22 +6,26 @@ Source of truth, if this doc and the code ever disagree:
 
 | What | Where |
 | --- | --- |
-| Campaign registry (route, kind, cap, quiet hours) | [notification_campaigns.ts](supabase/functions/_shared/notification_campaigns.ts) |
+| Campaign registry (route, kind, cap, quiet hours, the drip's slots) | [notification_campaigns.ts](supabase/functions/_shared/notification_campaigns.ts) |
 | Who qualifies (scheduled campaigns) | [20260917000002_notifications.sql](supabase/migrations/20260917000002_notifications.sql) — `notification_candidates` |
+| Who qualifies (the daily drip) | [20260923000001_daily_drip.sql](supabase/migrations/20260923000001_daily_drip.sql) — the same function, rewritten with six more branches |
 | Send-time re-check, gating, delivery | [notify.ts](supabase/functions/_shared/notify.ts) |
 | The two inline triggers | [notification_triggers.ts](supabase/functions/_shared/notification_triggers.ts) |
-| Copy, 7 languages | [notification_copy.ts](supabase/functions/_shared/notification_copy.ts) |
+| Copy for the 14 event campaigns, 7 languages | [notification_copy.ts](supabase/functions/_shared/notification_copy.ts) |
+| Copy for the drip — 26 variants, 7 languages | [drip_copy.ts](supabase/functions/_shared/drip_copy.ts) |
 | Where a tap goes | [push_navigation.dart](lib/app/push_navigation.dart) |
 
 ---
 
 ## How a push gets sent
 
-There are two ways a notification is created.
+There are two ways a notification is created, and the daily drip is a variety of the second.
 
 **Inline** — `mid_cancel` and `billing_issue` only. Raised the moment the subscription sync sees the transition, from whichever function observed it (`cashfree-webhook`, `subscription-reconcile`, or `subscription-cancel`). These cannot wait: the average trial cancellation happens 1.7 hours in, and the ask has to land while the phone is still in hand. The hooks never throw and never delay the caller.
 
-**Scheduled** — everything else. `pg_cron` calls `notification-dispatch` every 5 minutes (`1-59/5 * * * *`), authenticated with `x-cron-secret`. It runs `notification_candidates` per enabled campaign, enqueues up to 200 rows each, then sends whatever is due.
+**Scheduled** — everything else, the drip included. `pg_cron` calls `notification-dispatch` every 5 minutes (`1-59/5 * * * *`), authenticated with `x-cron-secret`. It runs `notification_candidates` per enabled campaign, enqueues up to `notif_dispatch_batch` rows a pass and asks again while a pass comes back full, then sends whatever is due.
+
+The 14 event campaigns are triggered by something that happened. The 6 drip slots are triggered by the clock: each has an IST time it is written for, and its branch only returns anybody during the hour before that time. See [The daily drip](#the-daily-drip).
 
 Either way the row lands in `public.notifications` and goes through the same send path.
 
@@ -36,16 +40,22 @@ Checked in order, at send time, against the live account — not against whateve
 5. **Entitlement** — decided by the same `isEntitled` every other function uses. Most campaigns require it; the win-back ones require the opposite.
 6. **Marketing opt-out** — `users.push_marketing_opt_out` blocks every `marketing` campaign. Transactional ones still go.
 7. **Quiet hours** — 22:00–08:00 IST (`notif_quiet_start_ist` / `notif_quiet_end_ist`). Deferred to morning, plus a random 0–30 min jitter so a night's backlog doesn't hit every phone at 08:00:00. **`mid_cancel` is the only campaign that ignores this.**
-8. **Daily cap** — 2 per IST day (`notif_daily_cap`), minimum 180 minutes apart (`notif_min_gap_minutes`). Over cap, the row is deferred to the next IST day — or skipped `cap` if it would expire before then. `mid_cancel` and `kundali_ready` don't count toward it.
+8. **Daily cap** — and it is asymmetric, because the drip and the event campaigns are counting different things.
+
+   An **event** row counts itself against the other `countsTowardCap` campaigns: 2 per IST day (`notif_daily_cap`), minimum 180 minutes apart (`notif_min_gap_minutes`). Unchanged since before the drip existed. `mid_cancel` and `kundali_ready` don't count toward it.
+
+   A **drip** row counts itself against *everything* sent that day, and against its own per-track total: `notif_drip_daily_total` (6) for an account whose `payment_type` is not `active`, `notif_drip_daily_total_active` (2) for one that is, with `notif_drip_min_gap_minutes` (45) between it and any other push. That way round on purpose — **the drip is what yields.** If `winback_paid` fires at 09:00 it spends one of the day's six and the last slot is skipped `cap`, so six is a real ceiling and not an average.
+
+   Doing it the other way would have been quiet and bad: `billing_issue` and `onboarding_incomplete` are `countsTowardCap: true`, so if drip sends counted toward *their* cap, a non-active account at six sends would have had "your autopay failed" deferred to the next morning.
 9. **A device that can show it** — an authorized push token, on a live session, from build ≥ `notif_min_app_build` (currently **9**). No such device → skipped `no_token`.
 
 **Deduplication** is by `dedupe_key`, unique per notification. The webhook, the hourly reconcile and the app's status poll can all observe the same cancellation; the key makes that one push. Every campaign's window is bounded to at most a week, which is what stops the 180-day purge of `notifications` from ever letting a once-only key fire twice.
 
 ---
 
-## The 14 campaigns
+## The 14 event campaigns
 
-`T` = transactional (sent even to accounts that turned marketing pushes off). `M` = marketing.
+`T` = transactional (sent even to accounts that turned marketing pushes off). `M` = marketing. The six drip slots are all marketing and have [their own section](#the-daily-drip).
 
 | Campaign | | Fires when | Delay | Tap opens |
 | --- | --- | --- | --- | --- |
@@ -206,6 +216,134 @@ Transactional, because they've paid and are owed the thing they paid for.
 
 ---
 
+---
+
+## The daily drip
+
+Six pushes a day to everyone whose `payment_type` is not `active`, two to everyone whose is. The 14
+campaigns above all wait for something to happen; most days nothing does, and the app goes unopened.
+The drip is the other half — a reason to open it on an ordinary Tuesday.
+
+| Campaign | IST | Theme | `active` | everyone else |
+| --- | --- | --- | --- | --- |
+| `daily_today` | 08:00 | What today holds, and the colour to wear | ✅ | ✅ |
+| `daily_palm` | 10:30 | Read your palm — or ask Astro through it | — | ✅ |
+| `daily_kundali` | 13:00 | Cast your chart — or ask Astro about it | — | ✅ |
+| `daily_face` | 15:30 | Read your face — or ask Astro through it | — | ✅ |
+| `daily_chat` | 18:00 | A question worth asking | — | ✅ |
+| `daily_evening` | 20:00 | Tomorrow, and a graha from your own chart | ✅ | ✅ |
+
+**The 2-versus-6 split is structural, not configured.** The four middle branches carry
+`payment_type <> 'active'`; the two bookends do not. There is no per-user cap to set wrong. All six
+are `countsTowardCap: false` for the same reason — their budget is the schedule.
+
+Every slot is inside the waking window, so `quietHoursDeferral` never moves one. A push that says
+"what does today hold" and arrives tomorrow is a lie, and the drip has no `bypassQuietHours` escape.
+
+### When a row is made, and when it dies
+
+A slot's branch returns candidates only during the hour before its time
+(`notif_drip_enqueue_window_minutes`), and stamps `scheduled_for` with the slot itself. So the
+dispatcher has twelve runs to find everybody, and everybody is sent at 10:30 rather than whenever
+they were found.
+
+`expires_at` is the slot **plus two hours**. A missed slot is therefore *lost, not queued*: if the
+dispatcher is down at 13:00 the kundali push is skipped `stale`, it does not turn up at 16:00 on top
+of the 15:30 one, and tomorrow is not double-loaded. The cost of that choice is that **silence is
+what a failure looks like** — so watch the daily counts rather than waiting for an error.
+
+`dedupe_key` is `<campaign>:<user_id>:<YYYYMMDD IST>`, so a slot can fire once per account per day
+however many times the dispatcher runs.
+
+### Which of the 26 sentences
+
+Nothing here is generated. Two deterministic steps:
+
+**Which pool** — read live in `resolveDrip` at send time, never at enqueue, because a row made at
+09:30 is sent at 10:30 and the answer can change in between.
+
+| Slot | `new` | `ask` |
+| --- | --- | --- |
+| `palm` | no `palm_readings` row with `status = 'ready'` | has one → `/chat` |
+| `face` | no `face_readings` row with `status = 'ready'` | has one → `/chat` |
+| `kundali` | no live chart, or one whose cast **failed** | `status = 'ready'` → `/chat` |
+| `evening` | no readable report | a report exists → names a graha from it |
+| `today`, `chat` | always | — |
+
+A kundali that is `queued` or `generating` skips the 13:00 slot entirely: `kundali_halfway` already
+owns that person and is already pushing them, and telling someone their chart is uncast while they
+are watching it being cast is worse than one fewer push.
+
+There is a third state, **`locked`**, for an account that is not entitled. It has its own pool of six
+and every one of them routes to `/subscribe`. This is not politeness: `resolvePushNavigation` bounces
+a non-entitled account off `/palm`, `/face`, `/chat` and `/kundali` onto the paywall, so the other
+twenty would be a price tag dressed as a palm reading, four times a day. Two of the six give the day's
+lucky colour away for nothing, which is the one thing the app can hand someone who has not paid.
+
+**Which sentence in the pool** — `drip_variant(user_id, now, slot)` in SQL: `md5(user, slot, IST day)`
+as a 28-bit integer, which `dripVariantFor` takes modulo the pool. The IST day is in the hash so the
+wording rotates daily; the user id is in it so two people do not get the same sentence on the same
+morning; the slot is in it so 10:30 and 13:00 shuffle independently. The **pool size lives only in
+`drip_copy.ts`** — SQL hands over a raw hash — so a twenty-seventh variant is a TypeScript edit, not
+a migration.
+
+### The lucky colour
+
+`{colour}` and `{planet}` come from a fixed weekday table in `drip_copy.ts`, computed at send time
+from the IST date. No stored state, no model, correct every week for ever.
+
+| Day | Lord | Colour |
+| --- | --- | --- |
+| Sunday | Sun | orange |
+| Monday | Moon | white |
+| Tuesday | Mars | red |
+| Wednesday | Mercury | green |
+| Thursday | Jupiter | yellow |
+| Friday | Venus | pink |
+| Saturday | Saturn | blue |
+
+The evening `ask` variant overrides `{planet}` with one out of the reader's own
+`kundalis.report.highlights`, hash-indexed so it moves day to day. An unknown or missing planet falls
+back to the weekday's lord — a stale param costs the personalisation, not the push.
+
+### The seeded question
+
+A drip push that opens `/chat` carries its question in `params.q`, **already in the reader's own
+language** — it lands in the transcript as their own words, so an English sentence in a Malayalam
+thread would be wrong.
+
+The app puts it in the composer and waits. It does **not** send it: a push arrives unasked, up to six
+times a day, and sending on arrival would spend a Gemini call and start a thread the user never asked
+for. `notif_drip_chat_autosend` flips that from the dashboard if you ever want the 08:00 slot to
+answer itself — the flag travels in the payload, so it needs no release.
+
+**Builds before 11 ignore `params` entirely and open a blank chat.** That is why the whole server side
+ships without moving `notif_min_app_build`, and why there is no rollout cliff.
+
+### Fatigue
+
+Six a day is a lot, and one swipe turns an app's notifications off for ever.
+
+- The drip is all `marketing`, so `push_marketing_opt_out` stops every slot. The branches also filter
+  on it in SQL, so an opted-out account is never even enqueued.
+- **Dormancy step-down:** no session in `notif_drip_dormant_days` (7) drops an account to the two
+  bookend slots. Someone ignoring six a day gets two, not silence. `0` turns it off.
+- `notif_drip_languages` is the language gate. All seven are on, but `drip_copy.ts` asks for native
+  review of Hindi, Telugu, Tamil, Kannada and Malayalam — narrow this to `english,hinglish` to pilot
+  on the two that need none, and widen it as review lands.
+- Watch `Notification Sent` → `Push Opened` per campaign, and the count of authorized push tokens.
+  A token count that starts falling is the drip being switched off by hand, and it does not come back.
+
+### Turning it off
+
+1. `notif_drip_enabled = false` — one key. SQL stops enqueueing immediately, and anything already
+   queued dies `disabled` within the 60-second config cache. **This is the kill switch.**
+2. One `notif_daily_<slot>_enabled = false` — drops 6/day to 5/day. This is the dial you will
+   actually use; launching at three slots and adding the rest is the recommended way in.
+3. `notifications_enabled = false` — everything, all 20 campaigns.
+
+---
+
 ## What happens when a user taps
 
 The push carries `route`, `campaign`, `notification_id` and `params` as data. On tap, [push_navigation.dart](lib/app/push_navigation.dart) decides where to go **before anything navigates** — a push that launched the app waits for the splash to resolve the session first, so it doesn't race the splash and lose.
@@ -239,7 +377,26 @@ Config lives in `app_config`. Current production values:
 | `notif_min_gap_minutes` | `180` |
 | `notif_quiet_start_ist` / `notif_quiet_end_ist` | `22` / `8` |
 | `notif_mid_cancel_max_age_minutes` | `180` |
-| every `notif_<campaign>_enabled` | `true` (all 13 flipped on 2026-09-18) |
+| every event `notif_<campaign>_enabled` | `true` (all 13 flipped on 2026-09-18) |
+
+And the drip's own, all seeded off by `20260923000001_daily_drip.sql`:
+
+| Key | Value | |
+| --- | --- | --- |
+| `notif_drip_enabled` | `false` | the master switch, read in SQL *and* TypeScript |
+| `notif_daily_<slot>_enabled` × 6 | `false` | per slot |
+| `notif_drip_slot_today` … `_evening` | `8`, `10.5`, `13`, `15.5`, `18`, `20` | IST hour; fractional is half past |
+| `notif_drip_enqueue_window_minutes` | `60` | how long before its slot a row may be made |
+| `notif_drip_daily_total` | `6` | ceiling across **all** campaigns, non-active |
+| `notif_drip_daily_total_active` | `2` | the same, for `payment_type = 'active'` |
+| `notif_drip_min_gap_minutes` | `45` | how long a drip push yields to any other |
+| `notif_drip_dormant_days` | `7` | no session this recently → two slots, not six. `0` disables |
+| `notif_drip_languages` | all seven | narrow to `english,hinglish` to pilot on the reviewed two |
+| `notif_drip_chat_autosend` | `false` | `true` makes a seeded question send itself on arrival |
+| `notif_dispatch_batch` | `200` | rows enqueued per campaign per pass |
+
+`notif_daily_cap` and `notif_min_gap_minutes` are **unchanged** — the drip does not use them, and
+nothing about the 14 event campaigns moves when it is switched on.
 
 There is a helper for all of this at [supabase/scripts/push.sh](supabase/scripts/push.sh):
 
@@ -251,7 +408,16 @@ export CRON_SECRET='…'                                   # app_config.reconcil
 ./push.sh send d53877e5-33d0-4fad-bb13-45328e23ee3b      # one real push to one account
 ./push.sh send <user_id> winback_paid
 ./push.sh run                                            # run the dispatch without waiting for cron
+
+# The drip. A slot only has candidates inside the hour before it, so this correctly says 0 at noon:
+./push.sh dry daily_palm                                 # run it between 09:30 and 10:30 IST
+./push.sh send <user_id> daily_today                     # `send` ignores the window
+./push.sh send <user_id> daily_kundali '{"variant":"kundali_ask_0"}'
+./push.sh send <user_id> daily_evening '{"variant":"evening_ask_0","planet":"saturn"}'
 ```
+
+`send` on a drip slot takes the variant you name, so all 26 can be read on a real phone in a real
+language before any of them is switched on.
 
 Or by hand — `notification-dispatch` takes two operator actions, both needing `x-cron-secret` (= `reconcile_secret`):
 
@@ -275,6 +441,7 @@ Every skipped row records why, in `notifications.skip_reason`:
 | `no_token` | No authorized device on a live session at build ≥ `notif_min_app_build` |
 | `no_longer_eligible` | The condition stopped being true between enqueue and send |
 | `stale` | Sat past `expires_at` |
+| `quiet_hours` | Would land in quiet hours, and would expire before they end |
 | `cap` | Over the daily cap, and would expire before the cap resets |
 | `opted_out` | Marketing campaign, `push_marketing_opt_out` set |
 | `disabled` | Campaign switched off between enqueue and send |

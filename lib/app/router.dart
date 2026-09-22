@@ -249,9 +249,18 @@ final appRouter = GoRouter(
     // account anyway.
     GoRoute(
       path: Routes.chat,
-      builder: (context, state) => EntitlementGate(
-        child: ChatView(opener: state.extra as String?),
-      ),
+      // Two kinds of caller, and the cast has to survive both. The in-app "Ask Astro" buttons pass a
+      // bare String and mean "send this now"; a drip push passes a [ChatLaunch] and usually means
+      // "put it in the composer". `as String?` alone would throw on the second.
+      builder: (context, state) {
+        final extra = state.extra;
+        final launch = switch (extra) {
+          ChatLaunch() => extra,
+          final String text when text.isNotEmpty => ChatLaunch(question: text, autoSend: true),
+          _ => null,
+        };
+        return EntitlementGate(child: ChatView(launch: launch));
+      },
     ),
 
     // The account. Gated like Home: everything reachable from here is behind the paywall, and

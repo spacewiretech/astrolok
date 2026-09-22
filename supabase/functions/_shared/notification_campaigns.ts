@@ -38,6 +38,14 @@ export const CAMPAIGN_KEYS = [
   "post_charge_no_return",
   "winback_paid",
   "dormant",
+  // The daily drip. Six fixed slots through the day rather than one push per event, so the app has a
+  // reason to be opened on a day when nothing has happened. See `DRIP_SLOTS` below.
+  "daily_today",
+  "daily_palm",
+  "daily_kundali",
+  "daily_face",
+  "daily_chat",
+  "daily_evening",
 ] as const;
 export type CampaignKey = typeof CAMPAIGN_KEYS[number];
 
@@ -93,10 +101,115 @@ export const CAMPAIGNS: Record<CampaignKey, Campaign> = {
   post_charge_no_return: { kind: "marketing", route: "/home", scheduled: true, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 0 },
   winback_paid: { kind: "marketing", route: "/subscribe", scheduled: true, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 0 },
   dormant: { kind: "marketing", route: "/chat", scheduled: true, bypassQuietHours: false, countsTowardCap: true, defaultDelayMinutes: 0 },
+
+  // ---- the daily drip ----
+  //
+  // `countsTowardCap` is false for all six, and not because they are exempt from a budget: their
+  // budget is the schedule itself. The SQL emits at most one row per slot per account per IST day,
+  // and only the two bookend slots for a paying account, so the count is structural — six a day for
+  // everyone else, two for `active`. Running them through `capDeferral` as well would only defer a
+  // slot past the hour it was written for.
+  //
+  // The routes below are defaults. `resolveForSend` picks the real one per row, because a variant
+  // that says "read your palm" must open `/palm` while one that says "ask Astro about your palm"
+  // must open `/chat` — and neither may be offered to an account that has since lapsed.
+  daily_today: { kind: "marketing", route: "/chat", scheduled: true, bypassQuietHours: false, countsTowardCap: false, defaultDelayMinutes: 0 },
+  daily_palm: { kind: "marketing", route: "/palm", scheduled: true, bypassQuietHours: false, countsTowardCap: false, defaultDelayMinutes: 0 },
+  // `/kundali` is safe here where it is not for the three reveal campaigns. `KundaliGateView` shows
+  // the kundali *form* whenever its status call does not come back — and this campaign's `new`
+  // variant only goes to accounts that have never cast one, for whom the form is the right screen.
+  // The `ask` variant goes to `/chat` and never touches the gate.
+  daily_kundali: { kind: "marketing", route: "/kundali", scheduled: true, bypassQuietHours: false, countsTowardCap: false, defaultDelayMinutes: 0 },
+  daily_face: { kind: "marketing", route: "/face", scheduled: true, bypassQuietHours: false, countsTowardCap: false, defaultDelayMinutes: 0 },
+  daily_chat: { kind: "marketing", route: "/chat", scheduled: true, bypassQuietHours: false, countsTowardCap: false, defaultDelayMinutes: 0 },
+  daily_evening: { kind: "marketing", route: "/chat", scheduled: true, bypassQuietHours: false, countsTowardCap: false, defaultDelayMinutes: 0 },
 };
 
 export const SCHEDULED_CAMPAIGNS: readonly CampaignKey[] = CAMPAIGN_KEYS.filter((key) => CAMPAIGNS[key].scheduled);
 export const CAPPED_CAMPAIGNS: readonly CampaignKey[] = CAMPAIGN_KEYS.filter((key) => CAMPAIGNS[key].countsTowardCap);
+
+// ---------------------------------------------------------------- the daily drip
+
+/**
+ * The six slots, in the order they land, with the IST hour each is written for.
+ *
+ * Fractional hours are half past. Every one of them sits inside the waking window
+ * (`notif_quiet_start_ist` 22 → `notif_quiet_end_ist` 8), so a drip push is never deferred to the
+ * morning — which matters, because a "what does today hold" that arrives tomorrow is a lie.
+ *
+ * The hours are also seeded into `app_config` as `notif_drip_slot_<slot>`, and the SQL reads them
+ * from there. These are the fallbacks, and the source of truth for the tests.
+ */
+export const DRIP_SLOTS = [
+  { campaign: "daily_today", slot: "today", hour: 8 },
+  { campaign: "daily_palm", slot: "palm", hour: 10.5 },
+  { campaign: "daily_kundali", slot: "kundali", hour: 13 },
+  { campaign: "daily_face", slot: "face", hour: 15.5 },
+  { campaign: "daily_chat", slot: "chat", hour: 18 },
+  { campaign: "daily_evening", slot: "evening", hour: 20 },
+] as const satisfies ReadonlyArray<{ campaign: CampaignKey; slot: string; hour: number }>;
+
+export type DripSlot = typeof DRIP_SLOTS[number]["slot"];
+export type DripCampaignKey = typeof DRIP_SLOTS[number]["campaign"];
+
+/**
+ * The fourteen event campaigns: everything that is not a drip slot.
+ *
+ * The two families keep their copy in different files, because a drip slot has a pool of variants and
+ * an event has one sentence. Splitting the key type here is what makes `deno check` insist on that —
+ * `COPY` must cover every event campaign and no drip one, and `DRIP_COPY` the other way round.
+ */
+export type EventCampaignKey = Exclude<CampaignKey, DripCampaignKey>;
+
+export const DRIP_CAMPAIGNS: readonly DripCampaignKey[] = DRIP_SLOTS.map((entry) => entry.campaign);
+
+export const EVENT_CAMPAIGN_KEYS: readonly EventCampaignKey[] = CAMPAIGN_KEYS.filter(
+  (key): key is EventCampaignKey => !(DRIP_CAMPAIGNS as readonly string[]).includes(key),
+);
+
+/** The two slots a paying account gets. The other four carry `payment_type <> 'active'` in SQL. */
+export const DRIP_ACTIVE_CAMPAIGNS: readonly CampaignKey[] = ["daily_today", "daily_evening"];
+
+export function isDripCampaign(key: CampaignKey): boolean {
+  return (DRIP_CAMPAIGNS as readonly string[]).includes(key);
+}
+
+export function dripSlotFor(key: CampaignKey): typeof DRIP_SLOTS[number] | null {
+  return DRIP_SLOTS.find((entry) => entry.campaign === key) ?? null;
+}
+
+/** `app_config.notif_drip_slot_<slot>` — the IST hour this slot is written for. */
+export function dripSlotHourKey(slot: DripSlot): string {
+  return `notif_drip_slot_${slot}`;
+}
+
+/**
+ * What the reader has already done about this slot's subject, worked out at send time.
+ *
+ * `new` — never scanned this, never cast this. `ask` — has, so the push points at Astro instead of
+ * at the camera. `locked` — not entitled, so every feature route would bounce off the paywall and the
+ * push says so honestly rather than promising a reading that is one tap away.
+ */
+export type DripState = "new" | "ask" | "locked";
+
+/**
+ * Where each slot goes, per state. `locked` is `/subscribe` for all six, which is the only route a
+ * non-entitled account can actually open — `resolvePushNavigation` bounces the rest.
+ *
+ * The `ask` states and the three chat-first slots go to `/chat`, carrying the variant's own question
+ * in `params.q`. `daily_kundali`'s `new` state is the one campaign that may safely use `/kundali`:
+ * the gate's "show the form when the status call does not come back" behaviour is a bug for the three
+ * reveal campaigns, whose recipients already own a chart — and exactly the right screen for someone
+ * who does not. `resolveDrip` guarantees `new` only reaches accounts with no live kundali.
+ */
+export const DRIP_ROUTES: Record<DripSlot, Record<DripState, PushRoute>> = {
+  today: { new: "/chat", ask: "/chat", locked: "/subscribe" },
+  palm: { new: "/palm", ask: "/chat", locked: "/subscribe" },
+  kundali: { new: "/kundali", ask: "/chat", locked: "/subscribe" },
+  face: { new: "/face", ask: "/chat", locked: "/subscribe" },
+  chat: { new: "/chat", ask: "/chat", locked: "/subscribe" },
+  evening: { new: "/chat", ask: "/chat", locked: "/subscribe" },
+};
 
 export function isCampaignKey(value: unknown): value is CampaignKey {
   return typeof value === "string" && (CAMPAIGN_KEYS as readonly string[]).includes(value);

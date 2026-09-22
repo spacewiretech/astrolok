@@ -12,13 +12,14 @@ import '../data/firebase/push_messaging.dart';
 import '../data/firebase/push_payload.dart';
 import '../data/kundali_summary.dart';
 import '../data/models/app_user.dart';
+import '../features/chat/chat_view.dart';
 import '../features/splash/splash_viewmodel.dart';
 import 'router.dart';
 
 /// Where a tapped push goes, decided before anything navigates.
 @immutable
 class PushNavigation {
-  const PushNavigation({this.go, this.push, this.dropReason});
+  const PushNavigation({this.go, this.push, this.dropReason, this.extra});
 
   /// Replaces the stack.
   final String? go;
@@ -30,15 +31,23 @@ class PushNavigation {
   /// taken to the paywall rather than left where it was.
   final String? dropReason;
 
+  /// Handed to go_router with [push]. Only ever a [ChatLaunch], for a drip push that arrives with a
+  /// question to put in the composer.
+  final Object? extra;
+
   @override
   bool operator ==(Object other) =>
-      other is PushNavigation && other.go == go && other.push == push && other.dropReason == dropReason;
+      other is PushNavigation &&
+      other.go == go &&
+      other.push == push &&
+      other.dropReason == dropReason &&
+      other.extra == extra;
 
   @override
-  int get hashCode => Object.hash(go, push, dropReason);
+  int get hashCode => Object.hash(go, push, dropReason, extra);
 
   @override
-  String toString() => 'PushNavigation(go: $go, push: $push, drop: $dropReason)';
+  String toString() => 'PushNavigation(go: $go, push: $push, drop: $dropReason, extra: $extra)';
 }
 
 /// The routes behind `EntitlementGate`: opened on top of Home, and only for an entitled account.
@@ -82,7 +91,15 @@ PushNavigation resolvePushNavigation(PushPayload payload, {required AppUser? use
       if (onboarding != Routes.home) {
         return PushNavigation(go: onboarding, dropReason: user.entitled ? 'onboarding' : 'not_entitled');
       }
-      return PushNavigation(go: Routes.home, push: route);
+      // A drip push to `/chat` carries the question it asked on the lock screen, so the composer is
+      // already filled when the screen opens. Older builds ignore `params` entirely and open empty,
+      // which is why the server can send this to everyone without a `notif_min_app_build` bump.
+      final question = route == Routes.chat ? payload.chatQuestion : null;
+      return PushNavigation(
+        go: Routes.home,
+        push: route,
+        extra: question == null ? null : ChatLaunch(question: question, autoSend: payload.chatAutoSend),
+      );
   }
 }
 
@@ -150,7 +167,7 @@ class PushNavigator {
     final go = navigation.go;
     if (go != null) appRouter.go(go);
     final push = navigation.push;
-    if (push != null) appRouter.push(push);
+    if (push != null) appRouter.push(push, extra: navigation.extra);
   }
 
   void dispose() => _subscription?.cancel();

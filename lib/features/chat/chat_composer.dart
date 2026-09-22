@@ -83,7 +83,13 @@ class _ChatComposerState extends State<ChatComposer> {
     // an astrologer should not have to write them again because the network blinked.
     final pending = widget.state.pending;
     if (pending != null && pending.isNotEmpty && _controller.text.isEmpty) {
-      _controller.text = pending;
+      // Setting `.text` alone leaves the selection at offset -1, so the caret sits at the start and
+      // anything typed goes in front of the restored words. Set the whole value instead, with the
+      // caret after the text, which is where someone about to keep writing expects it.
+      _controller.value = TextEditingValue(
+        text: pending,
+        selection: TextSelection.collapsed(offset: pending.length),
+      );
       widget.onDraftRestored();
     }
   }

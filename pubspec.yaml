@@ -2,7 +2,7 @@ name: astrolok
 description: "Astrology, palm reading and astro talk."
 publish_to: 'none'
 
-version: 1.0.6+10
+version: 1.0.7+11
 
 environment:
   sdk: ^3.12.2
