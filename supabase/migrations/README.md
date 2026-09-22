@@ -134,3 +134,11 @@ and run in lexical order.
 - `user_attribution.first_*` is written by an insert that does nothing on conflict, so first
   touch is physically incapable of being overwritten. See `20260911000001_referrals.sql`.
 - Steps 2 and 5 of the setup in [../README.md](../README.md) are manual and easy to miss.
+- `20260922000001_daily_metrics.sql` → **superseded in part by `20260922000002`**; see below.
+- `20260922000002_trial_definition.sql` — redefines the `trials` count in
+  `daily_marketing_metrics`. `trial_started_at` is set from Cashfree's mandate *authorisation*,
+  not from a payment, and a UPI autopay approval very often never debits the ₹3 — 18,492 accounts
+  had the column set against 6,322 that had ever paid over ₹2, so the reported figure was ~2.8x
+  the truth. The day still comes from `trial_started_at` (written once, so it cannot double-count)
+  but now requires `total_paid_amount > 2`. Cross-checked against `AUTH`/`SUCCESS` rows in
+  `subscription_payments`, which agree within ~1%. **No schema change** — function body only.
