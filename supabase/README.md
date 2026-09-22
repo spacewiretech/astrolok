@@ -34,6 +34,10 @@ so RLS cannot be written against a Supabase session. Instead:
 Without a Fast2SMS template you can set `allow_dev_otp = true` (and leave `fast2sms_otp_id`
 empty) to accept `000000` and send no SMS. Never leave that on once a template exists.
 
+The daily marketing push is optional and off until configured: fill `metrics_sheet_url` and
+`metrics_sheet_secret` once the Apps Script Web App in `scripts/daily_metrics_sheet.gs` is
+deployed. While `metrics_sheet_url` is empty the cron job runs and posts nowhere.
+
 ## Money
 
 The client sends **no amount and no plan id** — only its session token. Everything billable is
@@ -223,6 +227,10 @@ break the reading contract, since the screen renders whatever comes out of it.
 - `functions/tests/` — `deno test`, 226 tests over the pure logic.
 - `migrations/` — 20 `.sql` files in lexical order. See its README for what each adds and for
   the two manual setup steps that are easy to miss.
+- `scripts/` — operator tools, run by hand and not deployed: `push.sh` drives the notification
+  dispatcher, `chat_power_users.sh` is a read-only aggregate over `chat_messages`, and
+  `daily_metrics_sheet.gs` is the Apps Script half of the daily marketing push — it lives in the
+  Google Sheet, not in this deploy, and its own header carries the setup steps.
 
 ### Notes
 

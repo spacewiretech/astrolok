@@ -103,6 +103,15 @@ and run in lexical order.
   `notif_*` config rows (**every switch false**), the `notification-dispatch-5min` cron job, and
   `purge_expired` extended to drop push history after 180 days. **Apply both `20260917…`
   migrations before deploying any function** — `entitlement.ts` selects the new user columns.
+- `20260922000001_daily_metrics.sql` — the marketing sheet. `daily_marketing_metrics(date)`
+  (signups, trials started, successful `RECURRING` charges for one **Asia/Kolkata** day, with the
+  `review_mobile` account excluded), `post_daily_metrics(date default null)` which POSTs them
+  through pg_net, the `metrics_sheet_url` / `metrics_sheet_secret` config rows (both private,
+  seeded blank) and the `daily-marketing-metrics` cron job at 03:30 UTC / 09:00 IST. No schema
+  change and no Edge Function: the receiving half is an Apps Script Web App on the sheet, kept at
+  [../scripts/daily_metrics_sheet.gs](../scripts/daily_metrics_sheet.gs). **Trials count
+  `users.trial_started_at`, not ₹3 AUTH payments** — that column is written once and never
+  overwritten, so a reconcile re-reading an old mandate cannot report the same trial twice.
 
 ## Notes
 
