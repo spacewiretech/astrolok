@@ -14,14 +14,17 @@
  *
  * 1. Extensions > Apps Script, paste this in, save.
  * 2. Project Settings > Script Properties: add METRICS_SECRET with a long random value.
- * 3. Run `setup` once from the editor. It grants the permissions and prints whether the
+ * 3. On a sheet with no header row yet, run `installHeaders` once to write them. It refuses a
+ *    row that already has anything on it, so it is safe to run against a sheet someone has
+ *    already laid out — that case wants the headers added by hand.
+ * 4. Run `setup` once from the editor. It grants the permissions and prints whether the
  *    headers below were all found — do this before deploying, so a typo in COLUMNS surfaces
  *    here rather than as a silently missing column at nine tomorrow morning.
- * 4. Deploy > New deployment > Web app.
+ * 5. Deploy > New deployment > Web app.
  *      Execute as: Me.   Who has access: Anyone.
  *    "Anyone" is what lets a database with no Google account post at all; the secret in step 2
  *    is what stops anyone else. Never remove it.
- * 5. Copy the /exec URL into app_config.metrics_sheet_url, and the same secret into
+ * 6. Copy the /exec URL into app_config.metrics_sheet_url, and the same secret into
  *    app_config.metrics_sheet_secret.
  *
  * Re-deploying after an edit needs Deploy > Manage deployments > edit > New version. A plain
@@ -172,6 +175,33 @@ function asDate_(iso) {
 /** Zero is a real answer and must be written; a missing field must not become one. */
 function numberOr_(v) {
   return v === null || v === undefined || v === '' ? '' : Number(v);
+}
+
+/**
+ * Run once, before `setup`, on a sheet whose header row is still blank — it writes the four
+ * headers COLUMNS expects. A row with anything already on it is left alone and reported instead,
+ * so this cannot overwrite a layout somebody has already built; rearranging or renaming columns
+ * afterwards is the sheet owner's business, and COLUMNS is what to keep in step with it.
+ */
+function installHeaders() {
+  var sheet = targetSheet_();
+  var width = sheet.getLastColumn();
+  var occupied = width
+    ? sheet.getRange(HEADER_ROW, 1, 1, width).getDisplayValues()[0]
+        .filter(function (v) { return normalise_(v) !== ''; })
+    : [];
+
+  if (occupied.length) {
+    Logger.log(
+      'Row ' + HEADER_ROW + ' already holds: ' + occupied.join(', ') +
+      '. Nothing written — add the missing headers by hand, or clear the row and re-run.'
+    );
+    return;
+  }
+
+  var headers = Object.keys(COLUMNS).map(function (field) { return COLUMNS[field]; });
+  sheet.getRange(HEADER_ROW, 1, 1, headers.length).setValues([headers]);
+  Logger.log('Wrote ' + headers.join(' | ') + ' to row ' + HEADER_ROW + ' of "' + sheet.getName() + '".');
 }
 
 /**
