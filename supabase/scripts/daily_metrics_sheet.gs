@@ -137,6 +137,19 @@ function writeRow_(body) {
     }
   });
 
+  // Keep the sheet in date order. The ordinary daily write appends a day later than every row
+  // already there, so it lands in order on its own — but a backfill over a range, or a re-post of
+  // a day whose row was deleted, appends wherever it happens to arrive. That is how 2026-09-22
+  // came to sit above 2026-09-21. Sorting after each write means the order cannot drift again,
+  // whatever sequence the days turn up in.
+  var dataRows = sheet.getLastRow() - firstDataRow + 1;
+  if (dataRows > 1) {
+    sheet.getRange(firstDataRow, 1, dataRows, sheet.getLastColumn())
+         .sort({ column: dateCol, ascending: true });
+  }
+
+  // `row` is where the write landed, before that sort may have moved it. It is here to say what
+  // happened, not to be read back as a cell reference.
   return { ok: true, row: row, action: target >= 0 ? 'updated' : 'appended', date: body.report_date };
 }
 
