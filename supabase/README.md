@@ -228,7 +228,8 @@ break the reading contract, since the screen renders whatever comes out of it.
 - `migrations/` — 20 `.sql` files in lexical order. See its README for what each adds and for
   the two manual setup steps that are easy to miss.
 - `scripts/` — operator tools, run by hand and not deployed: `push.sh` drives the notification
-  dispatcher, `chat_power_users.sh` is a read-only aggregate over `chat_messages`, and
+  dispatcher, `chat_power_users.sh` is a read-only aggregate over `chat_messages`,
+  `daily_metrics.sh` prints a day of marketing numbers ready to paste into the sheet, and
   `daily_metrics_sheet.gs` is the Apps Script half of the daily marketing push — it lives in the
   Google Sheet, not in this deploy, and its own header carries the setup steps.
 
