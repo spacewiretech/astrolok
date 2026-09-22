@@ -36,21 +36,45 @@ import 'chat_viewmodel.dart';
 /// the server can turn on later through `notif_drip_chat_autosend` without another release.
 @immutable
 class ChatLaunch {
-  const ChatLaunch({required this.question, this.autoSend = false});
+  const ChatLaunch({required this.question, required this.source, this.autoSend = false});
 
   final String question;
+
+  /// Where the question came from, for `Chat Opened`. Carried rather than inferred from [autoSend]:
+  /// the two stopped meaning the same thing the moment a push could send on arrival too, and a
+  /// funnel that reports every drip push as a reading is worse than no funnel.
+  final String source;
+
+  /// Send it on arrival, or write it into the composer and wait. A reading's "Ask Astro" sends,
+  /// because the user just tapped it. A push follows `notif_drip_chat_autosend`, server-side.
   final bool autoSend;
 
   @override
   bool operator ==(Object other) =>
-      other is ChatLaunch && other.question == question && other.autoSend == autoSend;
+      other is ChatLaunch &&
+      other.question == question &&
+      other.source == source &&
+      other.autoSend == autoSend;
 
   @override
-  int get hashCode => Object.hash(question, autoSend);
+  int get hashCode => Object.hash(question, source, autoSend);
 
   @override
-  String toString() => 'ChatLaunch(${question.length} chars, autoSend: $autoSend)';
+  String toString() => 'ChatLaunch(${question.length} chars, from $source, autoSend: $autoSend)';
 }
+
+/// A question a push wants asked, parked here instead of riding go_router's `extra`.
+///
+/// `extra` is an in-process object attached to one route entry, and it does not survive a cold
+/// start: a push tapped from a *terminated* app is replayed after the splash resolves, the route is
+/// built a second time, and the second build gets `extra: null`. The symptom is exact — chat opens
+/// (the route string survived) with an empty composer (the object did not). Tapped from the
+/// background, where the router is already up and the route is built once, the same push works.
+///
+/// Parking it here instead makes it independent of how many times the route is built. [ChatView]
+/// takes whichever arrives and clears this the moment it has it, so a later, deliberate visit to
+/// chat never inherits yesterday's question.
+final pendingChatLaunchProvider = StateProvider<ChatLaunch?>((_) => null);
 
 /// The conversation with Astro.
 ///
@@ -90,7 +114,9 @@ class _ChatViewState extends ConsumerState<ChatView> {
   void initState() {
     super.initState();
 
-    final launch = widget.launch;
+    // `extra` when chat was opened in-process; the provider when the push had to survive a cold
+    // start. Reading both is what makes the two paths behave the same.
+    final launch = widget.launch ?? ref.read(pendingChatLaunchProvider);
     final question = launch?.question.trim();
     final arrived = question != null && question.isNotEmpty;
 
@@ -102,6 +128,11 @@ class _ChatViewState extends ConsumerState<ChatView> {
       // Home usually has the conversations loaded by now, but this screen is also reached straight
       // from a reading's "Ask Astro". Warmed here so the drawer never has to fetch for itself; it
       // is a no-op once the list is up.
+      // Consumed — clear it before anything else can, so a question is asked once and only once.
+      if (ref.read(pendingChatLaunchProvider) != null) {
+        ref.read(pendingChatLaunchProvider.notifier).state = null;
+      }
+
       final threads = ref.read(chatThreadsProvider);
 
       analytics.track(Ev.chatOpened, {
@@ -109,21 +140,19 @@ class _ChatViewState extends ConsumerState<ChatView> {
         // Home — and a question from a push is different again from one from a reading, because
         // nobody asked for it.
         P.hasOpener: arrived,
-        P.source: !arrived
-            ? 'direct'
-            : launch!.autoSend
-                ? 'reading'
-                : 'push',
+        P.source: arrived ? launch!.source : 'direct',
         P.threadCount: threads.valueOrNull?.length,
       });
 
-      if (!arrived) return;
+      // Checked against the values rather than against `arrived`: Dart promotes a nullable local
+      // through a direct null test, not through a boolean that happens to encode one.
+      if (launch == null || question == null || question.isEmpty) return;
 
       ref.read(selectedThreadProvider.notifier).state = ChatThread.draftId;
       final model = ref.read(chatViewModelProvider(ChatThread.draftId).notifier);
 
-      if (launch!.autoSend) {
-        model.send(question, entry: 'opener');
+      if (launch.autoSend) {
+        model.send(question, entry: launch.source);
       } else {
         // A push fills the composer and stops there. Sending on arrival would spend a turn and a
         // Gemini call the user never asked for, six times a day — and start six threads doing it.

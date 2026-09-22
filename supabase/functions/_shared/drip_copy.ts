@@ -440,6 +440,26 @@ export function dripStateOf(variant: DripVariantKey): DripState {
 // ---------------------------------------------------------------- rendering
 
 /**
+ * Capitalises every sentence start, because a placeholder can land on one.
+ *
+ * `fill` already handles the case where it has taken a `{name}` off the front, but `{colour}` is a
+ * plain noun — "red", "laal" — and it sits wherever the sentence needs it. Both of these were going
+ * out lower-case before this existed:
+ *
+ *   "red is your colour for luck today."            (`today_1`, opening the string)
+ *   "…kalam Shani ke haath mein hai. laal pehniye"  (`today_3`, opening the second sentence)
+ *
+ * A no-op for the five Indic scripts, which have no case, and for `{planet}` and `{name}`, which are
+ * capitalised in their own tables.
+ */
+function sentenceCase(text: string): string {
+  return text.replace(
+    /(^|[.!?।]\s+)(\p{Ll})/gu,
+    (_, lead: string, letter: string) => lead + letter.toUpperCase(),
+  );
+}
+
+/**
  * The title, body and seeded question for one drip variant, in one language.
  *
  * `{colour}` and `{planet}` are filled from the IST weekday — except that `planet` overrides the
@@ -461,7 +481,9 @@ export function renderDripCopy(
 
   const first = nameFor(name);
   const write = (text: string) =>
-    fill(text.replaceAll("{colour}", day.colour).replaceAll("{planet}", named ?? day.planet), first);
+    sentenceCase(
+      fill(text.replaceAll("{colour}", day.colour).replaceAll("{planet}", named ?? day.planet), first),
+    );
 
   return {
     title: write(template.title),

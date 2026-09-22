@@ -171,6 +171,32 @@ Deno.test("dripVariantFor is total, and spreads across the pool", () => {
   assertEquals(seen.size, DRIP_POOLS.palm.new!.length);
 });
 
+Deno.test("nothing reaches a lock screen starting in lower case", () => {
+  // A placeholder can land in the first position — `{colour}` is a plain noun, "red" or "laal" —
+  // and the body would otherwise open mid-sentence. Checked across every weekday, because which
+  // colour lands there changes daily, and with and without a name, because stripping one moves the
+  // first word too.
+  for (const variant of DRIP_VARIANT_KEYS) {
+    for (const language of ["english", "hinglish"] as const) {
+      for (let day = 0; day < 7; day++) {
+        const now = new Date(Date.UTC(2026, 8, 20 + day, 6, 0, 0));
+        for (const name of ["Ravi", null]) {
+          const c = renderDripCopy(variant, language, { name, now, planet: "saturn" });
+          for (const [what, text] of [["title", c.title], ["body", c.body], ["ask", c.ask]] as const) {
+            if (!text) continue;
+            // Start of the string, and after any sentence-ending punctuation: `{colour}` can land
+            // on either, and did on both before `sentenceCase` existed.
+            assertFalse(
+              /(^|[.!?।]\s+)\p{Ll}/u.test(text),
+              `${variant}/${language} day ${day} ${what}: "${text}"`,
+            );
+          }
+        }
+      }
+    }
+  }
+});
+
 Deno.test("the weekday table covers every day in every language", () => {
   assertEquals(WEEKDAY_LORD.length, 7);
   for (const language of COPY_LANGUAGES) {

@@ -256,7 +256,8 @@ final appRouter = GoRouter(
         final extra = state.extra;
         final launch = switch (extra) {
           ChatLaunch() => extra,
-          final String text when text.isNotEmpty => ChatLaunch(question: text, autoSend: true),
+          final String text when text.isNotEmpty =>
+            ChatLaunch(question: text, source: 'reading', autoSend: true),
           _ => null,
         };
         return EntitlementGate(child: ChatView(launch: launch));

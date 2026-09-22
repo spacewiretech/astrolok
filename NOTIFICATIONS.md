@@ -2,6 +2,11 @@
 
 Every push Astrolok can send: what fires it, who qualifies, when it actually lands, and where a tap goes.
 
+Twenty campaigns in two families. **Fourteen are event-driven** — a kundali unlocks, a mandate fails,
+a trial goes unused — and fire when something happens. **Six are the daily drip**, which fires because
+it is half past ten. They share one queue, one send path and one set of rules; where they differ, the
+drip's section says so.
+
 Source of truth, if this doc and the code ever disagree:
 
 | What | Where |
@@ -240,6 +245,46 @@ are `countsTowardCap: false` for the same reason — their budget is the schedul
 Every slot is inside the waking window, so `quietHoursDeferral` never moves one. A push that says
 "what does today hold" and arrives tomorrow is a lie, and the drip has no `bypassQuietHours` escape.
 
+### One Tuesday, three accounts
+
+The same six branches, the same six slots, producing three quite different days. This is the whole
+feature in one table.
+
+**A — in trial.** Entitled, Hinglish, has read their palm, has a ready kundali, has never scanned
+their face. Gets all six.
+
+| IST | Slot | State, decided at send | Says | Opens |
+| --- | --- | --- | --- | --- |
+| 08:00 | `daily_today` | — | "Aaj laal pehniye 💫" (Tuesday is Mangal's) | `/chat` + question |
+| 10:30 | `daily_palm` | `ask` — a `ready` palm reading exists | "Aapki hatheli pehle se jaanti hai" | `/chat` + question |
+| 13:00 | `daily_kundali` | `ask` — a live chart exists | "Aapki Kundali mein aur bhi hai" | `/chat` + question |
+| 15:30 | `daily_face` | `new` — no face reading | "Ek pal ke liye upar dekhiye 👁️" | `/face`, the camera |
+| 18:00 | `daily_chat` | — | "Din khatam hone se pehle ek sawaal" | `/chat` + question |
+| 20:00 | `daily_evening` | `ask` — the report names a graha | "Aapki kundali mein Shani tez hai" | `/chat` + question |
+
+**B — paying (`payment_type = 'active'`).** Two, not six, and structurally so: the four middle
+branches carry `payment_type <> 'active'` and never return this account at all.
+
+| IST | Slot | Says |
+| --- | --- | --- |
+| 08:00 | `daily_today` | the day and its colour |
+| 20:00 | `daily_evening` | tomorrow, named after a graha from their own chart |
+
+**C — never paid (`payment_type = 'none'`).** Six pushes, every one of them `locked`. The app bounces
+this account off `/palm`, `/face`, `/chat` and `/kundali`, so all six say something true and go to the
+paywall — and two of them give the day's colour away for nothing.
+
+| IST | Slot | Says | Opens |
+| --- | --- | --- | --- |
+| 08:00 | `daily_today` | one of the six `locked_*` | `/subscribe` |
+| 10:30 | `daily_palm` | another, because the slot is in the hash | `/subscribe` |
+| … | … | … | `/subscribe` |
+
+What happens for each of those rows, in order: the dispatcher finds the account in the hour before the
+slot and writes a row scheduled for the slot itself → at the slot, `processRow` re-reads the live
+account, picks the state and the route, renders the copy in their language with today's colour → FCM
+→ the row records what was actually sent, variant included.
+
 ### When a row is made, and when it dies
 
 A slot's branch returns candidates only during the hour before its time
@@ -287,6 +332,45 @@ morning; the slot is in it so 10:30 and 13:00 shuffle independently. The **pool 
 `drip_copy.ts`** — SQL hands over a raw hash — so a twenty-seventh variant is a TypeScript edit, not
 a migration.
 
+### All twenty-six, in English
+
+The other six languages say the same things; `drip_copy.ts` is the source, and `drip_copy_test.ts`
+asserts every variant exists in all seven, fits a lock screen (48 graphemes of title, 150 of body),
+is written in its own script, and carries a seeded question exactly when its route is `/chat`.
+
+| Campaign | Variant | State | Opens | Title | Body |
+| --- | --- | --- | --- | --- | --- |
+| `daily_today` | `today_0` | new | /chat | Wear {colour} today 💫 | {name}, {planet} rules this day. Ask Astro what else it has planned for you. |
+| `daily_today` | `today_1` | new | /chat | Today belongs to {planet} | {colour} is your colour for luck today. One question, and Astro tells you the rest. |
+| `daily_today` | `today_2` | new | /chat | Something shifts today 🌙 | {name}, keep {colour} close. Astro can tell you where the day is pointing. |
+| `daily_today` | `today_3` | new | /chat | Your day is already written | {planet} is holding the pen. Wear {colour}, and ask Astro what it says. |
+| `daily_palm` | `palm_new_0` | new | /palm | Your hand is a map 🖐️ | {name}, thirty seconds and eight lines. See where yours are taking you. |
+| `daily_palm` | `palm_new_1` | new | /palm | Nobody else has your lines | Heart, life, head, fate — and four more. Read them before the day turns. |
+| `daily_palm` | `palm_ask_0` | ask | /chat | Your palm already knows | {name}, ask Astro what your hand says about today. |
+| `daily_palm` | `palm_ask_1` | ask | /chat | Bring your palm a question | You've had it read. Ask Astro what those lines mean for this week. |
+| `daily_kundali` | `kundali_new_0` | new | /kundali | Your chart hasn't been cast | {name}, your birth details are saved. One tap and the planets do the rest. |
+| `daily_kundali` | `kundali_new_1` | new | /kundali | Nine planets, one moment 🪐 | The sky at the hour you were born is still up there. See what it wrote. |
+| `daily_kundali` | `kundali_ask_0` | ask | /chat | Your Kundali has more to say | {name}, ask Astro what your chart says about right now. |
+| `daily_kundali` | `kundali_ask_1` | ask | /chat | Ask your chart a real question | Astro has your birth chart open. Love, money, the year ahead — pick one. |
+| `daily_face` | `face_new_0` | new | /face | Your face is keeping secrets | {name}, six features, read the way Samudrika Shastra reads them. |
+| `daily_face` | `face_new_1` | new | /face | Look up for a moment 👁️ | Eyes, brow, jaw — your face says what your palm cannot. See what. |
+| `daily_face` | `face_ask_0` | ask | /chat | Your face reading isn't finished | {name}, ask Astro what your features say about the days ahead. |
+| `daily_face` | `face_ask_1` | ask | /chat | What your face didn't tell you | Astro read it once. Ask what it means for the question you're carrying. |
+| `daily_chat` | `chat_0` | new | /chat | One question before the day ends | {name}, love, work or money — Astro answers with your own chart open. |
+| `daily_chat` | `chat_1` | new | /chat | Astro is still awake 🌗 | Ask the thing you have been turning over all day. |
+| `daily_evening` | `evening_new_0` | new | /chat | Tomorrow is already moving | {name}, the planets shift overnight. Ask Astro what you are walking into. |
+| `daily_evening` | `evening_ask_0` | ask | /chat | {planet} is loud in your chart | {name}, ask Astro what it has been quietly arranging for you. |
+| *(any slot)* | `locked_0` | locked | /subscribe | Your colour for today 💫 | {name}, wear {colour} — that one is free. Unlock your chart to see the rest. |
+| *(any slot)* | `locked_1` | locked | /subscribe | The sky moved last night 🌙 | {planet} owns today. Unlock Astrolok to find out what that means for you. |
+| *(any slot)* | `locked_2` | locked | /subscribe | Eight lines, six features, nine planets | Your palm, your face, your chart. Unlock all three and Astro reads them for you. |
+| *(any slot)* | `locked_3` | locked | /subscribe | Astro is waiting to meet you | {name}, one plan unlocks your palm, your face, your Kundali and every question. |
+| *(any slot)* | `locked_4` | locked | /subscribe | Something is written for you ✨ | It has been since the hour you were born. Unlock your chart and read it. |
+| *(any slot)* | `locked_5` | locked | /subscribe | Your stars kept your place | {name}, wear {colour} today. When you're ready, unlock what else is waiting. |
+
+`{name}` is the first word of `users.name`, dropped cleanly when there isn't one. `{colour}` and
+`{planet}` come from the weekday table above — except on `evening_ask_0`, where `{planet}` is a graha
+out of the reader's own chart.
+
 ### The lucky colour
 
 `{colour}` and `{planet}` come from a fixed weekday table in `drip_copy.ts`, computed at send time
@@ -308,14 +392,46 @@ back to the weekday's lord — a stale param costs the personalisation, not the 
 
 ### The seeded question
 
-A drip push that opens `/chat` carries its question in `params.q`, **already in the reader's own
-language** — it lands in the transcript as their own words, so an English sentence in a Malayalam
-thread would be wrong.
+Every drip variant that opens `/chat` carries the question it wants asked, in `params.q`, **already in
+the reader's own language**. It lands in the transcript as their own words, so an English sentence in
+a Malayalam thread would be wrong — which is why the `ask` strings are translated in `drip_copy.ts`
+alongside the title and body, rather than being built in SQL.
 
-The app puts it in the composer and waits. It does **not** send it: a push arrives unasked, up to six
-times a day, and sending on arrival would spend a Gemini call and start a thread the user never asked
-for. `notif_drip_chat_autosend` flips that from the dashboard if you ever want the 08:00 slot to
-answer itself — the flag travels in the payload, so it needs no release.
+The payload a chat-bound drip push actually carries:
+
+```jsonc
+{
+  "route": "/chat",
+  "campaign": "daily_palm",
+  "notification_id": "…",
+  "params": "{\"slot\":\"palm\",\"day\":\"20260922\",\"pick\":159207737,
+              \"variant\":\"palm_ask_0\",
+              \"q\":\"Meri hatheli ki reading aaj mere din ke baare mein kya kehti hai?\",
+              \"autosend\":\"1\"}"
+}
+```
+
+`variant` is written back onto the `notifications` row when it sends, so
+`select params->>'variant', count(*)` answers "which of the twenty-six actually works" off the table
+that is already being written — no new table, no new event.
+
+**`autosend` decides whether the question is sent or merely written**, and it is
+`notif_drip_chat_autosend` — server-side, so it changes from the dashboard with no release:
+
+| | What the reader gets |
+| --- | --- |
+| `autosend = true` *(current production setting)* | Chat opens and the question is **already asked**, with Astro answering. One tap from a lock screen to a reading. |
+| `autosend = false` | The question is written into the composer and waits. Nothing is spent until they press send. |
+
+The trade is real and worth restating before anyone flips it back: auto-sending spends a
+`chat_messages_per_day` turn and a Gemini call per push, **and starts a new thread each time** —
+`ChatView` always selects the draft before sending. At six slots a day that is ~180 threads a month
+in the drawer, and six Gemini calls per user per day that nobody asked for. The app has already had a
+full chat outage from depleted Gemini credits. If the drawer becomes unusable, the fix is to reuse
+the day's thread rather than draft a new one.
+
+Anything the app does not recognise means "write, do not send": an absent, empty, `"0"`, `"true"` or
+`"yes"` value all leave it in the composer. Only an explicit `"1"` sends.
 
 **Builds before 11 ignore `params` entirely and open a blank chat.** That is why the whole server side
 ships without moving `notif_min_app_build`, and why there is no rollout cliff.
@@ -346,7 +462,31 @@ Six a day is a lot, and one swipe turns an app's notifications off for ever.
 
 ## What happens when a user taps
 
-The push carries `route`, `campaign`, `notification_id` and `params` as data. On tap, [push_navigation.dart](lib/app/push_navigation.dart) decides where to go **before anything navigates** — a push that launched the app waits for the splash to resolve the session first, so it doesn't race the splash and lose.
+The push carries `route`, `campaign`, `notification_id` and `params` as data. On tap, [push_navigation.dart](lib/app/push_navigation.dart) decides where to go **before anything navigates** — a push that launched the app waits for the session to resolve first, so it doesn't race the splash and lose.
+
+### Waiting for the session, not for the splash
+
+`PushNavigator` buffers a tapped push in `_pending` until `_ready`, and then replays it. **What sets
+`_ready` is the session resolving** — `PushNavigator.attach` listens to `splashDestinationProvider`,
+the same provider the splash waits on:
+
+```dart
+_ref.listen(splashDestinationProvider, (_, next) {
+  if (next.valueOrNull == null) return;
+  WidgetsBinding.instance.addPostFrameCallback((_) => onSplashResolved());
+}, fireImmediately: true);
+```
+
+`SplashView` also calls `onSplashResolved()` when it routes, which is the usual path;
+`onSplashResolved` is idempotent, so whichever gets there first wins.
+
+⚠️ **This is load-bearing, and it was a real bug until 2026-09-22.** `_ready` used to be set *only*
+by `SplashView`. Android can restore a cold start straight onto the route the app was last on — so
+the splash never builds, nothing ever calls `onSplashResolved`, and **every push tapped for the rest
+of that session sits in `_pending` and is never handled.** It hit all fourteen event campaigns, not
+just the drip, and it is almost invisible from the outside: the notification opens the right-looking
+screen and does nothing, because the screen is the *restored* route and the push was dropped on the
+floor. If a push ever "opens the app but does nothing" again, check `_ready` first.
 
 The rules, in order:
 
@@ -363,6 +503,29 @@ Every tap is tracked as `Push Routed`, including the drop reason when it didn't 
 
 **If the app is already open**, the OS shows nothing. [push_banner.dart](lib/widgets/push_banner.dart) shows an in-app banner instead, and tapping that runs the same routing.
 
+### Carrying the question to the chat screen
+
+A chat-bound drip push hands `ChatView` a `ChatLaunch` — the question, where it came from, and
+whether to send it. That object travels **two ways at once**, and both are needed:
+
+| | |
+| --- | --- |
+| go_router `extra` | Instant for a tap handled in-process. |
+| `pendingChatLaunchProvider` | Survives the route being built more than once. |
+
+`extra` is attached to one route entry and does not survive a cold start: the push is replayed after
+the session resolves, the route gets built again, and the second build receives `extra: null`. The
+symptom is precise — chat opens (the route string survived) with an empty composer (the object did
+not). `ChatView` therefore takes `widget.launch ?? ref.read(pendingChatLaunchProvider)` and clears the
+provider the moment it has it, so a question is asked once and a later, deliberate visit to chat never
+inherits yesterday's.
+
+`ChatLaunch.source` is carried rather than inferred. It used to be derived from `autoSend`, which was
+fine only while readings were the only thing that auto-sent — with `notif_drip_chat_autosend` on,
+every drip push would have reported as `source: 'reading'` in `Chat Opened` and quietly ruined the one
+funnel the drip is judged by. It is `'push'` for a push and `'reading'` for an in-app "Ask Astro", and
+a test pins it.
+
 ---
 
 ## Operating it
@@ -377,23 +540,28 @@ Config lives in `app_config`. Current production values:
 | `notif_min_gap_minutes` | `180` |
 | `notif_quiet_start_ist` / `notif_quiet_end_ist` | `22` / `8` |
 | `notif_mid_cancel_max_age_minutes` | `180` |
-| every event `notif_<campaign>_enabled` | `true` (all 13 flipped on 2026-09-18) |
+| every event `notif_<campaign>_enabled` | `true` (all 13 flipped on 2026-09-18) — the drip's six are separate, below |
 
-And the drip's own, all seeded off by `20260923000001_daily_drip.sql`:
+And the drip's own. The **Seeded** column is what `20260923000001_daily_drip.sql` writes; **Now** is
+what production is actually set to, which is what the drip does today:
 
-| Key | Value | |
-| --- | --- | --- |
-| `notif_drip_enabled` | `false` | the master switch, read in SQL *and* TypeScript |
-| `notif_daily_<slot>_enabled` × 6 | `false` | per slot |
-| `notif_drip_slot_today` … `_evening` | `8`, `10.5`, `13`, `15.5`, `18`, `20` | IST hour; fractional is half past |
-| `notif_drip_enqueue_window_minutes` | `60` | how long before its slot a row may be made |
-| `notif_drip_daily_total` | `6` | ceiling across **all** campaigns, non-active |
-| `notif_drip_daily_total_active` | `2` | the same, for `payment_type = 'active'` |
-| `notif_drip_min_gap_minutes` | `45` | how long a drip push yields to any other |
-| `notif_drip_dormant_days` | `7` | no session this recently → two slots, not six. `0` disables |
-| `notif_drip_languages` | all seven | narrow to `english,hinglish` to pilot on the reviewed two |
-| `notif_drip_chat_autosend` | `false` | `true` makes a seeded question send itself on arrival |
-| `notif_dispatch_batch` | `200` | rows enqueued per campaign per pass |
+| Key | Seeded | Now | |
+| --- | --- | --- | --- |
+| `notif_drip_enabled` | `false` | `false` | the master switch, read in SQL *and* TypeScript |
+| `notif_daily_<slot>_enabled` × 6 | `false` | `false` | per slot |
+| `notif_drip_slot_today` … `_evening` | `8`, `10.5`, `13`, `15.5`, `18`, `20` | — | IST hour; fractional is half past |
+| `notif_drip_enqueue_window_minutes` | `60` | — | how long before its slot a row may be made |
+| `notif_drip_daily_total` | `6` | — | ceiling across **all** campaigns, non-active |
+| `notif_drip_daily_total_active` | `2` | — | the same, for `payment_type = 'active'` |
+| `notif_drip_min_gap_minutes` | `45` | — | how long a drip push yields to any other |
+| `notif_drip_dormant_days` | `7` | — | no session this recently → two slots, not six. `0` disables |
+| `notif_drip_languages` | all seven | — | narrow to `english,hinglish` to pilot on the reviewed two |
+| `notif_drip_chat_autosend` | `false` | **`true`** | the question sends itself on arrival — see [The seeded question](#the-seeded-question) |
+| `notif_dispatch_batch` | `200` | — | rows enqueued per campaign per pass |
+
+**Nothing is being sent yet.** `notif_drip_enabled` is still `false`, so the six branches select
+nobody. `notif_drip_chat_autosend` being `true` only decides what a drip push *does when tapped*, and
+takes effect the moment the first slot is switched on.
 
 `notif_daily_cap` and `notif_min_gap_minutes` are **unchanged** — the drip does not use them, and
 nothing about the 14 event campaigns moves when it is switched on.

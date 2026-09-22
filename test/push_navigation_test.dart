@@ -85,7 +85,16 @@ void main() {
       final nav = resolvePushNavigation(chat(q: 'What does today hold for me?'), user: _user());
       expect(nav.go, '/home');
       expect(nav.push, '/chat');
-      expect(nav.extra, const ChatLaunch(question: 'What does today hold for me?'));
+      expect(nav.extra, const ChatLaunch(question: 'What does today hold for me?', source: 'push'));
+    });
+
+    test('is labelled as a push, not as a reading', () {
+      // `Chat Opened`'s source drives the funnel. It must not follow autoSend — the two stopped
+      // meaning the same thing once a push could auto-send as well.
+      for (final autosend in [null, '0', '1']) {
+        final nav = resolvePushNavigation(chat(q: 'Hi?', autosend: autosend), user: _user());
+        expect((nav.extra! as ChatLaunch).source, 'push', reason: 'autosend=$autosend');
+      }
     });
 
     test('does not send itself unless the server says so', () {

@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/analytics/analytics.dart';
@@ -98,7 +98,9 @@ PushNavigation resolvePushNavigation(PushPayload payload, {required AppUser? use
       return PushNavigation(
         go: Routes.home,
         push: route,
-        extra: question == null ? null : ChatLaunch(question: question, autoSend: payload.chatAutoSend),
+        extra: question == null
+            ? null
+            : ChatLaunch(question: question, source: 'push', autoSend: payload.chatAutoSend),
       );
   }
 }
@@ -118,6 +120,21 @@ class PushNavigator {
 
   void attach() {
     _subscription ??= pushMessaging.opened.listen((message) => handle(PushPayload.fromData(message.data)));
+
+    // Readiness is "the session has resolved", not "the splash was shown".
+    //
+    // [SplashView] calls [onSplashResolved] when it routes, and that is the usual path. But Android
+    // can restore a cold start straight onto the route the app was last on — `/chat`, say — in which
+    // case SplashView never builds, nothing ever calls it, and every push tapped for the rest of that
+    // session sits in `_pending` and is never handled. The screen opens, because the route was
+    // restored; the push that pointed at it does nothing at all.
+    //
+    // Listening to the same provider the splash waits on covers both paths, and [onSplashResolved]
+    // is idempotent, so whichever gets there first wins.
+    _ref.listen(splashDestinationProvider, (_, next) {
+      if (next.valueOrNull == null) return;
+      WidgetsBinding.instance.addPostFrameCallback((_) => onSplashResolved());
+    }, fireImmediately: true);
   }
 
   /// Called by the splash once it has routed. Hands over whatever launched the app.
@@ -163,6 +180,11 @@ class PushNavigator {
         P.notificationId: ?payload.notificationId,
       });
     }
+
+    // Parked *and* passed as `extra`. The extra is what makes an in-process tap instant; the
+    // provider is what makes a cold start work at all, since the route is rebuilt without it.
+    final launch = navigation.extra;
+    if (launch is ChatLaunch) _ref.read(pendingChatLaunchProvider.notifier).state = launch;
 
     final go = navigation.go;
     if (go != null) appRouter.go(go);
