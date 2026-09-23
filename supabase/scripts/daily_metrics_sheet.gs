@@ -30,6 +30,16 @@
  * Re-deploying after an edit needs Deploy > Manage deployments > edit > New version. A plain
  * save does not change what the /exec URL serves, which is the usual reason a fix appears to
  * have done nothing.
+ *
+ * ---------------------------------------------------------------- verifying a run
+ *
+ * The sheet is the only reliable record of whether a day was written. pg_net keeps the reply in
+ * net._http_response, and a 200 carrying {"ok":true,...} is the script's own word and can be
+ * trusted. But Apps Script serves that reply through a 302 to script.googleusercontent.com, and
+ * that second hop intermittently answers 404 with a Google HTML page (it opens with
+ * window['ppConfig']). By then the write has already happened: on 2026-09-23 two such 404s were
+ * logged and both rows were correctly in the sheet. So a ppConfig 404 means "look at the sheet",
+ * not "it failed" — and since the write is an upsert, re-posting the day is always safe.
  */
 
 // Which sheet to write. Empty string means the first tab.
