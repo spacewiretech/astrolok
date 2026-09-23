@@ -41,11 +41,16 @@ var HEADER_ROW = 1;
 // Payload field -> the exact header text above the column it belongs in. Matching on the header
 // rather than on a column letter is what lets the layout be rearranged, or a column inserted in
 // the middle, without touching this script. Case and surrounding spaces are ignored.
+//
+// What it does NOT survive is the header itself being renamed: the day "Subscription Renewed"
+// became "Subs Renewed" the script answered `no column headed "Subscription Renewed"` — with HTTP
+// 200 — and wrote nothing. If a header is renamed on the sheet, rename it here, run `setup` to
+// see all six found, and deploy a new version.
 var COLUMNS = {
   report_date: 'Date',
   signups: 'Signups',
   trials: 'Trials',
-  renewals: 'Subscription Renewed',
+  renewals: 'Subs Renewed',
   renewals_499: 'Renewed 499',
   renewals_299: 'Renewed 299'
 };
