@@ -1,6 +1,7 @@
 import { assert, assertAlmostEquals, assertEquals } from "jsr:@std/assert@1";
 
 import {
+  antardashaSequence,
   ayanamsa,
   chartToJson,
   computeChart,
@@ -461,4 +462,73 @@ Deno.test("a chart with the hour carries the dasha, and describes it without a s
     !describeChart(chart).includes("Mahadasha"),
     "the dasha reached a prompt that did not ask for it",
   );
+});
+
+// ---------------------------------------------------------------- the dated sub-periods
+
+Deno.test("dated sub-periods run back to back, each opening with its Mahadasha's own lord", () => {
+  const spans = antardashaSequence(0.0001, BIRTH_JD, BIRTH_JD, BIRTH_JD + 30 * JULIAN_YEAR);
+
+  // Ketu's seven years, then Shukra's twenty, then into Surya's: 9 + 9 + some.
+  assertEquals(spans[0].mahadasha, "Ketu");
+  assertEquals(spans[0].antardasha, "Ketu");
+  assertEquals(spans[9].mahadasha, "Shukra");
+  assertEquals(spans[9].antardasha, "Shukra");
+  assertEquals(spans[18].antardasha, "Surya");
+
+  for (let i = 1; i < spans.length; i++) {
+    assertAlmostEquals(spans[i].startJd, spans[i - 1].endJd, 1e-6, `a gap before span ${i}`);
+  }
+});
+
+Deno.test("the dated sub-periods agree with the running dasha at every point", () => {
+  // Two walks over the same cycle: the one the prompt's phases come from, and the one its dates
+  // come from. If they ever disagreed, a window would be timed by a period that is not running.
+  const moon = 3.5 * (360 / 27);
+  const spans = antardashaSequence(moon, BIRTH_JD, BIRTH_JD, BIRTH_JD + 40 * JULIAN_YEAR);
+
+  for (const span of spans) {
+    const middle = (span.startJd + span.endJd) / 2;
+    const running = vimshottariDasha(moon, BIRTH_JD, middle)!;
+    assertEquals(running.mahadasha, span.mahadasha);
+    assertEquals(running.antardasha, span.antardasha);
+  }
+});
+
+Deno.test("only the sub-periods overlapping the range are returned, the running one first", () => {
+  const from = BIRTH_JD + 0.5 * JULIAN_YEAR;
+  const spans = antardashaSequence(0.0001, BIRTH_JD, from, from + 1);
+
+  // Half a year in is Shukra's sub-period of Ketu, which began before `from` and is still running.
+  assertEquals(spans.length, 1);
+  assertEquals(spans[0].antardasha, "Shukra");
+  assert(spans[0].startJd < from && spans[0].endJd > from);
+
+  assertEquals(antardashaSequence(0.0001, BIRTH_JD, from, from), []);
+});
+
+Deno.test("a chart with the hour carries its periods ahead; without it, none", () => {
+  const asOf = new Date("2026-09-14T00:00:00Z");
+  const chart = computeChart({ dob: CHANGEOVER_DAY, birthTime: "23:55", asOf })!;
+
+  assert(chart.periods && chart.periods.length > 0);
+  // The first is the one running now, and it is the one the dasha names.
+  assertEquals(chart.periods![0].antardasha, chart.dasha!.antardasha);
+  assertEquals(chart.periods![0].mahadasha, chart.dasha!.mahadasha);
+
+  assertEquals(computeChart({ dob: CHANGEOVER_DAY, asOf })!.periods, null);
+  assertEquals(computeChart({ dob: CHANGEOVER_DAY, birthTime: "23:55" })!.periods, null);
+});
+
+Deno.test("a chart described for v4 points at the timing block instead of forbidding years", () => {
+  const chart = computeChart({
+    dob: CHANGEOVER_DAY,
+    birthTime: "23:55",
+    asOf: new Date("2026-09-14T00:00:00Z"),
+  })!;
+
+  const described = describeChart(chart, { dasha: true, years: true });
+  assert(described.includes("Mahadasha of Rahu"));
+  assert(described.includes("THE TIMING below"));
+  assert(!described.includes("Never give the year"));
 });

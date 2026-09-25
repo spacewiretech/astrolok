@@ -119,6 +119,11 @@ and run in lexical order.
   the SQL itself checks `notif_drip_enabled`, so applying it changes nothing until someone turns a
   slot on. Six pushes a day to `payment_type <> 'active'`, two to `active`; see
   [NOTIFICATIONS.md](../../NOTIFICATIONS.md#the-daily-drip).
+- `20260924000001_chat_prompt_v4.sql` — data only: moves `chat_prompt_version` from `v3` to `v4`
+  (a "when" answered with a window computed from the dasha, the birth hour asked for once, plain
+  Hindi, a shorter body) and rewrites the row's description. A project rolled back to v2 or v1
+  stays put. **Safe in either order against the functions deploy** — code from before v4 reads
+  `v4` as unrecognised, which there means v3.
 
 ## Notes
 

@@ -15,15 +15,21 @@ signature check. No network, no database.
 - `chat_feedback_test.ts` (5) — the written answer beside the chat rating: non-text and blank
   input store nothing, whitespace is tidied, and the 500-character cap matches the column without
   splitting an emoji.
-- `chat_test.ts` (66) — `normaliseChatReply`: malformed and partial model replies, `ask_for`
-  fallback, verdict clamping, rashi keys. The prompt versions (v3's dasha and remedies, v2 as the
-  rollback), the user prompt's correction and known-rashi blocks, and `detectLanguageSwitch`.
+- `chat_test.ts` (85) — `normaliseChatReply`: malformed and partial model replies, `ask_for`
+  fallback, verdict clamping, rashi keys. The prompt versions (v4's computed windows, hope, plain
+  words and shorter body; v3's dasha and remedies; v2 and v1 as rollbacks), the user prompt's
+  correction, known-rashi, timing and hour-of-birth blocks, `birthHourAsks` in every language the
+  picker offers, and `detectLanguageSwitch`.
+- `chat_timing_test.ts` (17) — the windows v4 answers "when" with: karakas and house lords from
+  Chandra, the soonest favoured period and never a past one, back-to-back periods merged, a
+  closing period not offered as "now", a favoured Mahadasha bridging a long wait, no marriage
+  timing under 18 or before 21, and the same answer every time.
 - `face_test.ts` (29) — `normaliseFaceReading`: display ordering, unknown and duplicate part
   keys, server focus winning over the model's echo. The reading keeps the no-remedies rule.
-- `jyotish_test.ts` (34) — the astronomy in `jyotish.ts` against **Meeus worked examples**:
+- `jyotish_test.ts` (39) — the astronomy in `jyotish.ts` against **Meeus worked examples**:
   Julian day, Sun/Moon longitude, equinoxes, new and full moon. Then 17 October 1999, a day the
   Moon changed sign: no guessed rashi without the hour, a stated rashi settling it, and the
-  Vimshottari dasha.
+  Vimshottari dasha — its dated sub-periods back to back and agreeing with the running one.
 - `palm_test.ts` (21) — `normalisePalmReading`: ordering, `is_palm` rejection paths, unknown and
   duplicate lines, incompleteness.
 - `birth_time_test.ts` (6) — `readClock`: AM/PM, raat/shaam/subah in both scripts, night past

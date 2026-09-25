@@ -113,6 +113,18 @@ export const TIPS_RULE = `- Every "tip" is a small, kind, practical nudge about 
   purchase, never a remedy, gemstone, ritual, fast or charm.`;
 
 /**
+ * What may be said about *when*, as the readings have always had it: nothing with a calendar in it.
+ *
+ * The second bullet of [BOUNDARIES] that is the caller's to replace. A palm or a face carries no
+ * clock, so for them a year could only ever be invented, and they keep this byte for byte. The
+ * chat from v4 carries a dated dasha, and replaces this with a rule that permits exactly the
+ * windows computed from it and nothing else. The guarantee half of the sentence travels with it
+ * unchanged in both — a window is a leaning, never a promise.
+ */
+export const TIMING_RULE = `- Never guarantee an outcome about money, work, marriage or family. Never give a date, a year,
+  or an age at which something will happen.`;
+
+/**
  * The boundaries.
  *
  * Written as instructions about *how to write*, not as a disclaimer to append. A model told "add
@@ -124,17 +136,16 @@ export const TIPS_RULE = `- Every "tip" is a small, kind, practical nudge about 
  * carries all of them, so the forbidden list is spelled out item by item rather than left to the
  * model's own sense of what counts as a comment on appearance.
  */
-export const BOUNDARIES = boundariesWith(TIPS_RULE);
+export const BOUNDARIES = boundariesWith(TIPS_RULE, TIMING_RULE);
 
-/** The block, with its counsel bullet left open. Every other line in it is fixed. */
-function boundariesWith(tips: string): string {
+/** The block, with its counsel and timing bullets left open. Every other line in it is fixed. */
+function boundariesWith(tips: string, timing: string): string {
   return `
 BOUNDARIES — these are absolute.
 
 - Never mention health, illness, diagnosis, recovery, fertility, pregnancy, or mental health.
   Vitality, resilience and stamina are fine; the body and medicine are not.
-- Never guarantee an outcome about money, work, marriage or family. Never give a date, a year,
-  or an age at which something will happen.
+${timing}
 - Never use deterministic verbs. Not "you will", not "this means you have", not "you are going
   to". Always "tends to", "suggests", "leans toward", "people with features like yours often".
 - Never give advice that belongs to a professional — medical, legal or financial.
@@ -175,20 +186,29 @@ STYLE
  * Roman-letters rule in it is a *rendering* constraint, not a stylistic one — the PDF font
  * subset and the device TTS, neither of which the chat has. A feature that can honestly carry
  * another script says so by passing its own voice; palm and face pass nothing and keep the rule.
- * [BOUNDARIES] is deliberately not overridable, because it is the safety layer — except for its
- * one counsel bullet, [tips], which says what kind of advice may be offered rather than what may
- * never be said. See [TIPS_RULE].
+ * [BOUNDARIES] is deliberately not overridable, because it is the safety layer — except for two
+ * bullets: [tips], which says what kind of advice may be offered, and [timing], which says whether
+ * a window of years may be named. See [TIPS_RULE] and [TIMING_RULE]. Health, the appearance list
+ * and deterministic verbs are fixed for every caller.
  */
 export function panditSystemPrompt(
-  { craft, lengths, grounding = GROUNDING, voice = PANDIT_VOICE, tips = TIPS_RULE }: {
+  {
+    craft,
+    lengths,
+    grounding = GROUNDING,
+    voice = PANDIT_VOICE,
+    tips = TIPS_RULE,
+    timing = TIMING_RULE,
+  }: {
     craft: string;
     lengths: string;
     grounding?: string;
     voice?: string;
     tips?: string;
+    timing?: string;
   },
 ): string {
-  return [voice, "", craft, "", grounding, "", boundariesWith(tips), "", lengths, "", STYLE]
+  return [voice, "", craft, "", grounding, "", boundariesWith(tips, timing), "", lengths, "", STYLE]
     .join("\n");
 }
 

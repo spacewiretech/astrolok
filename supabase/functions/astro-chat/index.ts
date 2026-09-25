@@ -1,13 +1,16 @@
 import {
+  birthHourAsks,
   buildUserPrompt,
   CHAT_SCHEMA,
   chatSystemPrompt,
   normaliseChatReply,
   PROMPT_V3,
+  PROMPT_V4,
   promptVersion,
 } from "../_shared/astro_chat.ts";
 import { readClock } from "../_shared/birth_time.ts";
 import { detectLanguageSwitch, resolveLanguage } from "../_shared/chat_language.ts";
+import { chatTiming } from "../_shared/chat_timing.ts";
 import { configSetting, loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
 import { serviceClient, userIdForBearer } from "../_shared/db.ts";
@@ -255,14 +258,21 @@ Deno.serve(async (req) => {
   const facts = (factRows ?? []) as Array<{ key: string; value: string }>;
 
   const version = promptVersion(configSetting(config, "chat_prompt_version"));
+  const v4 = version === PROMPT_V4;
 
+  const now = new Date();
   const chart = computeChart({
     dob: user.dob ?? "",
     birthTime: user.birth_time ?? null,
     // Only ever used to settle a day the Moon changed sign; see `BirthDetails.statedRashi`.
     statedRashi: factValue(facts, "rashi"),
-    asOf: new Date(),
+    asOf: now,
   });
+
+  // v4 answers "when" with a window computed from the dasha, and asks for the hour once. Both are
+  // worked out here, in code, so neither is left to a model that does not see its own `ask_for`.
+  const timing = v4 ? chatTiming(chart, { dob: user.dob, asOf: now }) : null;
+  const hourAsks = v4 ? birthHourAsks(recentRows, message) : undefined;
 
   const previousChart = snapshotRead.error
     ? null
@@ -319,8 +329,10 @@ Deno.serve(async (req) => {
         name: firstName(user.name),
         age: ageFrom(user.dob),
         chart,
-        // Only the v3 craft is told what a dasha is; a rollback must not be handed one.
-        dasha: version === PROMPT_V3,
+        // Only v3 and v4 are told what a dasha is; a rollback to v2 must not be handed one.
+        dasha: version === PROMPT_V3 || v4,
+        version,
+        ...(v4 ? { timing, birthHourAsks: hourAsks } : {}),
         statedRashi: factValue(facts, "rashi"),
         chartCorrection,
         unsettledBirthTime,
@@ -342,6 +354,10 @@ Deno.serve(async (req) => {
         `chart=${chart ? "yes" : "no"} version=${version} language=${language} ` +
         `switch=${switched ? (switched.explicit ? "asked" : "script") : "-"} ` +
         `corrected=${chartCorrection ? "yes" : "no"} ` +
+        (v4
+          ? `timing=${timing ? "yes" : "no"} hour_asks=${hourAsks!.asked}` +
+            `${hourAsks!.declined ? "/declined" : ""} `
+          : "") +
         `sections=${reply?.sections.length ?? "-"} remembered=${reply?.remember.length ?? "-"}`,
     );
 

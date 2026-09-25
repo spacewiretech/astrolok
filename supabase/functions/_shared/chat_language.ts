@@ -123,11 +123,53 @@ const INSTRUCTIONS: Record<string, string> = {
     "Sanskritised Hindi, which reads as a textbook rather than as someone sitting with them.",
 };
 
+/**
+ * The plain-words versions, for chat v4.
+ *
+ * The one-line "keep it spoken" rule above did not hold. In a review of one-star conversations the
+ * user wrote "shaadi" and Astro wrote "vivah" 55 times out of 72, and a Hindi reply to "love
+ * marriage hogi ya arrange" came back as "बौद्धिक और वैचारिक मेल… औपचारिक सहमति". Hinglish did the
+ * same in Roman letters: virajman, apekshaon, pratishthit. A principle was not enough, so these
+ * name the words — the swap list is the instruction the model actually follows.
+ */
+const PLAIN: Record<string, string> = {
+  hinglish:
+    "Hinglish means Hindi as it is actually typed on a phone: Hindi words in Roman letters, " +
+    "with the English words people genuinely use left in English. " +
+    '"Aapki shaadi ke yog 2027 ke aas-paas sabse mazboot dikh rahe hain." ' +
+    "Never Devanagari, and never formal Hindi in Roman letters — write the way they wrote to " +
+    "you. Use their own words: if they wrote shaadi, write shaadi, never vivah. The common word " +
+    "every time: shaadi not vivah, naukri or job not aajeevika, kaam not karyakshetra, paisa or " +
+    "kamai not dhan, ghar walon ki haan not parivarik sahmati, pakka not sthir, samajhdari not " +
+    "paripakvata, rishta not sambandh. Words like virajman, apeksha, pratishthit, sahbhagita, " +
+    "snehshil or darshata do not belong in a reply.",
+
+  hindi:
+    "Hindi means Hindi written in Devanagari — the everyday Hindi people type to their family on " +
+    "a phone, not the Hindi of the news or of a textbook. " +
+    '"आपकी शादी के योग 2027 के आसपास सबसे मज़बूत दिख रहे हैं।" ' +
+    "Use their own words: if they wrote शादी or shaadi, write शादी, never विवाह. The common " +
+    "word every time, including the English ones Hindi speakers use daily: शादी not विवाह, नौकरी " +
+    "or जॉब not आजीविका, काम not कार्यक्षेत्र, पैसा or कमाई not धन or आर्थिक स्थिति, घरवालों की " +
+    "हाँ not पारिवारिक सहमति, पक्का not स्थिर, समझदारी not परिपक्वता, रिश्ता not संबंध, करियर, " +
+    "टाइम. Words like परिपक्वता, व्यावहारिक, आगमन, वैचारिक, औपचारिक or प्रमाणित do not belong " +
+    "in a reply.",
+};
+
+/** Said after every language's instruction in v4, the listed ones included. */
+const PLAIN_WORDS =
+  "Whatever the language, write in the everyday words of someone chatting on a phone, in short " +
+  "sentences. Never a literary, bookish or formal word where a common one exists. If a word " +
+  "would sound odd in a message to a cousin, use a simpler one.";
+
 /** The line describing how to write [name]. Unknown names get a template, so config can lead. */
-export function languageInstruction(name: string): string {
-  return INSTRUCTIONS[name.trim().toLowerCase()] ??
+export function languageInstruction(name: string, { plain = false } = {}): string {
+  const key = name.trim().toLowerCase();
+  const instruction = (plain ? PLAIN[key] : undefined) ?? INSTRUCTIONS[key] ??
     `Write your whole reply in ${name}, in the script ${name} is normally written in, in the ` +
       `register an elder would actually speak it — not a formal or literary version of it.`;
+
+  return plain ? `${instruction}\n\n${PLAIN_WORDS}` : instruction;
 }
 
 /**
@@ -142,8 +184,14 @@ export function languageInstruction(name: string): string {
  *
  * [conversation] is the chat. A reading has no earlier replies to be misled by, and no message
  * typed on a keyboard, so palm and face keep the block exactly as it shipped.
+ *
+ * [plain] is chat v4's register: the same block with the plain-words instruction in it. See
+ * [PLAIN].
  */
-export function languageBlock(name: string, { conversation = false } = {}): string {
+export function languageBlock(
+  name: string,
+  { conversation = false, plain = false } = {},
+): string {
   const head = `
 THE LANGUAGE YOU WRITE IN.
 
@@ -151,7 +199,7 @@ Write every field of your reply in ${name} — the verdict, the title, the openi
 heading and body, and every option. Not a mixture of two languages, and never a translation
 appended after. The person reads one language; give them that one.
 
-${languageInstruction(name)}
+${languageInstruction(name, { plain })}
 `.trim();
 
   if (!conversation) {

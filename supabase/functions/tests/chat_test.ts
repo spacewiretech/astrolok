@@ -1,12 +1,14 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 
 import {
+  birthHourAsks,
   buildUserPrompt,
   CHAT_SCHEMA,
   chatSystemPrompt,
   normaliseChatReply,
   promptVersion,
 } from "../_shared/astro_chat.ts";
+import { chatTiming } from "../_shared/chat_timing.ts";
 import {
   BUILT_IN_LANGUAGES,
   detectLanguageSwitch,
@@ -423,10 +425,10 @@ Deno.test("v1 is still reachable, and is the text that shipped", () => {
 Deno.test("an unset or misspelled version is treated as current", () => {
   // `configSetting` hands over "" for a blank cell, and a dashboard is a text box. Neither may
   // silently strand every user on the old prompt.
-  for (const version of ["", "  ", "V3", "v4", "latest"]) {
+  for (const version of ["", "  ", "V4", "v5", "latest"]) {
     assert(
-      chatSystemPrompt({ version, language: "English" }).includes("THE DASHA."),
-      `version "${version}" did not fall through to v3`,
+      chatSystemPrompt({ version, language: "English" }).includes("THE TIMING block"),
+      `version "${version}" did not fall through to v4`,
     );
   }
 });
@@ -434,8 +436,9 @@ Deno.test("an unset or misspelled version is treated as current", () => {
 Deno.test("v2 answers the question v1 dodged", () => {
   // The reply that prompted this: "ky me army ma kab bharti hungi", answered with a remark about
   // looking at your energy rather than estimating a time. Each assertion is one half of that
-  // failure — no answer, and no mention of the work.
-  const prompt = chatSystemPrompt({ language: "Hinglish" });
+  // failure — no answer, and no mention of the work. Pinned to v3, which is where this text lives
+  // now that v4 answers with a window.
+  const prompt = chatSystemPrompt({ version: "v3", language: "Hinglish" });
 
   assert(prompt.includes("Never write that the chart cannot tell them when"));
   assert(prompt.includes("answer in conditions, not dates"));
@@ -697,13 +700,15 @@ Deno.test("v3 reads the dasha, and v2 was never told what one is", () => {
   assert(v2.includes("you have the Moon and the Sun, and nothing else"));
 });
 
-Deno.test("v3 permits a narrow remedy, and still forbids the gemstone", () => {
-  const v3 = chatSystemPrompt({ language: "Hinglish" });
+Deno.test("v3 and v4 permit a narrow remedy, and still forbid the gemstone", () => {
+  for (const version of ["v3", "v4"]) {
+    const prompt = chatSystemPrompt({ version, language: "Hinglish" });
 
-  assert(v3.includes("A remedy is allowed within narrow limits"));
-  assert(v3.includes("Never a gemstone"));
-  assert(v3.includes("Never a fast without food or water"));
-  assert(!v3.includes("never a remedy, gemstone, ritual, fast or charm"));
+    assert(prompt.includes("A remedy is allowed within narrow limits"), version);
+    assert(prompt.includes("Never a gemstone"), version);
+    assert(prompt.includes("Never a fast without food or water"), version);
+    assert(!prompt.includes("never a remedy, gemstone, ritual, fast or charm"), version);
+  }
 });
 
 Deno.test("rolling back to v2 withdraws the remedies with it", () => {
@@ -713,12 +718,290 @@ Deno.test("rolling back to v2 withdraws the remedies with it", () => {
   assert(!v2.includes("A remedy is allowed"));
 });
 
-Deno.test("the version cell is read forgivingly, and lands on v3", () => {
-  for (const raw of [undefined, null, "", "  ", "V3", "v4", "latest"]) {
-    assertEquals(promptVersion(raw), "v3", `"${raw}" did not land on v3`);
+Deno.test("the version cell is read forgivingly, and lands on v4", () => {
+  for (const raw of [undefined, null, "", "  ", "V4", "v5", "latest"]) {
+    assertEquals(promptVersion(raw), "v4", `"${raw}" did not land on v4`);
   }
+  assertEquals(promptVersion(" V3 "), "v3");
   assertEquals(promptVersion(" V2 "), "v2");
   assertEquals(promptVersion("v1"), "v1");
+});
+
+// ---------------------------------------------------------------- v4
+
+/**
+ * v4 exists because of a review of one-star conversations on v3. Each test below is one of its
+ * findings, asserted where it lives, so a later edit that quietly undid one fails here first.
+ */
+
+const V4 = chatSystemPrompt({ version: "v4", language: "Hinglish" });
+const V3 = chatSystemPrompt({ version: "v3", language: "Hinglish" });
+
+Deno.test("v4 answers 'when' with a window, and only with one the dasha computed", () => {
+  assert(V4.includes('WHEN THEY ASK "WHEN"'));
+  assert(V4.includes("Put the window in the verdict"));
+  assert(V4.includes("Give the same window every time they ask"));
+  assert(V4.includes("Never a year the block does not give"));
+
+  // The gate that answered "shaadi kab hogi" with "the door opens once you are settled" is gone.
+  assert(!V4.includes("answer in conditions, not dates"));
+  assert(!V4.includes("Name the gate, and the timing has been answered honestly"));
+});
+
+Deno.test("v4 swaps the no-years bullet for a narrow one, and keeps the rest of BOUNDARIES", () => {
+  assert(V4.includes("A window of years may be named only when THE TIMING block"));
+  assert(V4.includes("never as a promise"));
+  assert(V4.includes("Never give a date or an age"));
+  assert(!V4.includes("Never give a date, a year"));
+
+  // Everything else in the safety layer is where it was.
+  for (
+    const kept of [
+      "Never guarantee an outcome",
+      "Never mention health, illness, diagnosis, recovery, fertility, pregnancy",
+      "Never use deterministic verbs",
+      "caste",
+      "Never a gemstone",
+    ]
+  ) {
+    assert(V4.includes(kept), `v4 lost "${kept}"`);
+  }
+});
+
+Deno.test("palm, face and v3 still name no year at all", () => {
+  // They carry no computed timing, so any year they named would be invented.
+  const reading = panditSystemPrompt({ craft: "-", lengths: "-" });
+  assert(reading.includes("Never give a date, a year"));
+  assert(!reading.includes("THE TIMING block"));
+
+  assert(V3.includes("Never give a date, a year"));
+  assert(!V3.includes("THE TIMING block"));
+});
+
+Deno.test("v4 leads with hope, and never frightens", () => {
+  assert(V4.includes("THEY CAME FOR AN ANSWER AND FOR HOPE"));
+  assert(V4.includes("Lead with what is good in the chart"));
+  assert(V4.includes("A difficulty is a season, never a sentence"));
+  assert(V4.includes("Never frighten"));
+  // And hope stays on the right side of a promise.
+  assert(V4.includes("Hope is not a promise"));
+});
+
+Deno.test("v4 says each thing once, and shortens everything but the verdict", () => {
+  assert(V4.includes("SAY EACH THING ONCE"));
+  assert(V4.includes("The verdict is said once"));
+  assert(V4.replace(/\s+/g, " ").includes("do not describe it again"));
+
+  // The verdict budget is v3's, untouched; everything below it is smaller.
+  assert(V4.includes("verdict: at most 25 words"));
+  assert(V4.includes("opening: 20-35 words"));
+  assert(V4.includes("At most two sections"));
+  assert(V3.includes("opening: 45-75 words"), "the rollback's budgets moved");
+});
+
+Deno.test("v4 glosses a term once per conversation, not once per section", () => {
+  assert(V4.includes("the first time it\n  appears in this conversation, and never again"));
+  assert(!V4.includes("ONCE per section"));
+  assert(V3.includes("ONCE per section"), "the rollback's voice moved");
+});
+
+Deno.test("v4 neither argues with a doubter nor tells anyone their rashi is wrong", () => {
+  assert(V4.includes("WHEN THEY DOUBT YOU"));
+  assert(V4.includes("Do not defend jyotish"));
+  assert(V4.includes('never write "X, not Y"'));
+});
+
+Deno.test("v4 asks for a missing detail once, and not for the place at all", () => {
+  assert(V4.includes("at most once in a conversation"));
+  assert(V4.includes("never as a section of its own"));
+  assert(V4.includes("Do not ask where they were born"));
+});
+
+Deno.test("v4 Hindi and Hinglish name the plain word to use", () => {
+  const hindi = chatSystemPrompt({ version: "v4", language: "Hindi" });
+  assert(hindi.includes("शादी not विवाह"));
+  assert(hindi.includes("if they wrote शादी or shaadi, write शादी"));
+
+  assert(V4.includes("shaadi not vivah"));
+  assert(V4.includes("Never Devanagari"), "plain Hinglish lost its script rule");
+
+  // v3 and the readings keep the instruction they shipped with.
+  assert(!chatSystemPrompt({ version: "v3", language: "Hindi" }).includes("शादी not विवाह"));
+  assert(!languageBlock("Hindi").includes("शादी not विवाह"));
+});
+
+Deno.test("every v4 language is told to use everyday words, a dashboard one included", () => {
+  for (const language of [...BUILT_IN_LANGUAGES, "Marathi"]) {
+    const prompt = chatSystemPrompt({ version: "v4", language });
+    assert(prompt.includes("everyday words of someone chatting on a phone"), language);
+  }
+
+  const marathi = chatSystemPrompt({ version: "v4", language: "Marathi" });
+  assert(marathi.includes("Write your whole reply in Marathi"));
+});
+
+// ---------------------------------------------------------------- v4, the user prompt
+
+const V4_AS_OF = new Date("2026-09-24T10:00:00Z");
+
+Deno.test("a v4 prompt with the hour carries THE TIMING, with years in it", () => {
+  const dob = "1999-10-17";
+  const chart = computeChart({ dob, birthTime: "23:55", asOf: V4_AS_OF });
+  const prompt = buildUserPrompt("Meri shaadi kab hogi?", {
+    chart,
+    dasha: true,
+    version: "v4",
+    timing: chatTiming(chart, { dob, asOf: V4_AS_OF }),
+    birthHourAsks: { asked: 0, declined: false },
+    facts: [],
+    opening: false,
+  });
+
+  assert(prompt.includes("THE TIMING (computed from their Vimshottari dasha"));
+  assert(prompt.includes("today is September 2026"));
+  assert(/Marriage[^\n]*\b20\d\d\b/.test(prompt), "no year reached the marriage line");
+  assert(!prompt.includes("Never give the year"), "the chart line still forbids the years");
+  // The hour is known, so nothing about asking for it.
+  assert(!prompt.includes("THE HOUR OF BIRTH"));
+});
+
+Deno.test("a v4 prompt without the hour says the timing is unknown, rather than saying nothing", () => {
+  const prompt = buildUserPrompt("Meri shaadi kab hogi?", {
+    chart: computeChart({ dob: "1996-04-12", asOf: V4_AS_OF }),
+    dasha: true,
+    version: "v4",
+    timing: null,
+    birthHourAsks: { asked: 0, declined: false },
+    facts: [],
+    opening: false,
+  });
+
+  assert(prompt.includes("THE TIMING: UNKNOWN"));
+  assert(prompt.includes("Name no year"));
+  assert(prompt.includes("you have not asked for it in this conversation. You may ask once"));
+});
+
+Deno.test("a v4 prompt never asks for the hour a second time", () => {
+  const base = {
+    chart: computeChart({ dob: "1996-04-12", asOf: V4_AS_OF }),
+    version: "v4",
+    timing: null,
+    facts: [],
+    opening: false,
+  };
+
+  const asked = buildUserPrompt("Naukri kab lagegi?", {
+    ...base,
+    birthHourAsks: { asked: 1, declined: false },
+  });
+  assert(asked.includes("You have already asked for it in this conversation"));
+  assert(asked.includes("Do not ask again"));
+  assert(!asked.includes("You may ask once"));
+
+  const declined = buildUserPrompt("Naukri kab lagegi?", {
+    ...base,
+    birthHourAsks: { asked: 1, declined: true },
+  });
+  assert(declined.includes("they have told you they do not know it"));
+
+  // Nor may a half-given time be chased once they have said they do not know.
+  const unsettled = buildUserPrompt("Hello.", {
+    ...base,
+    unsettledBirthTime: "11:55",
+    birthHourAsks: { asked: 1, declined: true },
+  });
+  assert(!unsettled.includes("WITHOUT SAYING MORNING OR NIGHT"));
+
+  // But the one follow-up that settles a time they did give is still allowed.
+  const followUp = buildUserPrompt("Hello.", {
+    ...base,
+    unsettledBirthTime: "11:55",
+    birthHourAsks: { asked: 1, declined: false },
+  });
+  assert(followUp.includes("WITHOUT SAYING MORNING OR NIGHT"));
+});
+
+Deno.test("v4 does not ask where they were born", () => {
+  const prompt = buildUserPrompt("Hello.", {
+    chart: null,
+    version: "v4",
+    timing: null,
+    facts: [],
+    opening: false,
+  });
+
+  assert(prompt.includes("the place changes nothing in it, so do not ask for it"));
+  assert(!prompt.includes('"ask_for" to "birth_place"'));
+});
+
+Deno.test("a prompt that names no version gets none of v4's blocks", () => {
+  // The rollback must not be handed a timing block its craft was never told how to read.
+  const chart = computeChart({ dob: "1999-10-17", birthTime: "23:55", asOf: V4_AS_OF });
+  const prompt = buildUserPrompt("Meri shaadi kab hogi?", {
+    chart,
+    dasha: true,
+    facts: [],
+    opening: false,
+  });
+
+  assert(!prompt.includes("THE TIMING"));
+  assert(!prompt.includes("THE HOUR OF BIRTH"));
+  assert(prompt.includes("Never give the year"));
+});
+
+// ---------------------------------------------------------------- counting the asks
+
+/** A thread as the handler reads it: newest first. */
+function thread(...turns: Array<["user", string] | ["astro", string]>) {
+  return turns
+    .map(([role, value]) =>
+      role === "user" ? { role, body: { text: value } } : { role, body: { ask_for: value } }
+    )
+    .reverse();
+}
+
+Deno.test("each reply that asked for the hour is counted", () => {
+  const recent = thread(
+    ["user", "Meri shaadi kab hogi?"],
+    ["astro", "birth_time"],
+    ["user", "Aur naukri?"],
+    ["astro", "birth_time"],
+    ["user", "Paisa?"],
+    ["astro", "none"],
+  );
+
+  assertEquals(birthHourAsks(recent, "Ghar kab?"), { asked: 2, declined: false });
+});
+
+Deno.test("an 'I do not know' after an ask is a decline, however it is typed", () => {
+  for (
+    const said of [
+      "I do not know",
+      "i dont know",
+      "time pata nahi",
+      "janam tithi yaad nahi ha",
+      "मुझे नहीं पता",
+      "ಟೈಮ್ ಗೊತ್ತಿಲ್ಲ ಗುರುಗಳೇ",
+      "నాకు పుట్టిన సమయం తెలీదు",
+    ]
+  ) {
+    const recent = thread(["user", "Shaadi kab?"], ["astro", "birth_time"], ["user", said], [
+      "astro",
+      "none",
+    ]);
+    assertEquals(birthHourAsks(recent, "Aur?").declined, true, `"${said}" was not a decline`);
+  }
+});
+
+Deno.test("the message being answered can be the decline", () => {
+  const recent = thread(["user", "Shaadi kab?"], ["astro", "birth_time"]);
+  assertEquals(birthHourAsks(recent, "I do not know"), { asked: 1, declined: true });
+});
+
+Deno.test("not knowing something else is not declining the hour", () => {
+  // Only an answer to an ask counts; "pata nahi kya karu" on its own is a feeling, not a reply.
+  const recent = thread(["user", "Pata nahi kya karu"], ["astro", "none"]);
+  assertEquals(birthHourAsks(recent, "pata nahi"), { asked: 0, declined: false });
 });
 
 // ---------------------------------------------------------------- noticing a switch

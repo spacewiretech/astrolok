@@ -479,7 +479,7 @@ _ref.listen(splashDestinationProvider, (_, next) {
 
 `SplashView` also calls `onSplashResolved()` when it routes, which is the usual path;
 `onSplashResolved` is idempotent, so whichever gets there first wins.
-
+/
 ⚠️ **This is load-bearing, and it was a real bug until 2026-09-22.** `_ready` used to be set *only*
 by `SplashView`. Android can restore a cold start straight onto the route the app was last on — so
 the splash never builds, nothing ever calls `onSplashResolved`, and **every push tapped for the rest

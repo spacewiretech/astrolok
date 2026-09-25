@@ -582,10 +582,11 @@ export type DashaPhase = "early" | "middle" | "late";
 /**
  * The periods running at a moment, and roughly where in each that moment falls.
  *
- * A third of the way rather than a date, on purpose. BOUNDARIES forbids naming the year something
- * will happen, and a period's end date handed to a language model is a year waiting to be
- * repeated to someone. "Late in Shani's Mahadasha" is the tradition's own way of saying the same
- * thing without the calendar.
+ * A third of the way rather than a date, on purpose. A period's end date handed to a language
+ * model is a year waiting to be repeated to someone, so this is what every prompt up to chat v3
+ * sees: "late in Shani's Mahadasha" is the tradition's own way of saying it without the calendar.
+ * Chat v4 names years deliberately, and gets them from [antardashaSequence] instead, where the
+ * dates are explicit rather than something to be read out of a phase.
  */
 export interface Dasha {
   mahadasha: string;
@@ -658,7 +659,8 @@ export interface DashaPeriod {
  * before [birthJd]) and the eight that follow it.
  *
  * Dates, unlike [vimshottariDasha]. This feeds the kundali's timeline table, which is computed
- * fact printed beside the chart — never the model's prompt, which still only ever sees phases.
+ * fact printed beside the chart — never the model's prompt. The chat's timing windows are built
+ * from [antardashaSequence], one level finer.
  */
 export function mahadashaSequence(moonSidereal: number, birthJd: number): DashaPeriod[] {
   if (![moonSidereal, birthJd].every(Number.isFinite)) return [];
@@ -676,6 +678,61 @@ export function mahadashaSequence(moonSidereal: number, birthJd: number): DashaP
     lord = (lord + 1) % 9;
   }
   return periods;
+}
+
+/** One Antardasha as a span of Julian Days, with the Mahadasha it sits inside. */
+export interface AntardashaPeriod {
+  mahadasha: string;
+  antardasha: string;
+  startJd: number;
+  endJd: number;
+}
+
+/**
+ * The Antardashas that overlap [fromJd, toJd], in order — the one running at [fromJd] first.
+ *
+ * Dates, like [mahadashaSequence], and one level finer: the sub-periods are what the tradition
+ * times an event by, since a Mahadasha of up to twenty years is too wide to answer "when" with.
+ * Each opens with its Mahadasha's own lord and runs for its share of it, exactly as
+ * [vimshottariDasha] walks them, so the period this names for [fromJd] is always the one that
+ * function reports as running.
+ */
+export function antardashaSequence(
+  moonSidereal: number,
+  birthJd: number,
+  fromJd: number,
+  toJd: number,
+): AntardashaPeriod[] {
+  if (![fromJd, toJd].every(Number.isFinite) || toJd <= fromJd) return [];
+
+  const spans: AntardashaPeriod[] = [];
+  for (const maha of mahadashaSequence(moonSidereal, birthJd)) {
+    if (maha.endJd <= fromJd) continue;
+    if (maha.startJd >= toJd) break;
+
+    const first = DASHA_LORDS.findIndex(([name]) => name === maha.lord);
+    const length = maha.endJd - maha.startJd;
+    let subStart = maha.startJd;
+
+    for (let k = 0; k < 9; k++) {
+      const sub = (first + k) % 9;
+      // The last one ends where its Mahadasha does, so floating point cannot leave a gap.
+      const subEnd = k === 8
+        ? maha.endJd
+        : subStart + length * DASHA_LORDS[sub][1] / DASHA_CYCLE_YEARS;
+
+      if (subEnd > fromJd && subStart < toJd) {
+        spans.push({
+          mahadasha: maha.lord,
+          antardasha: DASHA_LORDS[sub][0],
+          startJd: subStart,
+          endJd: subEnd,
+        });
+      }
+      subStart = subEnd;
+    }
+  }
+  return spans;
 }
 
 function phaseOf(fraction: number): DashaPhase {
@@ -729,7 +786,19 @@ export interface Chart {
 
   /** The periods running at [BirthDetails.asOf]. Null without a birth hour, or without `asOf`. */
   dasha: Dasha | null;
+
+  /**
+   * The Antardashas from [BirthDetails.asOf] through the next [PERIOD_HORIZON_YEARS], dated. Null
+   * exactly when [dasha] is. What the chat's timing windows are chosen from.
+   */
+  periods: AntardashaPeriod[] | null;
 }
+
+/**
+ * How far ahead [Chart.periods] runs. Long enough that a topic whose grahas are all late in the
+ * cycle still finds a window; short enough that nothing named is a lifetime away.
+ */
+export const PERIOD_HORIZON_YEARS = 12;
 
 export interface BirthDetails {
   /** `YYYY-MM-DD`, as `users.dob` stores it. */
@@ -824,6 +893,9 @@ export function computeChart(details: BirthDetails): Chart | null {
 
   const nakshatraIndex = Math.floor(birth.moon / NAKSHATRA_SPAN) % 27;
 
+  const asOfJd = precise && details.asOf ? julianDayOf(details.asOf) : null;
+  const dasha = asOfJd !== null ? vimshottariDasha(birth.moon, birth.jd, asOfJd) : null;
+
   return {
     moonRashi,
     moonRashiEnglish: moonRashi ? RASHI_ENGLISH[moonRashi] : null,
@@ -837,8 +909,14 @@ export function computeChart(details: BirthDetails): Chart | null {
     sunRashiEnglish: sunRashi ? RASHI_ENGLISH[sunRashi] : null,
     sunRashiCandidates,
     precise,
-    dasha: precise && details.asOf
-      ? vimshottariDasha(birth.moon, birth.jd, julianDayOf(details.asOf))
+    dasha,
+    periods: dasha && asOfJd !== null
+      ? antardashaSequence(
+        birth.moon,
+        birth.jd,
+        asOfJd,
+        asOfJd + PERIOD_HORIZON_YEARS * DASHA_YEAR_DAYS,
+      )
       : null,
   };
 }
@@ -893,7 +971,14 @@ export function parseClock(raw: string | null | undefined): number | null {
  */
 export function describeChart(
   chart: Chart | null,
-  { dasha = false }: { dasha?: boolean } = {},
+  { dasha = false, years = false }: {
+    dasha?: boolean;
+    /**
+     * The prompt names years from a timing block of its own (chat v4), so the dasha line points
+     * there rather than forbidding them. Every earlier prompt keeps the prohibition.
+     */
+    years?: boolean;
+  } = {},
 ): string {
   if (!chart) return "";
 
@@ -946,7 +1031,10 @@ export function describeChart(
       lines.push(
         `Vimshottari dasha running now: the Mahadasha of ${d.mahadasha} (${d.mahaPhase} in its ` +
           `period), and within it the Antardasha of ${d.antardasha} (${d.antarPhase} in its ` +
-          `period). Never give the year a dasha began or will end.`,
+          `period). ` +
+          (years
+            ? "Its dates, and the periods after it, are in THE TIMING below."
+            : "Never give the year a dasha began or will end."),
       );
     } else {
       lines.push(

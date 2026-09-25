@@ -48,19 +48,30 @@ from here. This is where the credentials, the billing state machine and the mode
   vocabulary. Exports: `GeminiError`, `geminiSettings`, `readImage`, `converse`, `text`,
   `STATUSES`, `FOCUS_KEYS`, `FOCUS_LABELS`, `parseFocus`, `focusMismatch`, `ceremony`.
 - `pandit.ts` — the shared persona, grounding rules, safety boundaries and style. Exports:
-  `PANDIT_VOICE`, `GROUNDING`, `BOUNDARIES`, `STYLE`, `panditSystemPrompt`, `SHARED_LENGTHS`.
-  `panditSystemPrompt` takes optional `grounding` and `voice` overrides; `BOUNDARIES` is
-  deliberately not overridable, because it is the safety layer.
+  `PANDIT_VOICE`, `GROUNDING`, `BOUNDARIES`, `STYLE`, `TIPS_RULE`, `TIMING_RULE`,
+  `panditSystemPrompt`, `SHARED_LENGTHS`. `panditSystemPrompt` takes optional `grounding` and
+  `voice` overrides; `BOUNDARIES` is deliberately not overridable, because it is the safety layer
+  — except for its counsel bullet (`tips`) and its timing bullet (`timing`), which the chat
+  replaces with narrower rules of its own. Palm and face keep both byte for byte.
 - `palm_reading.ts` — prompt, JSON schema and pure normaliser. Exports: `LINE_KEYS`,
   `LINE_TITLES`, `REJECT_REASONS`, `PALM_SCHEMA`, `SYSTEM_PROMPT`, `buildUserPrompt`,
   `normalisePalmReading`.
 - `face_reading.ts` — a deliberate mirror of the above. Exports: `FACE_KEYS`, `FACE_TITLES`,
   `TRAIT_KEYS`, `FACE_SCHEMA`, `SYSTEM_PROMPT`, `buildUserPrompt`, `normaliseFaceReading`.
 - `astro_chat.ts` — chat prompt, schema and reply normaliser. Exports: `CHAT_TOPICS`, `ASK_FOR`,
-  `CHAT_VOICE`, `PROMPT_V1`, `PROMPT_V2`, `chatSystemPrompt`, `CHAT_SCHEMA`, `ChatContext`,
-  `buildUserPrompt`, `normaliseChatReply`. The prompt is a **function**, not a constant: it
-  varies by `chat_prompt_version` (the rollback) and by the language of the turn. The craft
-  exists twice on purpose — see the file header before factoring the two together.
+  `CHAT_VOICE`, `CHAT_REMEDIES_RULE`, `CHAT_TIMING_RULE`, `PROMPT_V1`…`PROMPT_V4`,
+  `promptVersion`, `chatSystemPrompt`, `CHAT_SCHEMA`, `ChatContext`, `BirthHourAsks`,
+  `birthHourAsks`, `buildUserPrompt`, `normaliseChatReply`. The prompt is a **function**, not a
+  constant: it varies by `chat_prompt_version` (the rollback) and by the language of the turn.
+  The craft exists once per version on purpose — see the file header before factoring them
+  together. v4 (current) answers "when" with a computed window, asks for the birth hour once
+  (`birthHourAsks` counts it in code), writes plain Hindi/Hinglish and halves everything below
+  the verdict.
+- `chat_timing.ts` — the windows v4 answers "when" with, computed from the dasha rather than
+  chosen by the model: per matter (marriage, career, money, home, studies), the soonest
+  Antardasha of a karaka or of the lord of its house from Chandra, or a favoured Mahadasha when
+  that is more than four years off. No marriage timing under 18, no marriage window before 21, no
+  children topic at all. Exports: `TIMING_TOPICS`, `chatTiming`, `describeTiming`, `monthYear`.
 - `chat_feedback.ts` — the written answer beside the chat rating. Exports:
   `MAX_FEEDBACK_COMMENT_CHARS` (500 code points, matching the column) and
   `normaliseFeedbackComment`, which tidies whitespace, drops blanks and never splits an emoji.
@@ -68,10 +79,14 @@ from here. This is where the credentials, the billing state machine and the mode
   `DEFAULT_LANGUAGE_KEY`, `BUILT_IN_LANGUAGES`, `supportedLanguages`, `isSupported`,
   `resolveLanguage`, `languageInstruction`, `languageBlock`. The list is `app_config`, so adding
   a language is a dashboard edit; an unrecognised name still gets a usable generic instruction,
-  which is what makes trusting the dashboard safe.
+  which is what makes trusting the dashboard safe. `plain: true` (chat v4) swaps in the
+  plain-words instructions, which name the common word to use — shaadi, not vivah.
 - `jyotish.ts` — **the non-LLM astronomy.** Julian day, Sun/Moon longitudes, ayanamsa, sidereal
-  rashi/nakshatra chart. Exports: `julianDay`, `sunLongitude`, `moonLongitude`, `ayanamsa`,
-  `toSidereal`, `RASHIS`, `NAKSHATRAS`, `computeChart`, `describeChart`, `IST_OFFSET_HOURS`.
+  rashi/nakshatra chart, Vimshottari dasha. Exports: `julianDay`, `sunLongitude`,
+  `moonLongitude`, `ayanamsa`, `toSidereal`, `RASHIS`, `NAKSHATRAS`, `computeChart`,
+  `describeChart`, `vimshottariDasha`, `mahadashaSequence`, `antardashaSequence`,
+  `PERIOD_HORIZON_YEARS`, `IST_OFFSET_HOURS`. A chart with the hour carries `periods`: the dated
+  Antardashas for the next twelve years.
 
 **Analytics**
 - `mixpanel.ts` — server-side events the client can never observe (renewals, holds,
