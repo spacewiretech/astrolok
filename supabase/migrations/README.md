@@ -139,6 +139,18 @@ and run in lexical order.
   `chat_plan_3m_enabled` (**false**, private). v5 reaches only clients sending `chat_ui: 2` (the
   WhatsApp-style screen); every older build keeps v4, so this changes nothing until that build
   ships. Safe in either order against the functions deploy.
+- `20260928000001_trials_from_payments.sql` — redefines `trials` in `daily_marketing_metrics` as
+  distinct accounts with a successful ₹3 `AUTH` charge in `subscription_payments` that day — the
+  charge the server's `Mandate Authorised` event and Cashfree's `SUBSCRIPTION_PAYMENT_SUCCESS`
+  webhook both come from. The fee is read from `cashfree_trial_amount`. Function body only.
+- `20260928000002_trial_outcomes.sql` — six trial-outcome counts on `daily_marketing_metrics`
+  (cancelled in the trial, debit failed then cancelled, debit failed with the mandate still active,
+  paused, debit pending, other), counted as a **cohort by trial day**; and `post_daily_metrics`
+  becomes `(p_from, p_to)`, sending many days as one `{"rows": [...]}` body. With no arguments —
+  the cron — it re-posts the **last 30 days**, since a cohort keeps moving for a month. **Deploy
+  the new [../scripts/daily_metrics_sheet.gs](../scripts/daily_metrics_sheet.gs) first** (run
+  `installHeaders`, then a new deployment version): the old script refuses a `rows` body and the
+  09:00 post would write nothing. Reload with `select post_daily_metrics('2026-09-03', <yesterday>)`.
 
 ## Notes
 
@@ -169,6 +181,8 @@ and run in lexical order.
   the truth. The day still comes from `trial_started_at` (written once, so it cannot double-count)
   but now requires `total_paid_amount > 2`. Cross-checked against `AUTH`/`SUCCESS` rows in
   `subscription_payments`, which agree within ~1%. **No schema change** — function body only.
+  **Superseded by `20260928000001`**, which counts those `AUTH`/`SUCCESS` rows directly: the
+  `total_paid_amount` proxy also admitted accounts whose first charge was full price (35 on 09-26).
 - `20260922000003_renewals_by_plan.sql` — adds `renewals_499` / `renewals_299` to
   `daily_marketing_metrics`, split on `subscriptions.plan_variant` (`plan_499` / `plan_299`) rather
   than on `plan_id` — ₹499 already spans three plan ids including the legacy account's

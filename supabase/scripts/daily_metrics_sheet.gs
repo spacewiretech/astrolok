@@ -4,18 +4,23 @@
  * Lives in the marketing spreadsheet, not in this repo's deploy: paste it into
  * Extensions > Apps Script on the sheet itself. It is kept here so the two halves of the
  * integration can be read together — the other half is
- * supabase/migrations/20260922000001_daily_metrics.sql, which POSTs
+ * supabase/migrations/20260922000001_daily_metrics.sql (and the migrations after it), which POSTs
  *
- *   { "report_date": "2026-09-21", "signups": 42, "trials": 9, "renewals": 5, "secret": "..." }
+ *   { "secret": "...", "rows": [ { "report_date": "2026-09-21", "signups": 42, "trials": 9, ... }, ... ] }
  *
- * once a morning at 09:00 IST.
+ * once a morning at 09:00 IST: the last 30 days, not just yesterday, because the trial-outcome
+ * columns describe each day's trials and keep changing for weeks after the day itself. Every row
+ * is an upsert on its date. The older single-day body — the row's fields at the top level, beside
+ * the secret — is still accepted.
  *
  * ---------------------------------------------------------------- setup
  *
  * 1. Extensions > Apps Script, paste this in, save.
  * 2. Project Settings > Script Properties: add METRICS_SECRET with a long random value.
  * 3. Run `installHeaders` from the editor. It adds whichever headers are missing and leaves the
- *    rest alone, so it lays out a blank sheet and also appends a column added to COLUMNS later.
+ *    rest alone, so it lays out a blank sheet and also adds a column added to COLUMNS later — as a
+ *    new column inserted straight after the one before it in COLUMNS, so nothing to its right is
+ *    overwritten and formulas there shift along with their columns.
  *    It is run from the editor, not through the web app, so it needs no deployment.
  * 4. Run `setup` once from the editor. It grants the permissions and prints whether the
  *    headers below were all found — do this before deploying, so a typo in COLUMNS surfaces
@@ -55,14 +60,24 @@ var HEADER_ROW = 1;
 // What it does NOT survive is the header itself being renamed: the day "Subscription Renewed"
 // became "Subs Renewed" the script answered `no column headed "Subscription Renewed"` — with HTTP
 // 200 — and wrote nothing. If a header is renamed on the sheet, rename it here, run `setup` to
-// see all six found, and deploy a new version.
+// see every one found, and deploy a new version.
+//
+// Order matters only to `installHeaders`, which puts a missing column straight after the one
+// listed before it. The six trial outcomes describe the trials that *started* on the row's date,
+// wherever they have got to since; see supabase/migrations/20260928000002_trial_outcomes.sql.
 var COLUMNS = {
   report_date: 'Date',
   signups: 'Signups',
   trials: 'Trials',
   renewals: 'Subs Renewed',
   renewals_499: 'Renewed 499',
-  renewals_299: 'Renewed 299'
+  renewals_299: 'Renewed 299',
+  cancelled_in_trial: 'Cancelled during the trial, before the debit',
+  failed_then_cancelled: 'Debit failed (insufficient funds), then cancelled',
+  failed_mandate_active: 'Debit failed (insufficient funds), mandate still active',
+  paused_in_upi: 'Paused the mandate in their UPI app',
+  debit_pending: 'Debit stuck in pending',
+  outcome_other: 'Other'
 };
 
 function doPost(e) {
@@ -83,7 +98,12 @@ function doPost(e) {
     return reply_({ ok: false, error: 'bad secret' });
   }
 
-  if (!body.report_date) return reply_({ ok: false, error: 'no report_date' });
+  // Many days as `rows`, or one day's fields at the top level as the first version sent them.
+  var rows = Array.isArray(body.rows) ? body.rows : [body];
+  if (!rows.length) return reply_({ ok: false, error: 'no rows' });
+  for (var i = 0; i < rows.length; i++) {
+    if (!rows[i] || !rows[i].report_date) return reply_({ ok: false, error: 'no report_date in row ' + i });
+  }
 
   // Two deliveries for the same date must not become two rows, so the whole read-then-write is
   // taken under a lock. Without it a retry arriving while the first is still searching finds no
@@ -92,7 +112,7 @@ function doPost(e) {
   if (!lock.tryLock(30000)) return reply_({ ok: false, error: 'busy' });
 
   try {
-    return reply_(writeRow_(body));
+    return reply_(writeRows_(rows));
   } catch (err) {
     return reply_({ ok: false, error: String(err) });
   } finally {
@@ -110,8 +130,8 @@ function reply_(payload) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-/** Upserts one day. Returns what happened, which is echoed back to pg_net. */
-function writeRow_(body) {
+/** Upserts each day in `rows`. Returns what happened, which is echoed back to pg_net. */
+function writeRows_(rows) {
   var sheet = targetSheet_();
   var tz = sheet.getParent().getSpreadsheetTimeZone();
   var index = headerIndex_(sheet);
@@ -131,31 +151,63 @@ function writeRow_(body) {
   var lastRow = sheet.getLastRow();
 
   // The date column as it stands, normalised to yyyy-MM-dd so a cell holding a real Date and a
-  // payload holding a string compare equal.
+  // payload holding a string compare equal. Read once for the whole batch and kept up to date as
+  // rows are appended, so two rows for the same date in one body still land on one row.
   var existing = [];
+  var free = [];
   if (lastRow >= firstDataRow) {
-    existing = sheet.getRange(firstDataRow, dateCol, lastRow - firstDataRow + 1, 1)
-      .getValues()
-      .map(function (row) { return dateKey_(row[0], tz); });
+    var block = sheet.getRange(firstDataRow, 1, lastRow - firstDataRow + 1, sheet.getLastColumn()).getValues();
+    existing = block.map(function (row) { return dateKey_(row[dateCol - 1], tz); });
+
+    // Rows laid out ahead of the data — formulas dragged down past the last day, with every
+    // column this script writes still empty. A new day goes into the first of these rather than
+    // below them, so it picks up the formulas instead of arriving without any and being sorted up
+    // past them.
+    free = block
+      .map(function (row, i) {
+        var empty = Object.keys(COLUMNS).every(function (field) {
+          return String(row[index[field] - 1]).trim() === '';
+        });
+        return empty ? i : -1;
+      })
+      .filter(function (i) { return i >= 0; });
   }
 
-  var target = existing.indexOf(String(body.report_date).trim());
-  var row = target >= 0 ? firstDataRow + target : Math.max(lastRow + 1, firstDataRow);
-
-  // Written cell by cell rather than as one range, because the columns need not be adjacent and
-  // anything between them belongs to whoever designed the sheet. Driven off COLUMNS rather than
-  // named one by one, so adding a count is a line in COLUMNS and a header in the sheet.
-  writeDate_(sheet.getRange(row, dateCol), body.report_date);
-  Object.keys(COLUMNS).forEach(function (field) {
-    if (field !== 'report_date') {
-      sheet.getRange(row, index[field]).setValue(numberOr_(body[field]));
+  var updated = 0;
+  var appended = 0;
+  rows.forEach(function (body) {
+    var date = String(body.report_date).trim();
+    var target = existing.indexOf(date);
+    var row;
+    if (target >= 0) {
+      row = firstDataRow + target;
+      updated++;
+    } else {
+      var slot = free.length ? free.shift() : Math.max(existing.length, lastRow - firstDataRow + 1);
+      row = firstDataRow + slot;
+      existing[slot] = date;
+      lastRow = Math.max(lastRow, row);
+      appended++;
     }
+
+    // Written cell by cell rather than as one range, because the columns need not be adjacent and
+    // anything between them belongs to whoever designed the sheet. Driven off COLUMNS rather than
+    // named one by one, so adding a count is a line in COLUMNS and a header in the sheet.
+    //
+    // A field the body does not carry is left alone rather than blanked, so a sender that predates
+    // a column cannot wipe what a newer one wrote there.
+    writeDate_(sheet.getRange(row, dateCol), date);
+    Object.keys(COLUMNS).forEach(function (field) {
+      if (field !== 'report_date' && Object.prototype.hasOwnProperty.call(body, field)) {
+        sheet.getRange(row, index[field]).setValue(numberOr_(body[field]));
+      }
+    });
   });
 
   // Keep the sheet in date order. The ordinary daily write appends a day later than every row
   // already there, so it lands in order on its own — but a backfill over a range, or a re-post of
   // a day whose row was deleted, appends wherever it happens to arrive. That is how 2026-09-22
-  // came to sit above 2026-09-21. Sorting after each write means the order cannot drift again,
+  // came to sit above 2026-09-21. Sorting once after the batch means the order cannot drift again,
   // whatever sequence the days turn up in.
   var dataRows = sheet.getLastRow() - firstDataRow + 1;
   if (dataRows > 1) {
@@ -163,9 +215,13 @@ function writeRow_(body) {
          .sort({ column: dateCol, ascending: true });
   }
 
-  // `row` is where the write landed, before that sort may have moved it. It is here to say what
-  // happened, not to be read back as a cell reference.
-  return { ok: true, row: row, action: target >= 0 ? 'updated' : 'appended', date: body.report_date };
+  return {
+    ok: true,
+    updated: updated,
+    appended: appended,
+    from: String(rows[0].report_date),
+    to: String(rows[rows.length - 1].report_date)
+  };
 }
 
 function targetSheet_() {
@@ -228,11 +284,16 @@ function numberOr_(v) {
 /**
  * Adds whichever headers COLUMNS expects and the sheet does not already have. Run it from the
  * editor on a blank sheet to lay the row out from nothing, and again after adding a count to
- * COLUMNS to append the new one.
+ * COLUMNS to add the new one.
  *
- * It only ever writes into empty cells. A header already present is left exactly where it is,
- * whatever order the sheet keeps its columns in, and a cell with anything in it is never
- * overwritten — so this is safe to re-run, and safe on a sheet somebody else has laid out.
+ * A missing column goes straight after the column of the field listed before it in COLUMNS — the
+ * outcome columns land after "Renewed 299", not after whatever someone has put at the far right.
+ * It is a whole new column, inserted, so nothing already on the sheet is overwritten: columns to
+ * its right move over one, and formulas that point at them move with them. With nothing before it
+ * to follow (a blank sheet) it takes the first empty header cell instead.
+ *
+ * A header already present is left exactly where it is, whatever order the sheet keeps its columns
+ * in, so this is safe to re-run, and safe on a sheet somebody else has laid out.
  *
  * An earlier version refused outright if the header row had anything on it at all. That made it
  * useless for the case it is most needed in — adding a column to a sheet already carrying data —
@@ -240,23 +301,34 @@ function numberOr_(v) {
  */
 function installHeaders() {
   var sheet = targetSheet_();
-  var index = headerIndex_(sheet);
-  var width = sheet.getLastColumn();
-  var header = width
-    ? sheet.getRange(HEADER_ROW, 1, 1, width).getDisplayValues()[0]
-    : [];
-
   var added = [];
+  var previousCol = null;
+
   Object.keys(COLUMNS).forEach(function (field) {
-    if (index[field] !== undefined) return;
+    // Re-read each time: an insertion moves every column to its right.
+    var index = headerIndex_(sheet);
+    if (index[field] !== undefined) {
+      previousCol = index[field];
+      return;
+    }
 
-    // The first cell on the header row holding nothing, appending past the end if there is none.
-    var at = 0;
-    while (at < header.length && normalise_(header[at]) !== '') at++;
+    var col;
+    if (previousCol !== null) {
+      sheet.insertColumnAfter(previousCol);
+      col = previousCol + 1;
+    } else {
+      var width = sheet.getLastColumn();
+      var header = width ? sheet.getRange(HEADER_ROW, 1, 1, width).getDisplayValues()[0] : [];
+      col = 1;
+      while (col <= header.length && normalise_(header[col - 1]) !== '') col++;
+    }
 
-    var cell = sheet.getRange(HEADER_ROW, at + 1);
+    var cell = sheet.getRange(HEADER_ROW, col);
     cell.setValue(COLUMNS[field]);
-    header[at] = COLUMNS[field];
+    // The outcome headers are sentences; wrapped, they stay readable without a column 50
+    // characters wide.
+    cell.setWrap(true);
+    previousCol = col;
     added.push('"' + COLUMNS[field] + '" -> column ' + cell.getA1Notation().replace(/\d+/, ''));
   });
 

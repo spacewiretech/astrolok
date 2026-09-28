@@ -2,10 +2,11 @@
 #
 # Yesterday's marketing numbers, in the order the sheet's columns are in, ready to paste.
 #
-# The same counts the 09:00 cron job would push — signups, trials started, subscriptions renewed,
-# and that last one split into its ₹499 and ₹299 halves — but printed here instead of posted, for
-# as long as the Apps Script half is not up. The two halves need not sum to the total: a payment
-# with no subscription row behind it counts in the total and in neither half.
+# The same counts the 09:00 cron job would push — signups, trials started, subscriptions renewed
+# (split into its ₹499 and ₹299 halves), and where each day's trials have got to — but printed
+# here instead of posted. The two halves need not sum to the total: a payment with no subscription
+# row behind it counts in the total and in neither half. The six outcome columns describe the
+# trials that started that day and keep changing for weeks, so an older day's are not final.
 #
 # It calls `public.daily_marketing_metrics` rather than re-deriving the counts, so this and the
 # automatic push can never drift apart: change the definition once, in the migration, and both
@@ -26,7 +27,7 @@
 #   --csv     comma-separated, with a header row
 #
 # Paste into the sheet by selecting the cell under `Date` and hitting paste: a tab-separated row
-# spreads across the six columns on its own, and a range pastes as that many rows.
+# spreads across the twelve columns on its own, and a range pastes as that many rows.
 #
 # "Yesterday" is a calendar day in Asia/Kolkata and is worked out by the database, not by this
 # machine — so a laptop on the wrong timezone, or on a plane, still gets the day the numbers
@@ -99,7 +100,13 @@ select to_char(m.report_date, 'YYYY-MM-DD') as report_date,
        m.trials,
        m.renewals,
        m.renewals_499,
-       m.renewals_299
+       m.renewals_299,
+       m.cancelled_in_trial,
+       m.failed_then_cancelled,
+       m.failed_mandate_active,
+       m.paused_in_upi,
+       m.debit_pending,
+       m.outcome_other
   from generate_series($FIRST, $LAST, interval '1 day') d
   cross join lateral public.daily_marketing_metrics(d::date) m
  order by m.report_date;
@@ -131,7 +138,14 @@ rows="$(jq -c 'if type == "array" then . else .rows end' < "$out" 2>/dev/null)" 
 n="$(printf '%s' "$rows" | jq 'length')"
 [ "$n" -gt 0 ] || die "no rows came back for $WHEN, which should not happen — the query returns one row per day asked for."
 
-tsv() { printf '%s' "$rows" | jq -r '.[] | [.report_date,.signups,.trials,.renewals,.renewals_499,.renewals_299] | @tsv'; }
+FIELDS='.report_date,.signups,.trials,.renewals,.renewals_499,.renewals_299,.cancelled_in_trial,.failed_then_cancelled,.failed_mandate_active,.paused_in_upi,.debit_pending,.outcome_other'
+HEADERS=(Date Signups Trials "Subs Renewed" "Renewed 499" "Renewed 299"
+  "Cancelled during the trial, before the debit"
+  "Debit failed (insufficient funds), then cancelled"
+  "Debit failed (insufficient funds), mandate still active"
+  "Paused the mandate in their UPI app" "Debit stuck in pending" Other)
+
+tsv() { printf '%s' "$rows" | jq -r ".[] | [$FIELDS] | @tsv"; }
 
 if [ "$COPY" = yes ]; then
   command -v pbcopy >/dev/null 2>&1 || die "--copy needs pbcopy, which is macOS only. Use --tsv and pipe it yourself."
@@ -143,13 +157,11 @@ fi
 case "$FORMAT" in
   tsv) tsv ;;
   csv)
-    printf '%s' "$rows" | jq -r '
-      (["Date","Signups","Trials","Subscription Renewed","Renewed 499","Renewed 299"] | @csv),
-      (.[] | [.report_date,.signups,.trials,.renewals,.renewals_499,.renewals_299] | @csv)'
+    printf '%s' "$rows" | jq -r --args "(\$ARGS.positional | @csv), (.[] | [$FIELDS] | @csv)" "${HEADERS[@]}"
     ;;
   table)
     {
-      printf 'Date\tSignups\tTrials\tSubscription Renewed\tRenewed 499\tRenewed 299\n'
+      (IFS=$'\t'; printf '%s\n' "${HEADERS[*]}")
       tsv
     } | column -t -s $'\t'
     printf '\n\033[2mPaste-ready:\033[0m\n'
