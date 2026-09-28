@@ -5,12 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/models/app_user.dart';
 import '../../data/models/astro_message.dart';
+import '../../data/models/birth_place.dart';
 import '../../data/analytics/analytics.dart';
 import '../../data/analytics/analytics_events.dart';
 import '../../data/entitlement.dart';
 import '../../data/language.dart';
 import '../../data/providers.dart';
 import '../../data/repositories/chat_repository.dart';
+import '../../data/repositories/place_repository.dart';
 import 'chat_copy.dart';
 import 'chat_state.dart';
 import 'chat_threads_viewmodel.dart';
@@ -46,6 +48,10 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
   /// reply that lands meanwhile parks the showing of its first message in [_afterFloor].
   Timer? _typingFloor;
   VoidCallback? _afterFloor;
+
+  /// Place-search session tokens already counted, so `Place Search Started` is one per search
+  /// rather than one per keystroke — the kundali form's rule.
+  final _placeSessions = <String>{};
 
   @override
   ChatState build(String threadId) {
@@ -158,7 +164,15 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
   /// every messaging app has taught people to expect. On failure it is taken back out and handed
   /// to the composer through [ChatState.pending] rather than left sitting in the transcript
   /// looking answered.
-  Future<void> send(String message, {String entry = 'composer'}) async {
+  ///
+  /// [birthPlace] rides along when the message is a row picked in the place search. A turn that
+  /// fails hands back only the words, and sending them again is a typed town, which the server
+  /// looks up from the text — still answered, just by the likeliest match.
+  Future<void> send(
+    String message, {
+    String entry = 'composer',
+    ChatBirthPlace? birthPlace,
+  }) async {
     final trimmed = message.trim();
     if (trimmed.isEmpty || state.sending || state.exhausted) return;
 
@@ -208,6 +222,7 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
             trimmed,
             threadId: _target,
             entry: entry,
+            birthPlace: birthPlace,
           );
       if (_disposed) return;
 
@@ -295,6 +310,24 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
     } catch (error) {
       debugPrint('[chat] send failed: $error');
       _rollBack(mine, ChatCopy.sendFailed, stale: gone());
+    }
+  }
+
+  /// The place search behind "📍 Jagah chunein" — `place-search`'s autocomplete, as the kundali
+  /// form uses it, and no Details call after: the chat sends the picked row's id and the server
+  /// resolves it (see `ChatBirthPlace`).
+  Future<List<PlaceSuggestion>> searchPlaces(String query, String sessionToken) async {
+    if (_placeSessions.add(sessionToken)) {
+      analytics.track(Ev.placeSearchStarted, {P.source: 'chat'});
+    }
+    try {
+      return await ref.read(placeRepositoryProvider).autocomplete(query, sessionToken: sessionToken);
+    } on PlaceException catch (error) {
+      analytics.track(Ev.placeSearchFailed, {
+        P.code: error.runtimeType.toString(),
+        P.source: 'chat',
+      });
+      rethrow;
     }
   }
 

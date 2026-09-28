@@ -1,7 +1,13 @@
+import 'package:astrolok/data/fake/fake_astro_chat.dart';
 import 'package:astrolok/data/local/reading_store.dart';
 import 'package:astrolok/data/models/app_user.dart';
 import 'package:astrolok/data/models/astro_message.dart';
 import 'package:astrolok/data/models/birth_chart.dart';
+import 'package:astrolok/data/repositories/chat_repository.dart';
+import 'package:astrolok/data/supabase/edge_functions.dart';
+import 'package:astrolok/data/supabase/session_store.dart';
+import 'package:astrolok/data/supabase/supabase_chat_repository.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -112,6 +118,151 @@ void main() {
       final spoken = AstroMessage.fromServer(v5())!.spoken;
       expect(spoken, contains('Shaadi ka sabse accha samay 2027 hai.'));
       expect(spoken, isNot(contains('🙏')));
+    });
+
+    test('the answer as it is written now: four messages in order, and no offer', () {
+      const bubbles = [
+        'April se June 2027 mein rishta pakka hone ke sabse acche yog hain.',
+        'Us samay Guru aapke saatve ghar se guzrega.',
+        'Agle 4 hafte har Shukravar Maa Katyayani ka mantra 11 baar padhiye. Kal wapas aaiye.',
+        'Aapka janm kis shehar mein hua tha?',
+      ];
+      final message = AstroMessage.fromServer(v5({
+        'bubbles': bubbles,
+        'offer': 'none',
+        'ask_for': 'birth_place',
+        'options': ['Jeevansathi kaisa hoga?'],
+      }))!;
+
+      expect(message.displayBubbles, bubbles);
+      expect(message.offersRemedy, isFalse);
+      expect(message.askFor, AskFor.birthPlace);
+      expect(message.toJson().containsKey('offer'), isFalse);
+    });
+
+    test('a place ask round-trips through the cache', () async {
+      SharedPreferences.setMockInitialValues({});
+      final message = AstroMessage.fromServer(v5({'ask_for': 'birth_place', 'offer': 'none'}))!;
+      expect(message.toJson()['ask_for'], 'birth_place');
+      expect(AstroMessage.fromServer(message.toJson())!.askFor, AskFor.birthPlace);
+
+      const store = ChatThreadStore();
+      await store.save(ChatThread(id: 'thread-1', messages: [message]));
+      expect((await store.load('thread-1'))!.messages.single.askFor, AskFor.birthPlace);
+    });
+
+    test('an ask this build does not know raises nothing, and is cached as nothing', () {
+      // A newer server may ask for something no control here can answer. Cached as what this
+      // build understood, so no later read of the cache raises a control for it either.
+      final message = AstroMessage.fromServer(v5({'ask_for': 'partner_dob'}))!;
+      expect(message.askFor, AskFor.none);
+      expect(message.toJson()['ask_for'], 'none');
+      for (final raw in [null, 42, '', 'place']) {
+        expect(AskFor.parse(raw), AskFor.none, reason: '$raw');
+      }
+    });
+  });
+
+  group('what a turn sends', () {
+    late _FakeEdgeFunctions functions;
+    late SupabaseChatRepository repository;
+
+    setUp(() {
+      FlutterSecureStorage.setMockInitialValues({'astrolok.session_token': 'a-valid-token'});
+      functions = _FakeEdgeFunctions();
+      repository = SupabaseChatRepository(functions, SessionStore());
+    });
+
+    test('a picked place goes beside the words as birth_place: its id, its description and its '
+        'search session', () async {
+      await repository.send(
+        'Jaipur, Rajasthan, India',
+        threadId: 'thread-1',
+        entry: 'birth_place',
+        birthPlace: const ChatBirthPlace(
+          placeId: 'ChIJgeJXTN9KbDkRCS7yDDrG4Qw',
+          description: 'Jaipur, Rajasthan, India',
+          sessionToken: '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d',
+        ),
+      );
+
+      final body = functions.lastBody!;
+      expect(functions.lastName, 'astro-chat');
+      expect(body['message'], 'Jaipur, Rajasthan, India');
+      expect(body['entry'], 'birth_place');
+      expect(body['chat_ui'], 2);
+      // The token closes the search's billed session with the server's Details call.
+      expect(body['birth_place'], {
+        'place_id': 'ChIJgeJXTN9KbDkRCS7yDDrG4Qw',
+        'description': 'Jaipur, Rajasthan, India',
+        'session_token': '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d',
+      });
+    });
+
+    test('a pick without a session sends none, rather than an empty one', () async {
+      await repository.send(
+        'Jaipur, Rajasthan, India',
+        threadId: 'thread-1',
+        entry: 'birth_place',
+        birthPlace: const ChatBirthPlace(placeId: 'p', description: 'Jaipur, Rajasthan, India'),
+      );
+
+      expect(functions.lastBody!['birth_place'], {'place_id': 'p', 'description': 'Jaipur, Rajasthan, India'});
+    });
+
+    test('anything else sends no birth_place at all — a typed town is only words', () async {
+      await repository.send('Jaipur, Rajasthan', threadId: 'thread-1');
+
+      expect(functions.lastBody!.containsKey('birth_place'), isFalse);
+      expect(functions.lastBody!['entry'], 'composer');
+    });
+  });
+
+  group('the scripted sage, for a checkout with no server', () {
+    Future<AstroMessage> say(FakeChatRepository fake, String message, String? thread,
+            {ChatBirthPlace? place}) async =>
+        (await fake.send(message, threadId: thread, birthPlace: place)).message;
+
+    test('walks the arc: the hour asked, then the place, then the upay on the third answer',
+        () async {
+      final fake = FakeChatRepository(latency: Duration.zero);
+
+      final first = await fake.send('Meri shaadi kab hogi?');
+      final thread = first.threadId;
+      expect(first.message.askFor, AskFor.birthTime);
+      expect(first.message.offersRemedy, isFalse);
+      expect(first.message.bubbles.first, contains('rashi'));
+
+      final second = await say(fake, 'I was born at 4:00 PM.', thread);
+      expect(second.askFor, AskFor.birthPlace);
+      expect(second.bubbles.first, contains('4:00 PM'));
+      expect(second.bubbles.join(), isNot(contains('rashi')));
+
+      final third = await say(
+        fake,
+        'Jaipur, Rajasthan, India',
+        thread,
+        place: const ChatBirthPlace(placeId: 'p', description: 'Jaipur, Rajasthan, India'),
+      );
+      expect(third.bubbles, hasLength(4));
+      expect(third.bubbles.first, startsWith('Jaipur'));
+      expect(third.bubbles[2], contains('Shukravar'));
+      expect(third.options, hasLength(3));
+      expect(third.offersRemedy, isFalse);
+
+      // Given once: the next answer carries no upay.
+      final fourth = await say(fake, third.options.last, thread);
+      expect(fourth.bubbles.join(), isNot(contains('Shukravar')));
+      expect(fourth.askFor, AskFor.none);
+    });
+
+    test('a thread that ended on an old offer still gets its upay for a yes', () async {
+      final fake = FakeChatRepository(latency: Duration.zero);
+      final history = await fake.history('fake-thread-seed-c');
+      expect(history.messages.last.offersRemedy, isTrue);
+
+      final remedy = await say(fake, history.messages.last.options.first, 'fake-thread-seed-c');
+      expect(remedy.kind, ReplyKind.remedy);
     });
   });
 
@@ -571,4 +722,30 @@ void main() {
       expect(user.copyWith(clearBirthTime: true).birthTime, isNull);
     });
   });
+}
+
+class _FakeEdgeFunctions implements EdgeFunctions {
+  String? lastName;
+  Map<String, dynamic>? lastBody;
+
+  @override
+  Future<Map<String, dynamic>> call(
+    String name, {
+    Map<String, dynamic>? body,
+    String? bearerToken,
+    bool delete = false,
+    Duration? timeout,
+  }) async {
+    lastName = name;
+    lastBody = body;
+    return {
+      'message': {
+        'id': 'a-1',
+        'role': 'astro',
+        'created_at': '2026-09-28T10:00:00Z',
+        'bubbles': ['Theek hai.'],
+      },
+      'thread': {'id': 'thread-1', 'title': 'Shaadi'},
+    };
+  }
 }

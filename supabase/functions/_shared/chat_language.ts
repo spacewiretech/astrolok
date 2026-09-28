@@ -218,9 +218,9 @@ export function languageBlock(
     ? `
 THE LANGUAGE YOU WRITE IN.
 
-Write every field of your reply in ${name} — every message bubble, the hidden remedy messages, and
-every option. Not a mixture of two languages, and never a translation appended after. The person
-reads one language; give them that one.
+Write every field of your reply in ${name} — every message bubble: the answer, the upay and the
+question — and every option. Not a mixture of two languages, and never a translation appended
+after. The person reads one language; give them that one.
 
 ${languageInstruction(name, { plain: true })}
 

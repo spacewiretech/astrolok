@@ -57,7 +57,8 @@ The shared design-system widgets: everything more than one screen draws. Present
 - `zodiac_wheel.dart` — the turning ring on the kundali wait; still under reduced motion. Declares: `ZodiacWheel`.
 - `stage_checklist.dart` — Declares: `StageChecklist`, `StageItem`, `StageStatus`.
 - `place_search_field.dart` — debounced Google place search with the billing session token and
-  "Powered by Google". Declares: `PlaceSearchField`, `newPlaceSessionToken()`.
+  "Powered by Google". Used by the kundali form and the chat's birth-place sheet (which alone
+  passes `autofocus`). Declares: `PlaceSearchField`, `newPlaceSessionToken()`.
 - `push_banner.dart` — a push that arrives while the app is open. Declares: `PushBannerHost`.
 - `push_primer_sheet.dart` — the explanation before the system notification prompt. Declares:
   `showPushPrimer()`.

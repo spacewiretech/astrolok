@@ -7,9 +7,11 @@
  * `replace_live_kundali` + `generateKundaliNow` path the Kundali screen's form uses in
  * `kundali/index.ts`, and under the same regeneration limit.
  *
- * Only when there is something to re-cast from: a live kundali whose place has coordinates. A
- * place typed in the chat is never geocoded, so without one there is nothing honest to compute a
- * lagna for, and the Kundali screen will cast it from its own form when the user next asks.
+ * Only when there is something to re-cast from: a live kundali whose place has coordinates.
+ * Without one there is nothing honest to compute a lagna for, and the Kundali screen will cast it
+ * from its own form when the user next asks. A place told in the chat is located and saved to the
+ * account (`chat_birth_place.ts`), but it never comes here: the kundali keeps the place it was
+ * cast from, and a new place is its own form's to give.
  *
  * Never throws. A re-cast that fails is logged; the chat turn it rode in on is not.
  */

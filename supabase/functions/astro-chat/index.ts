@@ -14,15 +14,31 @@ import {
   buildUserPromptV5,
   CHAT_SCHEMA_V5,
   chatSystemPromptV5,
+  goodInChart,
   hasWholeChart,
   isRemedyAccept,
   kundaliLineFor,
   kundaliLineTurn,
   normaliseChatReplyV5,
+  notTheMoment,
   onTopicOptions,
   v5Body,
 } from "../_shared/astro_chat_v5.ts";
 import {
+  answersIn,
+  answersSinceUpay,
+  remediesGiven,
+  topicsAnswered,
+  turnTopic,
+  upayDue,
+  upayFor,
+  upaysGiven,
+} from "../_shared/chat_upay.ts";
+import { asksFor, sawalFor, sawalsAsked } from "../_shared/chat_sawal.ts";
+import { answersPlaceAsk, captureBirthPlace } from "../_shared/chat_birth_place.ts";
+import { kundliStrengths, miniKundli, weakGrahas } from "../_shared/mini_kundli.ts";
+import {
+  changedDetails,
   correctionIntent,
   correctsOwnDate,
   parseDob,
@@ -31,7 +47,7 @@ import {
 import { readClock } from "../_shared/birth_time.ts";
 import { detectLanguageSwitch, isMarathi, resolveLanguage } from "../_shared/chat_language.ts";
 import { chatTiming } from "../_shared/chat_timing.ts";
-import { transitTiming } from "../_shared/chat_transits.ts";
+import { transitTiming, transitTimingEither } from "../_shared/chat_transits.ts";
 import { inBackground } from "../_shared/background.ts";
 import { AppConfig, configSetting, loadConfig } from "../_shared/config.ts";
 import {
@@ -93,6 +109,12 @@ const DEFAULT_RATE_AFTER = 5;
  */
 const HISTORY_READ_CAP = 40;
 const FACTS_READ_CAP = 100;
+
+/**
+ * The most Astro replies [readArc] reads of one thread. Each is a handful of short fields; a
+ * thread this long is ten days of the daily allowance, spent in one conversation.
+ */
+const ARC_READ_CAP = 400;
 
 function positiveInt(raw: string | undefined, fallback: number): number {
   const value = Number(raw ?? "");
@@ -227,6 +249,7 @@ Deno.serve(async (req) => {
     { data: palmRow },
     { data: faceRow },
     feedbackRead,
+    arcRead,
   ] = await Promise.all([
     loadConfig(db),
     // With `chart`, the snapshot the sage was last given (`correctionBetween`). It was a read of
@@ -255,6 +278,8 @@ Deno.serve(async (req) => {
     // Allowed to fail. It reads a table added after the chat shipped, and a project whose
     // migration has not run yet must keep answering — it simply gets no rating card.
     db.from("chat_feedback").select("user_id").eq("user_id", userId).maybeSingle(),
+    // v5's own, for the screen that can be answered with it: what the whole thread gave and asked.
+    requestedThread && Number(body.chat_ui) >= 2 ? readArc(db, userId, requestedThread) : null,
   ]);
 
   if (userError || !userRow) {
@@ -309,6 +334,10 @@ Deno.serve(async (req) => {
     cap: HISTORY_READ_CAP,
   }) ?? await readHistory(db, userId, found.id, historyTurns);
 
+  // v5: the thread's upays, hooks and questions, however far back — see [readArc]. The recent
+  // turns stand in when it could not be read.
+  const arcRows: HistoryRow[] = !found ? [] : arcRead ?? recentRows;
+
   // Newest-first from the query, oldest-first for the model.
   const history: Turn[] = recentRows
     .slice()
@@ -359,9 +388,14 @@ Deno.serve(async (req) => {
 
   // v5: a birth detail Astro asked for is read from this reply and saved before the model is
   // called, so the answer it writes already comes from the corrected chart. What was on file
-  // before it is kept, to tell whether this is the turn that completed the chart.
+  // before it is kept, to tell whether this is the turn that completed the chart. The place —
+  // typed, or the row picked in the app's search (`birth_place`) — only when no date or hour was
+  // read: the two are asked for on different turns (`chat_birth_place.ts`).
   const before = { dob: user.dob ?? "", birthTime: user.birth_time ?? null };
-  const capture = v5 ? await captureBirthDetails(db, config, user, recentRows, message, now) : null;
+  const capture: Capture | null = v5
+    ? await captureBirthDetails(db, config, user, recentRows, message, now) ??
+      await captureBirthPlace(db, config, user, recentRows, message, body.birth_place, now)
+    : null;
 
   const chart = computeChart({
     dob: user.dob ?? "",
@@ -379,7 +413,18 @@ Deno.serve(async (req) => {
   // v5: the season from Guru's transit over the Moon's rashi — the settled one, or a stated one
   // only where it settled a day the Moon changed sign (`computeChart`). The answer without the
   // hour; with it, the answer only for a matter whose dasha window is years off (`nearerSeasons`).
-  const transits = v5 && chart ? transitTiming(chart.moonRashi, now) : null;
+  // A day the Moon changed sign, with no hour to settle it, is read from both signs.
+  const transits = v5 && chart
+    ? chart.moonRashi
+      ? transitTiming(chart.moonRashi, now)
+      : transitTimingEither(chart.moonRashiCandidates, now)
+    : null;
+
+  // A place is known once it is located: coordinates, or the Google place id they came from, which
+  // `purge_expired` keeps after it clears the coordinates. Words alone are not a place — THE
+  // KUNDALI LINE says "sthan" only for one that is known, and the sawal still asks for it.
+  const placeKnown = (user.birth_lat != null && user.birth_lng != null) ||
+    Boolean(user.birth_place_id);
 
   // v5: once Astro has their whole chart it says so, and how the time ahead looks — in the first
   // reply, or in the turn whose captured detail completed the chart, once in a thread. Owed but
@@ -389,14 +434,23 @@ Deno.serve(async (req) => {
   const lineQuestion = capture?.captured?.question ?? message;
   const lineTurn = v5 &&
     kundaliLineTurn(recentRows, { chart, completed, care: flagged, question: lineQuestion });
+  // The first reply of a thread without the hour was told to name a settled rashi; the line that
+  // comes once the hour does names only the nakshatra, unless the rashi was unsettled then or the
+  // corrected details moved it.
+  const earlierRashi = firstReply ? null : completed ? computeChart(before)?.moonRashi : chart?.moonRashi;
   const kundaliLine = lineTurn
     ? kundaliLineFor(chart, {
       timing,
       transits,
-      birthPlace: user.birth_place,
+      birthPlace: placeKnown ? user.birth_place : null,
       question: lineQuestion,
+      rashiNamed: Boolean(earlierRashi) && earlierRashi === chart?.moonRashi,
     })
     : null;
+
+  // v5: the whole kundali, once the date, hour, place and its zone are all on file — cast every
+  // turn, well under a millisecond, and never written anywhere (`mini_kundli.ts`).
+  const kundli = v5 ? miniKundli(user, now) : null;
 
   const previousChart = (snapshot ?? null) as Record<string, unknown> | null;
   const chartCorrection = correctionBetween(previousChart, chart);
@@ -406,6 +460,61 @@ Deno.serve(async (req) => {
   const statedTime = factValue(facts, "birth_time", "born_at");
   const unsettledBirthTime = capture?.unsettled ??
     (!user.birth_time && statedTime && readClock(statedTime).ambiguous ? statedTime : null);
+
+  // v5: the turn's arc, decided in code before the model writes a word of it — what this turn is
+  // about, whether its answer carries today's upay (`chat_upay.ts`), and the one question it ends
+  // on (`chat_sawal.ts`). A reply to the place ask is a place, and its words say nothing about the
+  // subject ([answersPlaceAsk]): that turn is about what the thread was about.
+  const placeTurn = answersPlaceAsk(recentRows, body.birth_place, message);
+  const topic = v5 ? turnTopic(placeTurn ? "" : message, recentRows) : null;
+  const placeAsks = asksFor(arcRows, "birth_place");
+  const hookGiven = hookGivenRecently(arcRows, now);
+  const sorrow = v5 && notTheMoment(message);
+  const due = v5
+    ? upayDue({
+      topic: topic!,
+      message,
+      answers: answersIn(arcRows),
+      sinceUpay: answersSinceUpay(arcRows),
+      care: flagged,
+      sorrow,
+      given: remediesGiven(arcRows),
+      answered: topicsAnswered(arcRows),
+      context: {
+        dob: chart !== null,
+        hour: Boolean(chart?.precise) || hourAsks!.asked > 0 || hourAsks!.declined,
+        place: placeKnown || placeAsks > 0,
+      },
+    })
+    : null;
+  const upay = due
+    ? upayFor(topic!, {
+      now,
+      chart,
+      weakGrahas: weakGrahas(kundli, topic!, chart),
+      given: upaysGiven(arcRows),
+      said: saidInThread.join("\n"),
+    })
+    : null;
+  const sawal = v5
+    ? sawalFor({
+      topic: topic!,
+      message,
+      care: flagged,
+      sorrow,
+      dob: chart !== null,
+      hour: Boolean(chart?.precise),
+      place: placeKnown,
+      hourAsks: hourAsks!,
+      dobAsks: asksFor(arcRows, "dob"),
+      placeAsks,
+      asked: sawalsAsked(arcRows),
+      captured: capture?.captured?.field ?? null,
+      captureFailed: capture?.failed ?? null,
+      placeDenied: capture?.denied ?? false,
+      unsettled: Boolean(unsettledBirthTime),
+    })
+    : null;
 
   // ------------------------------------------------------------ the language
   //
@@ -478,9 +587,9 @@ Deno.serve(async (req) => {
         palmSummary: summarise("palm", palmRow, "strongest_trait_title"),
         faceSummary: summarise("face", faceRow, "core_trait_title"),
         firstReply,
-        remediesGiven: remediesGiven(recentRows),
+        remediesGiven: remediesGiven(arcRows),
         upaysOffered: upaysOffered(recentRows),
-        hookGiven: hookGivenRecently(recentRows, now),
+        hookGiven,
         planEnabled: configSetting(config, "chat_plan_3m_enabled").toLowerCase() === "true",
         care: flagged,
         appOpener: isAppOpener(entry, message) ? language : null,
@@ -488,6 +597,12 @@ Deno.serve(async (req) => {
         captured: capture?.captured ?? null,
         captureFailed: capture?.failed ?? null,
         kundaliLine,
+        upay,
+        upayAfterAnswer: due?.afterAnswer ?? false,
+        sawal,
+        placeSaid: placeKnown ? null : user.birth_place,
+        strengths: goodInChart({ chart, timing, transits, more: kundliStrengths(kundli, chart) }),
+        kundli,
       }),
     } : {
       // Both from `app_config`, so the answer's shape and its language are dashboard edits rather
@@ -538,6 +653,10 @@ Deno.serve(async (req) => {
         // The last reply's chips as well: one they passed over is not offered to them again.
         asked: [...saidInThread, ...strings(lastAstro?.options)],
         care: flagged,
+        upay: upay !== null,
+        askFor: sawal!.askFor,
+        opening: kundaliLine !== null,
+        hook: upay !== null && !hookGiven,
       })
       : null;
     const reply = v5 ? null : normaliseChatReply(result.parsed);
@@ -562,9 +681,14 @@ Deno.serve(async (req) => {
               `hour_asks=${hourAsks!.asked}${hourAsks!.declined ? "/declined" : ""} `
             : "") +
           (v5
-            ? `kind=${replyV5?.kind ?? "-"} topic=${replyV5?.topic ?? "-"} ` +
-              `bubbles=${replyV5?.bubbles.length ?? "-"} offer=${replyV5?.offer ?? "-"} ` +
+            ? `kind=${replyV5?.kind ?? "-"} topic=${replyV5?.topic ?? "-"}/${topic} ` +
+              `bubbles=${replyV5?.bubbles.length ?? "-"} ` +
+              `words=${replyV5 ? replyV5.bubbles.join(" ").split(/\s+/).length : "-"} ` +
+              `answers=${answersIn(arcRows)} ` +
+              `upay=${replyV5?.upay ? `${upay!.id}/${due!.because}` : upay ? "dropped" : "-"} ` +
+              `sawal=${sawal!.about}${sawal!.because ? `/${sawal!.because}` : ""} ` +
               `captured=${capture?.captured?.field ?? capture?.failed ?? "-"} ` +
+              `kundli=${kundli ? "yes" : "-"} ` +
               `kundali=${
                 kundaliLine ? (kundaliLine.hopeful ? "good" : "yog") : lineTurn ? "owed" : "-"
               } `
@@ -585,11 +709,14 @@ Deno.serve(async (req) => {
     const stored: Record<string, unknown> = replyV5
       ? v5Body(replyV5, {
         version,
-        // The hook rides in the upay turn, once a session — see `hookGivenRecently`.
-        remedyHook: replyV5.offer === "remedy" && !hookGivenRecently(recentRows, now),
+        // The hook rides in the upay's message, once a session — see `hookGivenRecently`.
+        hook: replyV5.upay !== "" && !hookGiven,
         kundaliLine: kundaliLine !== null,
         kundaliLineOwed: lineTurn && kundaliLine === null,
         saved: capture?.saved ?? null,
+        // Recorded only when the reply carried it: one dropped is still due next turn.
+        upay: replyV5.upay ? upay : null,
+        sawalId: replyV5.sawal && sawal!.about === "situation" ? sawal!.question?.id ?? null : null,
       })
       : {
         verdict: reply!.verdict,
@@ -818,6 +945,41 @@ async function readHistory(
     .order("created_at", { ascending: false })
     .limit(limit);
   return (data ?? []) as HistoryRow[];
+}
+
+/**
+ * What a v5 thread has to remember about itself however long it runs, newest first: each Astro
+ * reply's kind and topic, the upay it gave, its hook, the question it asked and the detail it asked
+ * for — as rows whose bodies hold only those, for `chat_upay.ts` and `chat_sawal.ts` to count. The
+ * prompt's history is only the newest `chat_history_turns`; in a thread past them the first upay
+ * was out of sight, and the same remedy and the same invitation back came round again in the same
+ * sitting — a fifth of the threads long enough to get an upay at all, in the week to 28 Sep.
+ *
+ * Read beside the history, in the same round, so it costs no hop; by `user_id` as well, like it.
+ * Null when the read fails, and the recent turns are counted instead.
+ */
+async function readArc(
+  db: ReturnType<typeof serviceClient>,
+  userId: string,
+  threadId: string,
+): Promise<HistoryRow[] | null> {
+  const { data, error } = await db
+    .from("chat_messages")
+    .select(
+      "created_at, kind:body->>kind, topic:body->>topic, upay_topic:body->>upay_topic, " +
+        "upay_id:body->>upay_id, hook:body->hook, sawal_id:body->>sawal_id, ask_for:body->>ask_for",
+    )
+    .eq("thread_id", threadId)
+    .eq("user_id", userId)
+    .eq("role", "astro")
+    .order("created_at", { ascending: false })
+    .limit(ARC_READ_CAP);
+  if (error || !data) return null;
+  return (data as unknown as Array<Record<string, unknown>>).map(({ created_at, ...markers }) => ({
+    role: "astro",
+    created_at: String(created_at ?? ""),
+    body: Object.fromEntries(Object.entries(markers).filter(([, value]) => value != null)),
+  }));
 }
 
 /** The memory, most recently learned first. A failed read is no memory, as it always was. */
@@ -1336,7 +1498,10 @@ function strings(value: unknown): string[] {
     .filter((entry): entry is string => typeof entry === "string" && entry !== "");
 }
 
-/** Topics whose upay was offered in the turns read and has not been served since. */
+/**
+ * Topics whose upay a reply stored before 28 Sep offered, and which has not been given since. No
+ * reply offers one now; a yes to one of these is still served from it (`serveRemedy`).
+ */
 function upaysOffered(rows: HistoryRow[]): string[] {
   const given = new Set(remediesGiven(rows));
   const topics = rows
@@ -1348,15 +1513,6 @@ function upaysOffered(rows: HistoryRow[]): string[] {
 
 /** How long an invitation to come back holds: once in this long is "once a session". */
 const HOOK_SESSION_MS = 12 * 60 * 60 * 1000;
-
-/** Topics whose upay was already served in the turns read — so the same upay is not offered twice. */
-function remediesGiven(rows: HistoryRow[]): string[] {
-  const topics = rows
-    .filter((row) => row.role === "astro" && row.body?.kind === "remedy")
-    .map((row) => String(row.body?.topic ?? ""))
-    .filter((topic) => topic !== "");
-  return [...new Set(topics)];
-}
 
 /** Whether a turn in the last [HOOK_SESSION_MS] already invited them back. */
 function hookGivenRecently(rows: HistoryRow[], now: Date): boolean {
@@ -1382,7 +1538,8 @@ function isAppOpener(entry: string, message: string): boolean {
  *
  * No model call — the upay was written with the answer, in the same voice and against the same
  * chart — and the user turn is not metered: accepting what Astro offered should not use up a
- * question.
+ * question. Only a reply stored before 28 Sep has an offer to serve: since then the upay rides in
+ * the answer itself (`chat_upay.ts`), and this stays so that a yes to one of those still works.
  */
 async function serveRemedy(
   db: ReturnType<typeof serviceClient>,
@@ -1463,11 +1620,14 @@ function spokenTime(time: string): string {
   return `${h % 12 === 0 ? 12 : h % 12}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
 
+/** A birth detail this turn read — the date or hour here, the place in `chat_birth_place.ts`. */
 interface Capture {
-  captured?: { field: "dob" | "birth_time"; said: string; question: string | null };
-  failed?: "dob" | "birth_time";
+  captured?: { field: "dob" | "birth_time" | "birth_place"; said: string; question: string | null };
+  failed?: "dob" | "birth_time" | "birth_place";
   /** A time said without morning or night — asked about, never guessed. */
   unsettled?: string;
+  /** The place the last reply said back was called wrong, and no other given. */
+  denied?: boolean;
   saved?: { field: string; from: string | null; to: string };
   /** The refreshed account, for the app to install the way Profile does. */
   user?: Record<string, unknown>;
@@ -1484,6 +1644,8 @@ interface Capture {
  *   gives theirs (`correctsOwnDate`). Nothing else is ever read without Astro having asked.
  * - A reply with no date or time in it is not an answer to the question at all, and goes on as an
  *   ordinary turn.
+ * - The date or hour already on file, said again, confirms it: said back, never written, and no
+ *   kundali re-cast ([changedDetails]).
  *
  * Mutates [user] so everything after this in the turn — the chart, the timing, the promotion of
  * remembered facts — works from what was just saved.
@@ -1518,9 +1680,10 @@ async function captureBirthDetails(
 
   if (asked === "dob") {
     const found = parseDob(message, now);
-    // Nobody asked, so there is no "could not be read" to tell them — the model asks for it.
+    // Nobody asked, so there is no "could not be read" to tell them — the sawal asks for it.
     if (!found) return hasDigits && !unasked ? { failed: "dob" } : null;
-    if (!intent) return null;
+    // A date replaces a saved one only on a correction; one that was never on file, it fills.
+    if (!intent && user.dob) return null;
     update.dob = found.dob;
     saved = { field: "dob", from: user.dob, to: found.dob };
     captured = { field: "dob", said: spokenDate(found.dob), question };
@@ -1540,23 +1703,32 @@ async function captureBirthDetails(
     return null; // A time on file, and no word that it is wrong: left as it is.
   }
 
-  if (Object.keys(update).length === 0 || !captured) return null;
+  // A date or an hour the same as the one on file confirms it: said back, but nothing is written
+  // and nothing re-cast. "Mera birth time sahi hai, subah 7 baje", answering the sawal's ask for
+  // the correct hour, re-cast an unchanged kundali and spent one of its two regenerations.
+  if (!captured) return null;
+  const changed = changedDetails(update, user);
+  if (Object.keys(changed).length === 0) return { captured };
 
-  const { data: row, error } = await db.from("users").update(update).eq("user_id", user.user_id)
+  const { data: row, error } = await db.from("users").update(changed).eq("user_id", user.user_id)
     .select(USER_COLUMNS).single();
   if (error || !row) {
     console.error("astro-chat: could not save the birth details", error);
     return null;
   }
-  Object.assign(user, update);
-  console.log(`astro-chat: ${Object.keys(update).join("+")} saved from the chat`);
+  const filledBlank = changed.dob !== undefined && !saved?.from;
+  Object.assign(user, changed);
+  console.log(`astro-chat: ${Object.keys(changed).join("+")} saved from the chat`);
 
-  // The kundali follows, when there is one to re-cast — in the background, never awaited.
-  await inBackground(
-    "kundali recast",
-    recastKundali(db, config, user, { dob: user.dob!, birthTime: user.birth_time ?? null }, now)
-      .then((outcome) => console.log(`astro-chat: kundali after the correction: ${outcome}`)),
-  );
+  // The kundali follows, when there is one to re-cast — in the background, never awaited. Not
+  // after a date that filled a blank: that corrects nothing, and no kundali is cast without one.
+  if (!filledBlank) {
+    await inBackground(
+      "kundali recast",
+      recastKundali(db, config, user, { dob: user.dob!, birthTime: user.birth_time ?? null }, now)
+        .then((outcome) => console.log(`astro-chat: kundali after the correction: ${outcome}`)),
+    );
+  }
 
   const refreshed = asUserRow(row);
   return {

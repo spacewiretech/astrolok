@@ -18,7 +18,8 @@ line.
   (`read({image, focus})` — note it takes a `PalmFocus`), `FaceException`, `NoFaceDetected…`,
   `FaceLimitReached…`, `FaceUnavailable…`, `FaceNotEntitled…`, `FaceSignedOut…`.
 - `chat_repository.dart` — Declares: `ChatRepository` (`send`, `threads`, `history`,
-  `renameThread`, `deleteThread`, `forget`), `ChatReply`, `ChatThreadList`, `ChatSnapshot`,
+  `renameThread`, `deleteThread`, `forget`), `ChatReply`, `ChatBirthPlace` (a place picked in the
+  chat, sent as `birth_place: {place_id, description, session_token}`), `ChatThreadList`, `ChatSnapshot`,
   `ChatException` + `ChatLimitReached…`, `ChatUnavailable…`, `ChatNotEntitled…`,
   `ChatSignedOut…`, `ChatThreadGone…`.
 - `subscription_repository.dart` — Declares: `SubscriptionRepository` (`offer`, `start`,

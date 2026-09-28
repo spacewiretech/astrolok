@@ -270,3 +270,78 @@ export function correctsOwnDate(raw: string | null | undefined): boolean {
   return correctionIntent(text) && DOB_WORDS.test(text) && FIRST_PERSON.test(text) &&
     !SOMEONE_ELSE.test(text);
 }
+
+/**
+ * "Wrong", said outright. Narrower than [correctionIntent], which also hears "sahi time" and
+ * "actual" — and "shaadi ka sahi time kab hai?" asks for a window, not to be asked for an hour.
+ */
+const WRONG = /(?<![a-z])(?:galat|galt|wrong|incorrect|mistake)(?![a-z])|गलत|ग़लत|चुकीच|ತಪ್ಪು|தவறு|తప్పు|തെറ്റ്/iu;
+
+/**
+ * A date by a bare word for one, said as theirs — "meri date galat hai", "ನನ್ನ ದಿನಾಂಕ ತಪ್ಪು": the
+ * word straight after "my". Anywhere else a bare word is not their birth detail: "maine galat
+ * date par shaadi fix ki?" is about a wedding date, and was asked for a date of birth.
+ */
+const OWN_DATE =
+  /(?<![a-z])(?:meri|mera|my|apni)\s+(?:date|tarikh|tareekh|tarik|tithi)(?![a-z])|(?:मेरी|मेरा|अपनी)\s+(?:तारीख|तिथि)|ನನ್ನ\s+ದಿನಾಂಕ|(?:என்|என்னுடைய)\s+தேதி|నా\s+తేదీ|എന്റെ\s+തീയതി/iu;
+
+/** The hour of birth, named as such: "birth time", "janm ka samay", "जन्म समय", "ಜನ್ಮ ಸಮಯ". */
+const BIRTH_TIME_WORDS =
+  /(?<![a-z])(?:birth\s*time|time\s*of\s*birth|jan(?:a|u)?m\s*(?:ka\s*)?(?:samay|time)|paida\s*hone\s*ka\s*(?:samay|time))(?![a-z])|जन्म\s*(?:का\s*)?समय|ಜನ್ಮ\s*ಸಮಯ|ಹುಟ್ಟಿದ\s*ಸಮಯ|பிறந்த\s*நேர|పుట్టిన\s*సమయ|ജനന\s*സമയ/iu;
+
+/** A time by a bare word, said as theirs: "mera time galat hai" — see [OWN_DATE]. */
+const OWN_TIME =
+  /(?<![a-z])(?:mera|meri|my|apna)\s+(?:time|samay|samai)(?![a-z])|(?:मेरा|मेरी|अपना)\s+समय|ನನ್ನ\s+ಸಮಯ|(?:என்|என்னுடைய)\s+நேர|నా\s+సమయ|എന്റെ\s+സമയ/iu;
+
+/** The place of birth, named as such: "birth place", "janm sthan", "जन्म स्थान", "ಹುಟ್ಟಿದ ಸ್ಥಳ". */
+const BIRTH_PLACE_WORDS =
+  /(?<![a-z])(?:birth\s*-?place|place\s*of\s*birth|jan(?:a|u)?m\s*(?:ka\s*|ki\s*)?(?:sthan|sthal|jagah|jaga|shehar|shahar|place|city)|janmsthan|paida\s*hone\s*ki\s*(?:jagah|jaga))(?![a-z])|जन्म\s*(?:का\s*|की\s*)?(?:स्थान|स्थल|जगह|शहर)|जन्मस्थान|ಹುಟ್ಟಿದ\s*(?:ಸ್ಥಳ|ಊರು)|ಜನ್ಮ\s*ಸ್ಥಳ|பிறந்த\s*(?:இடம்|ஊர்)|పుట్టిన\s*(?:ప్రదేశ|ఊరు)|జన్మ\s*స్థల|ജനന\s*സ്ഥല|ജനിച്ച\s*സ്ഥല/iu;
+
+/**
+ * A place by a bare word, said as theirs: "meri jagah galat save hai" — see [OWN_DATE]. "Maine
+ * galat jagah naukri le li" is about a job.
+ */
+const OWN_PLACE =
+  /(?<![a-z])(?:meri|mera|my|apni|apna)\s+(?:jagah|sthan|shehar|shahar|city|place)(?![a-z])|(?:मेरी|मेरा|अपनी|अपना)\s+(?:स्थान|जगह|शहर)|ನನ್ನ\s+ಸ್ಥಳ|(?:என்|என்னுடைய)\s+இடம்|నా\s+ప్రదేశ|എന്റെ\s+സ്ഥല/iu;
+
+/**
+ * "Mera time galat chal raha hai": a bad phase, not a wrong hour — and no bare word beside it is
+ * a birth detail. Asked for their correct hour, one such message re-cast an unchanged kundali.
+ */
+const A_PHASE = /(?<![a-z])(?:chal|ho)\s*(?:raha|rahi|rahe|rha|rhi|rhe)(?![a-z])|(?:चल|हो)\s*(?:रहा|रही|रहे)/iu;
+
+/**
+ * Which of their own birth details [raw] says is wrong, with or without the right one beside it —
+ * "meri DOB galat hai", "mera birth time galat save hai", "mera janm sthan galat hai" — so the
+ * sawal asks for it (`chat_sawal.ts`). The date before the hour, and the hour before the place,
+ * when more than one is named. A bare "date", "time" or "jagah" counts only right after "my"
+ * ([OWN_DATE]) and never in a "chal raha hai" ([A_PHASE]), and nothing counts beside a word for
+ * someone else: "galat date bata rahe ho" is about a window, "papa ki DOB galat hai" about papa.
+ */
+export function saysOwnDetailWrong(
+  raw: string | null | undefined,
+): "dob" | "birth_time" | "birth_place" | null {
+  const text = raw ?? "";
+  if (!WRONG.test(text) || SOMEONE_ELSE.test(text)) return null;
+  const bare = !A_PHASE.test(text);
+  if (DOB_WORDS.test(text) || (bare && OWN_DATE.test(text))) return "dob";
+  if (BIRTH_TIME_WORDS.test(text) || (bare && OWN_TIME.test(text))) return "birth_time";
+  if (BIRTH_PLACE_WORDS.test(text) || (bare && OWN_PLACE.test(text))) return "birth_place";
+  return null;
+}
+
+/**
+ * The part of [update] that differs from what is on file — a date or an hour said again, the same,
+ * is a confirmation and nothing to write. Times compare to the minute: "07:00" is "07:00:00".
+ */
+export function changedDetails(
+  update: { dob?: string; birth_time?: string },
+  onFile: { dob?: string | null; birth_time?: string | null },
+): { dob?: string; birth_time?: string } {
+  const changed: { dob?: string; birth_time?: string } = {};
+  if (update.dob !== undefined && update.dob !== onFile.dob) changed.dob = update.dob;
+  if (update.birth_time !== undefined && update.birth_time.slice(0, 5) !== (onFile.birth_time ?? "").slice(0, 5)) {
+    changed.birth_time = update.birth_time;
+  }
+  return changed;
+}

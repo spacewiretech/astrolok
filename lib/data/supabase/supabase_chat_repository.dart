@@ -24,8 +24,9 @@ class SupabaseChatRepository implements ChatRepository {
   static const _sendTimeout = Duration(seconds: 35);
 
   /// Which chat screen this build is. 2 is the WhatsApp-style one, and only a client that says so
-  /// is answered with the v5 prompt: short messages, the upay offered then served, birth details
-  /// asked in the chat. Older builds send nothing and keep v4.
+  /// is answered with the v5 prompt: short messages — the answer, its reason, an upay once Astro
+  /// knows enough, a question back — and birth details asked in the chat. Older builds send
+  /// nothing and keep v4.
   static const _chatUi = 2;
 
   @override
@@ -33,6 +34,7 @@ class SupabaseChatRepository implements ChatRepository {
     String message, {
     String? threadId,
     String entry = 'composer',
+    ChatBirthPlace? birthPlace,
   }) async {
     final data = await _call('astro-chat', {
       'message': message,
@@ -41,6 +43,9 @@ class SupabaseChatRepository implements ChatRepository {
       if (threadId != null && threadId.isNotEmpty) 'thread_id': threadId,
       'entry': entry,
       'chat_ui': _chatUi,
+      // Only when a row was picked. A typed town arrives as the message alone, and the server
+      // geocodes the words.
+      if (birthPlace != null) 'birth_place': birthPlace.toRequest(),
     }, _sendTimeout);
 
     final reply = AstroMessage.fromServer(data['message']);

@@ -201,6 +201,10 @@ const TOPIC_WORDS: Record<ChipTopic, string[]> = {
       "cheat(?:ing|ed)?",
       "(?:wa|va)a?pas aa?y?e?g(?:a|i|e)",
       "(?:call|message|msg|baat) kar(?:ega|egi)",
+      // The one they love, by what they fear of them: "kya wo kisi aur se baat kar raha hai?" —
+      // the craft's own example, which read as no subject at all — and talking again.
+      "kisi aur (?:se|ke|ki|ko)",
+      "(?:phir se|fir se|dobara|dubara) (?:\\S+ ){0,2}(?:baat|call|message|msg)",
       ...BOTH_M_L_LATIN,
       // Devanagari
       "लव",
@@ -218,6 +222,14 @@ const TOPIC_WORDS: Record<ChipTopic, string[]> = {
       "रिश्त",
       "वापस आए",
       "वापस आये",
+      "किसी और (?:से|के|की|को)",
+      "(?:फिर से|दोबारा) (?:\\S+ ){0,2}(?:बात|कॉल|मैसेज)",
+      // Talking again, in the southern languages: "அவர் மீண்டும் என்னிடம் பேசுவாரா?", "ಅವನು ಮತ್ತೆ
+      // ನನ್ನ ಜೊತೆ ಮಾತಾಡ್ತಾನಾ?" — each read as no subject, and asked to choose one.
+      "(?:ಮತ್ತೆ|ವಾಪಸ್) (?:\\S+ ){0,2}ಮಾತ",
+      "(?:மீண்டும்|திரும்ப(?:வும்)?) (?:\\S+ ){0,2}பேசு",
+      "(?:మళ్ళీ|మళ్లీ|తిరిగి) (?:\\S+ ){0,2}మాట్లాడ",
+      "(?:വീണ്ടും|തിരിച്ച്) (?:\\S+ ){0,2}സംസാരിക്ക",
       // Kannada
       "ಪ್ರೀತಿ",
       "ಪ್ರೇಮ",
@@ -327,6 +339,14 @@ const TOPIC_WORDS: Record<ChipTopic, string[]> = {
       "work(?:s|ing|place)?(?! out)(?!s? for me)",
       "(?:un)?employ(?:ment|ed|er|ers)",
       "colleagues?",
+      // Going abroad is on the work menu ("work abroad"): "videsh mein settle ho paunga?" read as
+      // no subject, and was asked "shaadi, naukri ya paisa?".
+      "vid(?:e|ae|ai)sh",
+      "pardes",
+      "abroad",
+      "foreign",
+      "overseas",
+      "(?:bahar|baahar) (?:ke )?(?:desh|mulk)",
       // Devanagari
       "काम(?![\\p{L}\\p{M}])(?!\\s+कर)",
     ),
@@ -349,6 +369,12 @@ const TOPIC_WORDS: Record<ChipTopic, string[]> = {
       "पदोन्नति",
       "कारोबार",
       "बढती",
+      "विदेश",
+      "परदेश",
+      "ವಿದೇಶ",
+      "வெளிநாட",
+      "విదేశ",
+      "വിദേശ",
       // Pay belongs to both work and money, in the loan-word and in each language's own: a raise
       // is on the career menu. तनख़्वाह once the nukta is folded off.
       "सैलरी",

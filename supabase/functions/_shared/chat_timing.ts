@@ -255,6 +255,19 @@ export function topicLabel(topic: TimingTopic): string {
   return RULES[topic].label;
 }
 
+/**
+ * The grahas that signify [topic] and the houses it lives in, as this file reads them — for the
+ * chat's small kundli (`mini_kundli.ts`), which counts the same houses from the lagna rather than
+ * from Chandra. Copies, so nothing outside can change a rule.
+ */
+export function timingRule(topic: TimingTopic): {
+  karakas: string[];
+  houses: Array<readonly [number, string]>;
+} {
+  const rule = RULES[topic];
+  return { karakas: rule.karakas.map(([graha]) => graha), houses: [...rule.houses] };
+}
+
 /** A window cut to [V5_MAX_WINDOW_DAYS] from where it opens. */
 function clipped(window: TimingWindow): TimingWindow {
   return { ...window, endJd: Math.min(window.endJd, window.startJd + V5_MAX_WINDOW_DAYS) };

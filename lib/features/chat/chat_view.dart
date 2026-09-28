@@ -7,8 +7,11 @@ import '../../data/analytics/analytics.dart';
 import '../../data/analytics/analytics_events.dart';
 import '../../data/language.dart';
 import '../../data/models/astro_message.dart';
+import '../../data/providers.dart';
+import '../../data/repositories/app_config_repository.dart';
 import '../../widgets/app_snackbar.dart';
 import 'chat_app_bar.dart';
+import 'chat_birth_place_sheet.dart';
 import 'chat_birth_time_sheet.dart';
 import 'chat_bubble.dart';
 import 'chat_composer.dart';
@@ -100,7 +103,7 @@ class _ChatViewState extends ConsumerState<ChatView> {
   final _scroll = ScrollController();
   final _scaffold = GlobalKey<ScaffoldState>();
 
-  /// The composer's field, held here so an ask for a birthplace can put the cursor in it.
+  /// The composer's field, held here so a question a push filled in can put the cursor in it.
   final _composerFocus = FocusNode();
 
   /// Scrolled up far enough that a new message would arrive out of sight: the "↓" button shows.
@@ -207,6 +210,22 @@ class _ChatViewState extends ConsumerState<ChatView> {
     final sentence = await askBirthTime(context, source: 'reply');
     if (sentence == null || !mounted) return;
     model.send(sentence, entry: 'birth_time');
+  }
+
+  /// The place search, from the button under Astro's ask. Typing the town works too.
+  ///
+  /// What was picked goes out twice over: its words as the message, so the transcript shows the
+  /// place they chose in their own bubble, and the row itself beside it — with its search session —
+  /// so the server saves that exact place rather than its best reading of the words.
+  Future<void> _pickBirthPlace(ChatViewModel model, ChatGreeting greeting) async {
+    final place = await askBirthPlace(
+      context,
+      search: model.searchPlaces,
+      hint: greeting.placeHint,
+      source: 'reply',
+    );
+    if (place == null || !mounted) return;
+    model.send(place.description, entry: 'birth_place', birthPlace: place);
   }
 
   @override
@@ -412,20 +431,26 @@ class _ChatViewState extends ConsumerState<ChatView> {
     };
   }
 
-  /// The buttons under Astro's newest message: a way to give the hour when it was asked for,
-  /// then its suggestions — the first of which, after an offer, is the yes to today's upay.
+  /// The buttons under Astro's newest message: a way to give the hour or the place when it was
+  /// asked for, then its suggestions — the first of which, under an offer from before the upay
+  /// was folded into the answer, is the yes to today's upay.
   List<(String, VoidCallback)> _answers(
     ChatState state,
     ChatGreeting greeting,
     ChatViewModel model,
   ) {
+    // With search switched off (`place_search_enabled`) there is no button, not a sheet that says
+    // so: the composer's hint already asks for the town, and typing it is answered the same way.
+    final placeSearch = (ref.watch(appConfigProvider).valueOrNull ?? shippedAppConfig)
+        .configFlag(placeSearchEnabledKey);
+
     return [
       if (state.askFor == AskFor.birthTime) ...[
         (greeting.pickTime, () => _pickBirthTime(model)),
         (greeting.dontKnow, () => model.send(greeting.dontKnow, entry: 'birth_time')),
       ],
-      if (state.askFor == AskFor.birthPlace)
-        (ChatCopy.birthPlaceAction, () => _composerFocus.requestFocus()),
+      if (state.askFor == AskFor.birthPlace && placeSearch)
+        (greeting.pickPlace, () => _pickBirthPlace(model, greeting)),
       for (final option in state.options) (option, () => model.send(option, entry: 'quick_reply')),
     ];
   }

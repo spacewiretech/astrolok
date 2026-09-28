@@ -1,8 +1,11 @@
 import 'package:astrolok/app/theme/app_theme.dart';
 import 'package:astrolok/data/language.dart';
 import 'package:astrolok/data/models/astro_message.dart';
+import 'package:astrolok/data/models/birth_place.dart';
 import 'package:astrolok/data/providers.dart';
+import 'package:astrolok/data/repositories/app_config_repository.dart';
 import 'package:astrolok/data/repositories/chat_repository.dart';
+import 'package:astrolok/data/repositories/place_repository.dart';
 import 'package:astrolok/features/chat/chat_birth_time_sheet.dart';
 import 'package:astrolok/features/chat/chat_bubble.dart';
 import 'package:astrolok/features/chat/chat_composer.dart';
@@ -15,6 +18,7 @@ import 'package:astrolok/features/chat/chat_view.dart';
 import 'package:astrolok/features/chat/chat_viewmodel.dart';
 import 'package:astrolok/features/profile/memory_view.dart';
 import 'package:astrolok/widgets/date_wheel.dart';
+import 'package:astrolok/widgets/place_search_field.dart';
 import 'package:astrolok/widgets/primary_button.dart';
 import 'package:astrolok/widgets/safe_asset.dart';
 import 'package:flutter/material.dart';
@@ -135,7 +139,9 @@ void main() {
     return ChatThread(id: 'thread-1', messages: messages, remaining: 20);
   }
 
-  /// A v5 answer: the answer, the reason, and the offer of today's upay.
+  /// A v5 answer as they were written before the upay was folded into the answer: the answer, the
+  /// reason, and the offer of today's upay, with the yes as the first button. The server no longer
+  /// writes these, but every such row already stored must still be answerable.
   AstroMessage offer({String id = 'v5', DateTime? at}) => AstroMessage(
         id: id,
         role: ChatRole.astro,
@@ -150,6 +156,31 @@ void main() {
         ],
         text: 'Is time Shukra ki dasha chalegi.',
         options: const ['Haan, upay batao 🙏', 'Jeevansathi kaisa hoga?'],
+      );
+
+  /// A v5 answer as the server writes it now: the answer, its reason, the upay with the invitation
+  /// to come back, and a question about their situation — four messages, no offer, three
+  /// follow-ups.
+  AstroMessage arc({String id = 'arc', DateTime? at, AskFor askFor = AskFor.none}) => AstroMessage(
+        id: id,
+        role: ChatRole.astro,
+        createdAt: at ?? DateTime(2026, 9, 28, 10),
+        kind: ReplyKind.answer,
+        topic: 'marriage',
+        bubbles: const [
+          'Aapki kundali ke hisaab se April se June 2027 mein rishta pakka hone ke sabse acche yog '
+              'hain.',
+          'Us samay Guru aapke saatve ghar se guzrega, aur wahan Shukra pehle se mazboot hai.',
+          'Agle 4 hafte har Shukravar Maa Katyayani ka mantra 11 baar padhiye. Kal wapas aaiye, upay '
+              'ka asar dekhte hain 🙏',
+          'Ek baat bataiye — rishta ghar wale dhoond rahe hain ya aap khud?',
+        ],
+        askFor: askFor,
+        options: const [
+          'Ghar wale dhoond rahe hain',
+          'Main khud dhoond raha hoon',
+          'Jeevansathi kaisa hoga?',
+        ],
       );
 
   group('the opening screen', () {
@@ -598,6 +629,132 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
       expect(repository.sent, ['Haan, upay batao 🙏']);
     });
+
+    testWidgets('an offer from before still serves its upay, and the card follows the upay',
+        (tester) async {
+      final repository = _StubChatRepository(
+        messages: [offer()],
+        remaining: 5,
+        askRating: true,
+        replyWith: (_, _) => AstroMessage(
+          id: 'remedy',
+          role: ChatRole.astro,
+          createdAt: DateTime.now(),
+          kind: ReplyKind.remedy,
+          topic: 'marriage',
+          bubbles: const [
+            'Agle 4 hafte har Shukravar Maa Katyayani ka mantra 11 baar padhiye.',
+            'Kal wapas aaiye, upay ka asar dekhte hain.',
+            'Ek baat bataiye — rishta ghar wale dhoond rahe hain ya aap khud?',
+          ],
+          options: const ['Ghar wale dhoond rahe hain', 'Main khud dhoond raha hoon'],
+        ),
+      );
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(repository));
+      // Not over the offer: it is still waiting for its answer.
+      expect(find.byType(ChatRatingCard), findsNothing);
+
+      await tester.tap(find.text('Haan, upay batao 🙏'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(tester.takeException(), isNull);
+      expect(repository.entries, ['quick_reply']);
+      expect(find.textContaining('Maa Katyayani'), findsOneWidget);
+      // The yes is spent: the old offer's buttons are gone, the upay's own are up.
+      expect(find.text('Haan, upay batao 🙏'), findsNothing);
+      expect(find.text('Ghar wale dhoond rahe hain'), findsOneWidget);
+      expect(find.byType(ChatRatingCard), findsOneWidget);
+    });
+
+    testWidgets('four messages arrive in order, and the buttons and the card wait for the last',
+        (tester) async {
+      final repository = _StubChatRepository(
+        remaining: 5,
+        delay: const Duration(seconds: 3),
+        askRating: true,
+        replyWith: (_, _) => arc(id: 'arriving', at: DateTime.now()),
+      );
+      await pumpAt(tester, small, const ChatView(),
+          overrides: [chatRepositoryProvider.overrideWithValue(repository)], instant: false);
+      await ask(tester);
+
+      final bubbles = arc().bubbles;
+      Finder bubble(int i) => find.textContaining(bubbles[i]);
+
+      // Typed for the whole wait, so the answer shows the moment it lands.
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pump();
+      expect(bubble(0), findsOneWidget);
+
+      for (var i = 1; i < bubbles.length; i++) {
+        // Still typing the next one: nothing to answer with, and nothing to rate, yet.
+        expect(bubble(i), findsNothing, reason: 'message $i before its pause');
+        expect(find.byType(ChatTypingBubble), findsOneWidget, reason: 'typing before $i');
+        expect(find.text('Jeevansathi kaisa hoga?'), findsNothing, reason: 'buttons before $i');
+        expect(find.byType(ChatRatingCard), findsNothing, reason: 'card before $i');
+
+        // About two seconds after the one before: never before the shortest pause, never after
+        // the longest. Stepped, because each pause runs from when the last message showed.
+        var waited = 0;
+        while (bubble(i).evaluate().isEmpty && waited < 4000) {
+          await tester.pump(const Duration(milliseconds: 100));
+          waited += 100;
+        }
+        expect(waited, inInclusiveRange(1800, 2700), reason: 'the pause before message $i');
+        // Under the one before it: the answer, the reason, the upay, the question. Checked as each
+        // lands, since on a small phone the first has scrolled away by the time the last is in.
+        expect(
+          tester.getTopLeft(bubble(i)).dy,
+          greaterThan(tester.getTopLeft(bubble(i - 1)).dy),
+          reason: 'message $i is below message ${i - 1}',
+        );
+      }
+
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(ChatTypingBubble), findsNothing);
+      expect(find.text('Jeevansathi kaisa hoga?'), findsOneWidget);
+      expect(find.byType(ChatRatingCard), findsOneWidget);
+    });
+
+    for (final (label, size) in [('a small phone', small), ('a tall phone', tall)]) {
+      testWidgets('four messages, a place button, three follow-ups and the card fit $label',
+          (tester) async {
+        final repository = _StubChatRepository(
+          messages: [
+            AstroMessage(
+              id: 'u',
+              role: ChatRole.user,
+              createdAt: DateTime(2026, 9, 28, 9),
+              text: 'Meri shaadi kab hogi?',
+            ),
+            arc(id: 'earlier', askFor: AskFor.birthTime),
+          ],
+          remaining: 5,
+          askRating: true,
+          replyWith: (_, _) => arc(id: 'arriving', at: DateTime.now(), askFor: AskFor.birthPlace),
+        );
+        await pumpAt(tester, size, const ChatView(), overrides: onThread(repository));
+
+        await tester.tap(find.text(greeting.dontKnow));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+
+        expect(tester.takeException(), isNull);
+        expect(find.byType(ChatRatingCard), findsOneWidget);
+        for (final label in [greeting.pickPlace, ...arc().options]) {
+          expect(find.text(label), findsOneWidget, reason: label);
+        }
+
+        final list = find.byType(Scrollable).first;
+        for (var i = 0; i < 6; i++) {
+          await tester.drag(list, const Offset(0, 240));
+          await tester.pump();
+          expect(tester.takeException(), isNull, reason: 'after drag $i');
+        }
+      });
+    }
   });
 
   group('starting a new conversation', () {
@@ -1017,16 +1174,6 @@ void main() {
       expect(find.text(greeting.pickTime), findsNothing);
     });
 
-    testWidgets('a birthplace ask puts the cursor in the field', (tester) async {
-      await pumpAt(tester, small, const ChatView(), overrides: onThread(
-        _StubChatRepository(messages: [asking(askFor: AskFor.birthPlace)], remaining: 5),
-      ));
-
-      await tester.tap(find.text(ChatCopy.birthPlaceAction));
-      await tester.pump();
-      expect(tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus, isTrue);
-    });
-
     testWidgets('the sheet sends no time until a part of the day is chosen', (tester) async {
       final repository = _StubChatRepository(messages: [asking()], remaining: 5);
       await pumpAt(tester, small, const ChatView(), overrides: onThread(repository));
@@ -1107,6 +1254,180 @@ void main() {
     });
   });
 
+  group('asking for the birth place', () {
+    AstroMessage asking({String id = 'p', AskFor askFor = AskFor.birthPlace}) => AstroMessage(
+          id: id,
+          role: ChatRole.astro,
+          createdAt: DateTime(2026, 9, 28),
+          kind: ReplyKind.answer,
+          bubbles: const [
+            'Shukriya! 7:30 PM se dekha — March se August 2027 sabse mazboot mahine hain.',
+            'Aapke saatve ghar par Guru ki nazar hai, jo accha rishta laati hai.',
+            'Aapka janm kis shehar mein hua tha? Isse lagna pakka ho jayega.',
+          ],
+          askFor: askFor,
+        );
+
+    List<Override> withPlaces(_StubChatRepository chat, _StubPlaceRepository places) => [
+          ...onThread(chat),
+          placeRepositoryProvider.overrideWithValue(places),
+        ];
+
+    Future<void> openSheet(WidgetTester tester) async {
+      await tester.tap(find.text(greeting.pickPlace));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    Finder sheetField() =>
+        find.descendant(of: find.byType(PlaceSearchField), matching: find.byType(TextField));
+
+    /// Types into the sheet's field and waits out the debounce.
+    Future<void> search(WidgetTester tester, String query) async {
+      await tester.enterText(sheetField(), query);
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump();
+    }
+
+    testWidgets('only a place ask raises the button, and the hint asks for a town',
+        (tester) async {
+      await pumpAt(tester, small, const ChatView(),
+          overrides: onThread(_StubChatRepository(messages: [asking()], remaining: 5)));
+
+      expect(tester.takeException(), isNull);
+      expect(find.text(greeting.pickPlace), findsOneWidget);
+      expect(find.text(greeting.placeHint), findsOneWidget);
+      expect(find.text(greeting.pickTime), findsNothing);
+    });
+
+    for (final (label, messages) in [
+      ('an hour ask', () => [asking(askFor: AskFor.birthTime)]),
+      ('a reply that asks for nothing', () => [arc()]),
+      (
+        'an older reply that asked',
+        () => [
+              asking(),
+              AstroMessage(
+                id: 'u',
+                role: ChatRole.user,
+                createdAt: DateTime(2026, 9, 28, 1),
+                text: 'Jaipur, Rajasthan',
+              ),
+              arc(id: 'b'),
+            ],
+      ),
+    ]) {
+      testWidgets('no place button under $label', (tester) async {
+        await pumpAt(tester, small, const ChatView(),
+            overrides: onThread(_StubChatRepository(messages: messages(), remaining: 5)));
+
+        expect(tester.takeException(), isNull);
+        expect(find.text(greeting.pickPlace), findsNothing);
+      });
+    }
+
+    testWidgets('picking a place sends its words, and the row beside them', (tester) async {
+      final chat = _StubChatRepository(messages: [asking()], remaining: 5);
+      final places = _StubPlaceRepository();
+      await pumpAt(tester, small, const ChatView(), overrides: withPlaces(chat, places));
+
+      await openSheet(tester);
+      expect(tester.takeException(), isNull);
+      expect(find.text(ChatCopy.placeSheetTitle), findsOneWidget);
+      // The keyboard is up with the sheet: it exists only to ask this.
+      expect(tester.widget<TextField>(sheetField()).focusNode!.hasFocus, isTrue);
+
+      await search(tester, 'Jai');
+      expect(find.text('Jaisalmer'), findsOneWidget);
+      await tester.tap(find.text('Jaipur'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(tester.takeException(), isNull);
+      expect(find.text(ChatCopy.placeSheetTitle), findsNothing);
+      expect(chat.sent, ['Jaipur, Rajasthan, India']);
+      expect(chat.entries, ['birth_place']);
+      // With the session its search ran in, so the server's lookup of the row closes it.
+      expect(places.tokens, hasLength(1));
+      expect(chat.places, [
+        ChatBirthPlace(
+          placeId: 'place-jaipur',
+          description: 'Jaipur, Rajasthan, India',
+          sessionToken: places.tokens.single,
+        ),
+      ]);
+      // Their pick, in their own bubble.
+      expect(find.textContaining('Jaipur, Rajasthan, India'), findsOneWidget);
+      // One search, and no Details call: the server resolves the row it was sent.
+      expect(places.queries, ['Jai']);
+      expect(places.detailsCalls, 0);
+    });
+
+    testWidgets('typing the town still sends, with no row beside it', (tester) async {
+      final chat = _StubChatRepository(messages: [asking()], remaining: 5);
+      await pumpAt(tester, small, const ChatView(), overrides: onThread(chat));
+
+      await tester.enterText(find.byType(TextField), 'Jaipur, Rajasthan');
+      await tester.testTextInput.receiveAction(TextInputAction.send);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(chat.sent, ['Jaipur, Rajasthan']);
+      expect(chat.entries, ['composer']);
+      expect(chat.places, [null]);
+    });
+
+    testWidgets('closing the sheet without a pick sends nothing', (tester) async {
+      final chat = _StubChatRepository(messages: [asking()], remaining: 5);
+      await pumpAt(tester, small, const ChatView(),
+          overrides: withPlaces(chat, _StubPlaceRepository()));
+
+      await openSheet(tester);
+      await search(tester, 'Jai');
+      // The barrier above the sheet.
+      await tester.tapAt(const Offset(180, 20));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(find.text(ChatCopy.placeSheetTitle), findsNothing);
+      expect(chat.sent, isEmpty);
+      // Still asked, so still answerable.
+      expect(find.text(greeting.pickPlace), findsOneWidget);
+    });
+
+    testWidgets('with place search switched off there is no button, and typing is the way',
+        (tester) async {
+      await pumpAt(tester, small, const ChatView(), overrides: [
+        ...onThread(_StubChatRepository(messages: [asking()], remaining: 5)),
+        appConfigProvider.overrideWith(
+          (ref) async => {...shippedAppConfig, placeSearchEnabledKey: 'false'},
+        ),
+      ]);
+
+      expect(find.text(greeting.pickPlace), findsNothing);
+      expect(find.text(greeting.placeHint), findsOneWidget);
+    });
+
+    testWidgets('the sheet fits a small phone with the keyboard up and the suggestions out',
+        (tester) async {
+      await pumpAt(tester, small, const ChatView(), overrides: withPlaces(
+        _StubChatRepository(messages: [asking()], remaining: 5),
+        _StubPlaceRepository(),
+      ));
+      tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+      await tester.pump();
+
+      await openSheet(tester);
+      await search(tester, 'Jai');
+
+      expect(tester.takeException(), isNull);
+      expect(find.text('Jaunpur'), findsOneWidget);
+      // Above the keyboard, not under it.
+      expect(tester.getBottomLeft(sheetField()).dy, lessThan(small.height - 300));
+    });
+  });
+
   group('the chat\'s clock and calendar', () {
     test('a bubble\'s time is WhatsApp\'s: hour, minute, AM or PM', () {
       expect(formatBubbleTime(DateTime(2026, 9, 25, 0, 5)), '12:05 AM');
@@ -1157,7 +1478,12 @@ void main() {
 /// A repository whose sends fail two seconds in, after "typing…" has gone up.
 class _FailingChatRepository extends _StubChatRepository {
   @override
-  Future<ChatReply> send(String message, {String? threadId, String entry = 'composer'}) async {
+  Future<ChatReply> send(
+    String message, {
+    String? threadId,
+    String entry = 'composer',
+    ChatBirthPlace? birthPlace,
+  }) async {
     await Future<void>.delayed(const Duration(seconds: 2));
     throw const ChatException('That did not reach Astro. Please try again.');
   }
@@ -1183,6 +1509,7 @@ class _StubChatRepository implements ChatRepository {
     this.threadList = const [],
     this.delay = Duration.zero,
     this.replyWith,
+    this.askRating = false,
   });
 
   final List<AstroMessage> messages;
@@ -1196,12 +1523,17 @@ class _StubChatRepository implements ChatRepository {
   /// The reply to the nth message sent (1-based), when a test needs a particular one.
   final AstroMessage Function(String message, int n)? replyWith;
 
+  /// Whether each reply asks for the rating card, as the server's `ask_rating` does.
+  final bool askRating;
+
   /// How many times the sidebar has been asked for — proof it is not fetched on every open.
   int threadCalls = 0;
 
-  /// Every message sent, oldest first, and the affordance each came from.
+  /// Every message sent, oldest first, the affordance each came from, and the place picked beside
+  /// it — null for anything that was not a pick.
   final sent = <String>[];
   final entries = <String>[];
+  final places = <ChatBirthPlace?>[];
 
   @override
   Future<ChatSnapshot> history(String threadId) async =>
@@ -1218,13 +1550,16 @@ class _StubChatRepository implements ChatRepository {
     String message, {
     String? threadId,
     String entry = 'composer',
+    ChatBirthPlace? birthPlace,
   }) async {
     sent.add(message);
     entries.add(entry);
+    places.add(birthPlace);
     if (delay > Duration.zero) await Future<void>.delayed(delay);
     return ChatReply(
       threadId: threadId ?? 'thread-1',
       remaining: remaining,
+      askRating: askRating,
       message: replyWith?.call(message, sent.length) ??
           AstroMessage(
             id: 'reply-${sent.length}',
@@ -1249,3 +1584,36 @@ class _StubChatRepository implements ChatRepository {
   Future<void> rate({required String threadId, int? rating, String? comment}) async {}
 }
 
+/// Place search with a fixed answer, counting what the chat asks of it.
+///
+/// Details is the call that costs a second lookup; the chat must never make it, so it is counted
+/// here to be asserted zero.
+class _StubPlaceRepository implements PlaceRepository {
+  final queries = <String>[];
+  final tokens = <String>{};
+  int detailsCalls = 0;
+
+  static const rows = [
+    PlaceSuggestion(placeId: 'place-jaipur', primary: 'Jaipur', secondary: 'Rajasthan, India'),
+    PlaceSuggestion(placeId: 'place-jaisalmer', primary: 'Jaisalmer', secondary: 'Rajasthan, India'),
+    PlaceSuggestion(placeId: 'place-jaunpur', primary: 'Jaunpur', secondary: 'Uttar Pradesh, India'),
+  ];
+
+  @override
+  Future<List<PlaceSuggestion>> autocomplete(String input, {required String sessionToken}) async {
+    queries.add(input);
+    tokens.add(sessionToken);
+    return rows;
+  }
+
+  @override
+  Future<BirthPlace> details(
+    PlaceSuggestion suggestion, {
+    required String sessionToken,
+    DateTime? birthDate,
+    String? birthTime,
+  }) async {
+    detailsCalls++;
+    throw const PlaceUnavailableException('The chat never resolves a place itself.');
+  }
+}

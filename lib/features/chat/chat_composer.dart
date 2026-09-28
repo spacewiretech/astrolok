@@ -144,7 +144,7 @@ class _ChatComposerState extends State<ChatComposer> {
     final hint = switch (state.askFor) {
       AskFor.dob => widget.greeting.dobHint,
       AskFor.birthTime => widget.greeting.timeHint,
-      AskFor.birthPlace => ChatCopy.birthPlaceHint,
+      AskFor.birthPlace => widget.greeting.placeHint,
       AskFor.none => widget.greeting.placeholder,
     };
 

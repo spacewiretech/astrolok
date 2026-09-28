@@ -74,8 +74,6 @@ abstract final class ChatCopy {
   static const birthTimeUnknown = 'I do not know';
 
   static const birthPlacePrompt = 'Where were you born?';
-  static const birthPlaceHint = 'City or town';
-  static const birthPlaceAction = 'Type my birthplace';
 
   // The note under the verdict. The question itself is written at the foot of the reply, which is
   // exactly where a reader who stopped at the answer never gets to.
@@ -117,6 +115,12 @@ abstract final class ChatCopy {
   static const timeSheetPickFirst = 'Choose a part of the day';
   static String timeSheetConfirm(String time) => 'Confirm $time';
   static const timeSheetUnknown = "I don't know my birth time";
+
+  // ---------------------------------------------------------------- the birth place sheet
+
+  static const placeSheetTitle = 'Where you were born';
+  static const placeSheetWhy =
+      'Your birthplace sets your lagna and your houses. The town is enough, or the nearest city.';
 
   // ---------------------------------------------------------------- narration
 

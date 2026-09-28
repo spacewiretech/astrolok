@@ -38,6 +38,7 @@ class PlaceSearchField extends StatefulWidget {
     this.selectedLabel,
     this.hint = 'eg: Tirupati',
     this.enabled = true,
+    this.autofocus = false,
     this.unavailableMessage,
     this.debounce = const Duration(milliseconds: 350),
     this.sessionIdle = const Duration(minutes: 3),
@@ -55,6 +56,10 @@ class PlaceSearchField extends StatefulWidget {
   final String? selectedLabel;
   final String hint;
   final bool enabled;
+
+  /// Puts the cursor in the field on arrival, for a sheet that exists only to ask for the place.
+  /// Off in a form, where the keyboard coming up unasked would cover the fields above.
+  final bool autofocus;
 
   /// Shown instead of the field when search is switched off.
   final String? unavailableMessage;
@@ -216,6 +221,7 @@ class _PlaceSearchFieldState extends State<PlaceSearchField> {
                 child: TextField(
                   controller: _controller,
                   focusNode: _focus,
+                  autofocus: widget.autofocus,
                   enabled: widget.enabled && !_resolving,
                   onChanged: _onChanged,
                   textInputAction: TextInputAction.search,

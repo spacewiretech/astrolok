@@ -23,13 +23,14 @@ they are invoked with the anon key, before any session exists — so each valida
 | `push-token` | POST `{token, platform, app_build?, notifications_authorized?}` | bearer | upserts `push_tokens` on the FCM token, bound to the caller's session so sign-out removes it by cascade. The two optional fields let the sender skip old builds and devices that cannot show a push |
 | `palm-reading` | POST `{image, mime_type, focus}` | bearer + entitled | Gemini palm read, quota-anchored row |
 | `face-reading` | POST `{image, mime_type, focus}` | bearer + entitled | the face mirror |
-| `astro-chat` | POST `{message, thread_id?}` | bearer + entitled | one metered, chart-aware chat turn. Also returns `language`, `saved_language` (only when the message switched it) and `ask_rating` |
+| `astro-chat` | POST `{message, thread_id?, chat_ui?, entry?, birth_place?}` | bearer + entitled | one metered, chart-aware chat turn. `chat_ui: 2` gets v5; `birth_place: {place_id, description, session_token?}` is a row picked in the chat's place search, looked up and saved to the account (`_shared/chat_birth_place.ts`) — never to `kundalis`. Also returns `language`, `saved_language` (only when the message switched it), `ask_rating`, and `user` when the turn saved a birth detail |
 | `chat-history` | POST, multiplexed by body key | bearer | thread list, one transcript, user facts, and `delete_thread`/`rename`/`forget`/`rate` (`{thread_id, rating: 1-5 \| null}`, once per account). No model call |
 | `subscription-start` | POST | bearer | creates the Cashfree mandate, returns the session payload |
 | `subscription-status` | POST/GET | bearer | reads the latest subscription, optionally re-syncs, returns entitlement. No method check |
 | `subscription-cancel` | POST | bearer | cancels the mandate, returns refreshed entitlement |
 | `cashfree-webhook` | POST from Cashfree | **HMAC signature** | verifies `x-webhook-signature` over the raw body, dedupes, drives `syncSubscription` |
 | `subscription-reconcile` | POST from `pg_cron` | **shared secret** | `app_config.reconcile_secret`, compared with `constantTimeEquals`; sweeps abandoned/drifted/stale subscriptions |
+| `payment-retry` | POST from `pg_cron` (hourly, :37) | **shared secret** | same `reconcile_secret`. Retries debits that failed for insufficient funds via Cashfree's manage-payment RETRY (`payment_retries` table, schedule in `_shared/payment_retry.ts`). Off unless `cashfree_retry_enabled`. Body `{probe}` is read-only; `{only: [...]}` acts on named mandates even while switched off |
 | `place-search` | POST `{action: autocomplete \| details, …, session_token}` | bearer + entitled | Google Places (New) + Time Zone API with the key server-side; metered per user per hour (`place_search_per_hour`) |
 | `kundali` | POST `{action: status \| report \| request, …}` | bearer + entitled (trial OK) | casts the chart at request time; `report` answers **409 `not_ready` until `unlock_at`** — the lock lives in `kundaliPayload`, the only serializer. A trial's `unlock_at` is 24 h out; a paying account's is now, and its reading is written straight after the response (`_shared/kundali_generate.ts`) |
 | `kundali-worker` | POST from `pg_cron` (every 5 min) | **shared secret** (`x-cron-secret`) | answers 202, then writes due readings with Gemini after the response; retries with backoff, including a paying account's instant attempt that failed |
@@ -40,7 +41,7 @@ they are invoked with the anon key, before any session exists — so each valida
 
 - `_shared/` — everything more than one function needs: credentials, the billing state machine,
   the model prompts, the astronomy. Not deployed on its own.
-- `tests/` — `deno test`, 390 tests over the pure logic.
+- `tests/` — `deno test`, 575 tests over the pure logic.
 - One folder per function in the table above.
 
 ## Notes

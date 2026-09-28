@@ -20,8 +20,16 @@ import { FALLBACK_LANGUAGES, fallbackOptions, offTopic, topicsOf } from "../_sha
 import { detectLanguageSwitch, isMarathi } from "../_shared/chat_language.ts";
 import { detectCrisis } from "../_shared/crisis.ts";
 import { chatTiming, TIMING_TOPICS, V5_TIMING_TOPICS } from "../_shared/chat_timing.ts";
-import { describeTransits, nearerSeasons, stays, transitTiming } from "../_shared/chat_transits.ts";
+import {
+  describeTransits,
+  nearerSeasons,
+  stays,
+  transitTiming,
+  transitTimingEither,
+} from "../_shared/chat_transits.ts";
 import { chatSystemPrompt } from "../_shared/astro_chat.ts";
+import { upayFor } from "../_shared/chat_upay.ts";
+import { sawalFor } from "../_shared/chat_sawal.ts";
 import { AppConfig } from "../_shared/config.ts";
 import { computeChart, julianDayOf, RASHIS } from "../_shared/jyotish.ts";
 
@@ -33,16 +41,43 @@ import { computeChart, julianDayOf, RASHIS } from "../_shared/jyotish.ts";
 const PROMPT = chatSystemPromptV5({ language: "Hinglish" });
 const flat = (text: string) => text.replace(/\s+/g, " ");
 const TODAY = new Date("2026-09-25T00:00:00Z");
+/** 28 Sep 2026, 10:00 in India: a Monday morning. */
+const MONDAY = new Date("2026-09-28T04:30:00Z");
 
 // ---------------------------------------------------------------- the prompt
 
-Deno.test("a v5 reply is chat messages: the answer, the reason, then the offer", () => {
+Deno.test("a v5 reply is chat messages: the answer, the reason, the upay when due, one question", () => {
   const p = flat(PROMPT);
   assert(p.includes("YOU ARE CHATTING, THE WAY PEOPLE CHAT ON WHATSAPP"));
   assert(p.includes("No headings, no bullet lists"));
-  assert(p.includes("Kya main aapko aaj ka upay bataun?"));
-  assert(p.includes('in "remedy_bubbles"'));
+  assert(p.includes('"answer", its first message — Seedha jawab'));
+  assert(p.includes('"answer", its second message — Kyun: one sentence'));
+  assert(p.includes('"upay" — only when THE UPAY FOR TODAY block is below'));
+  assert(p.includes('"sawal" — exactly one question'));
   assert(p.includes("ANSWER FIRST"));
+  // The offer is gone: named only to forbid it, and nothing hidden is written any more.
+  assert(p.includes('Never offer an upay or ask whether they want one — no "Kya main aapko upay bataun?"'));
+  assert(!p.includes("Kya main aapko aaj ka upay bataun?"));
+  assert(!p.includes("remedy_bubbles"));
+  assert(!p.includes('"ask_for"'), "ask_for is the code's now");
+});
+
+Deno.test("the upay is the code's to choose, and hope is only what the chart shows", () => {
+  const p = flat(PROMPT);
+  assert(p.includes("THE UPAY — WORKED OUT FOR TODAY, NEVER CHOSEN BY YOU"));
+  assert(p.includes("Never change its day, its count or its length"));
+  assert(p.includes("Without the block there is no upay in the reply"));
+  assert(!p.includes("THE UPAY LIST"), "the model's own list is back");
+  assert(p.includes("An upay is only the one THE UPAY FOR TODAY gives"));
+  assert(p.includes("THE GOOD IN THEIR CHART lists what is truly strong in theirs"));
+  assert(p.includes("Never a strength it does not list"));
+  assert(p.includes('call them by it with "ji"'));
+  assert(p.includes('"Aapne bataya tha ki'));
+  // v4's rule stays v4's: v5 asks for the place when code says so, v4 never does.
+  assert(!p.includes("Never ask where they were born"));
+  const v4 = flat(chatSystemPrompt({ version: "v4", language: "Hinglish" }));
+  assert(v4.includes("Do not ask where they were born"));
+  assert(!v4.includes("THE QUESTION TO ASK") && !v4.includes("THE UPAY FOR TODAY"));
 });
 
 Deno.test("every kab gets a window in the first sentence — from the dasha or from Guru", () => {
@@ -86,7 +121,9 @@ Deno.test("a stated rashi is accepted, the DOB is never confirmed from its own c
   assert(p.includes('Never write "aapki rashi X nahi, Y hai"'));
   assert(p.includes("Never use the kundali to confirm or overrule their date of birth"));
   // Seen live: "Maine sahi janm tithi 3 January 2000 note kar li hai", and nothing saved.
-  assert(p.includes("Never say you have noted, saved or changed a date or time of birth unless THE DETAIL THEY JUST GAVE block is there"));
+  assert(p.includes("Never say you have noted, saved or changed a date, time or place of birth unless THE DETAIL THEY JUST GAVE block is there"));
+  // And a place: seen live, "Ab aapki kundali ka hisaab aur saaf ho gaya hai" for one never saved.
+  assert(p.includes("never that their kundali is now complete or clearer"));
 });
 
 Deno.test("the crisis rule stops the reading and gives Tele-MANAS", () => {
@@ -116,62 +153,71 @@ Deno.test("the language block is plain, and knows ghar can mean family", () => {
 Deno.test("the schema lists every property it orders, and care is not the model's to write", () => {
   const ordering = CHAT_SCHEMA_V5.propertyOrdering;
   assertEquals([...ordering].sort(), Object.keys(CHAT_SCHEMA_V5.properties).sort());
-  assertEquals(ordering[0], "kind");
+  assertEquals(ordering.slice(0, 5), ["kind", "topic", "answer", "upay", "sawal"]);
   assert(!CHAT_SCHEMA_V5.properties.kind.enum.includes("care" as never));
-  assertEquals(CHAT_SCHEMA_V5.properties.bubbles.maxItems, 3);
+  assertEquals(CHAT_SCHEMA_V5.properties.answer.maxItems, 2);
+  // What is asked, and whether an upay is due, are the code's: the model writes neither.
+  for (const gone of ["ask_for", "offer", "remedy_bubbles", "bubbles"]) {
+    assert(!(gone in CHAT_SCHEMA_V5.properties), gone);
+  }
 });
 
 // ---------------------------------------------------------------- normalising
 
-const OFFER = {
+const ANSWER = {
   kind: "answer",
   topic: "marriage",
-  bubbles: ["Aapki kundali ke hisaab se shaadi ka sabse accha samay aa raha hai.", "Is time Shukra.", "Upay bataun?"],
-  offer: "remedy",
-  remedy_bubbles: ["Har Shukravar mantra 11 baar.", "Kal aaiye.", "Rishta kaun dhoond raha hai?"],
+  answer: ["Aapki kundali ke hisaab se shaadi ka sabse accha samay aa raha hai.", "Is time Shukra ki dasha chalegi."],
+  upay: "Aaj Somvar hai — aaj se 16 Somvar Shiv ji ko jal chadhaiye.",
+  sawal: "Rishta ghar wale dhoond rahe hain ya aap khud?",
   options: ["Jeevansathi kaisa hoga?", "Birth time batayein"],
-  ask_for: "none",
 };
 
-Deno.test("an offer always leads with its yes, in their language", () => {
-  const reply = normaliseChatReplyV5(OFFER, { language: "Kannada", hourAsked: false })!;
-  assertEquals(reply.options[0], acceptChipFor("Kannada"));
-  assertEquals(reply.offer, "remedy");
-  assertEquals(reply.remedyBubbles.length, 3);
-});
-
-Deno.test("an offer with nothing to serve is no offer", () => {
-  const reply = normaliseChatReplyV5({ ...OFFER, remedy_bubbles: [] }, {
-    language: "Hinglish",
-    hourAsked: false,
-  })!;
+Deno.test("a new reply never offers: no yes chip, nothing hidden, whatever the model wrote", () => {
+  const reply = normaliseChatReplyV5({ ...ANSWER, offer: "remedy", remedy_bubbles: ["x"], options: ["Haan, upay batao 🙏", "Jeevansathi kaisa hoga?"] }, { language: "Kannada", hourAsked: false })!;
   assertEquals(reply.offer, "none");
+  assertEquals(reply.remedyBubbles, []);
   assert(!reply.options.includes(acceptChipFor("Hinglish")));
+  assert(!("remedy_bubbles" in v5Body(reply, { version: "v5" })));
 });
 
-Deno.test("once the hour has been asked, neither a chip nor ask_for asks it again", () => {
-  const reply = normaliseChatReplyV5({ ...OFFER, ask_for: "birth_time" }, {
+Deno.test("an upay the code did not ask for is dropped; one it asked for rides third", () => {
+  const unasked = normaliseChatReplyV5(ANSWER, { language: "Hinglish", hourAsked: false })!;
+  assertEquals(unasked.upay, "");
+  assertEquals(unasked.bubbles, [...ANSWER.answer, ANSWER.sawal]);
+
+  const due = normaliseChatReplyV5(ANSWER, { language: "Hinglish", hourAsked: false, upay: true })!;
+  assertEquals(due.upay, ANSWER.upay);
+  assertEquals(due.bubbles, [...ANSWER.answer, ANSWER.upay, ANSWER.sawal]);
+});
+
+Deno.test("once the hour has been asked, no chip asks it again; ask_for is the code's", () => {
+  const reply = normaliseChatReplyV5({ ...ANSWER, ask_for: "birth_time" }, {
     language: "Hinglish",
     hourAsked: true,
   })!;
   assert(!reply.options.some((o) => /birth time/i.test(o)));
   assertEquals(reply.askFor, "none");
+  assertEquals(normaliseChatReplyV5(ANSWER, { language: "Hinglish", hourAsked: false, askFor: "birth_place" })!.askFor, "birth_place");
 });
 
-Deno.test("no bubbles is no reply; odd fields fall back rather than throw", () => {
-  assertEquals(normaliseChatReplyV5({ bubbles: [] }, { language: "Hinglish", hourAsked: false }), null);
+Deno.test("no answer and no sawal is no reply; odd fields fall back rather than throw", () => {
+  assertEquals(normaliseChatReplyV5({ answer: [], sawal: "" }, { language: "Hinglish", hourAsked: false }), null);
   assertEquals(normaliseChatReplyV5(null, { language: "Hinglish", hourAsked: false }), null);
+  // The old shape is not read: a reply is its answer and its sawal.
+  assertEquals(normaliseChatReplyV5({ bubbles: ["a", "b"] }, { language: "Hinglish", hourAsked: false }), null);
 
-  const odd = normaliseChatReplyV5({ bubbles: ["x".repeat(900)], kind: "essay", topic: "moon" }, {
+  const odd = normaliseChatReplyV5({ answer: ["x".repeat(900), 7], kind: "essay", topic: "moon", sawal: 3 }, {
     language: "Hinglish",
     hourAsked: false,
   })!;
   assertEquals(odd.kind, "answer");
   assertEquals(odd.topic, "general");
+  assertEquals(odd.bubbles.length, 1);
   assert(odd.bubbles[0].length <= 320);
 });
 
-Deno.test("a reply that gives a helpline is a care reply: no offer, no astrology chip, no top-up", () => {
+Deno.test("a reply that gives a helpline is a care reply: no upay, no astrology chip, no top-up", () => {
   // Live, to a message the crisis lists do not know, in a thread no one had flagged: the model
   // followed IF THEY SAY THEY WANT TO DIE, and the top-up put "मेरी शादी कब होगी?" under it.
   const message = "जीने की इच्छा नहीं है, सब खत्म करना चाहती हूँ";
@@ -179,47 +225,51 @@ Deno.test("a reply that gives a helpline is a care reply: no offer, no astrology
   const raw = {
     kind: "chat",
     topic: "general",
-    offer: "none",
-    ask_for: "none",
-    bubbles: ["प्रिया, कृपया ऐसा बिल्कुल मत सोचिए।", "प्लीज़ अभी टेली-मानस (Tele-MANAS) हेल्पलाइन 14416 पर कॉल करें।", "अपने किसी करीबी से तुरंत बात कीजिए।"],
+    answer: ["प्रिया, कृपया ऐसा बिल्कुल मत सोचिए।", "प्लीज़ अभी टेली-मानस (Tele-MANAS) हेल्पलाइन 14416 पर कॉल करें।"],
+    upay: "",
+    sawal: "क्या आप अभी किसी करीबी से बात कर सकती हैं?",
     options: ["बात करने की कोशिश करती हूँ"],
   };
   const reply = normaliseChatReplyV5(raw, { language: "Hindi", hourAsked: false, asked: [message] })!;
   assertEquals(reply.kind, "care");
+  assertEquals(reply.bubbles.length, 3);
   assertEquals(reply.options, ["बात करने की कोशिश करती हूँ"]);
 
   // Whatever else the model put under it: no upay, no ask, no chip that goes back to a reading.
   const offered = normaliseChatReplyV5({
-    ...OFFER,
-    bubbles: ["Aap akele nahi hain.", "Abhi Tele-MANAS ko 14416 par call kijiye — free hai, 24 ghante."],
+    ...ANSWER,
+    answer: ["Aap akele nahi hain.", "Abhi Tele-MANAS ko 14416 par call kijiye — free hai, 24 ghante."],
     options: ["Meri shaadi kab hogi?", "Kisi apne se baat karti hoon"],
-    ask_for: "birth_time",
-  }, { language: "Hinglish", hourAsked: false })!;
+  }, { language: "Hinglish", hourAsked: false, upay: true, askFor: "birth_time" })!;
   assertEquals(offered.kind, "care");
   assertEquals(offered.offer, "none");
-  assertEquals(offered.remedyBubbles, []);
+  assertEquals(offered.upay, "");
+  assert(!offered.bubbles.includes(ANSWER.upay));
   assertEquals(offered.options, ["Kisi apne se baat karti hoon"]);
   assertEquals(offered.askFor, "none");
   assert(!("remedy_bubbles" in v5Body(offered, { version: "v5" })));
   assertEquals(v5Body(offered, { version: "v5" }).kind, "care");
 
   // A number that only contains 14416, or 112 on its own, is not a helpline.
-  assertEquals(normaliseChatReplyV5({ ...OFFER, bubbles: ["Order 1441612 aaya.", "112 din."] }, { language: "Hinglish", hourAsked: false })!.kind, "answer");
+  assertEquals(normaliseChatReplyV5({ ...ANSWER, answer: ["Order 1441612 aaya.", "112 din."] }, { language: "Hinglish", hourAsked: false })!.kind, "answer");
 });
 
 Deno.test("a stored v5 reply still renders in an old build, and hides nothing it should show", () => {
-  const reply = normaliseChatReplyV5(OFFER, { language: "Hinglish", hourAsked: false })!;
-  const body = v5Body(reply, { version: "v5", remedyHook: true });
-
+  const reply = normaliseChatReplyV5(ANSWER, { language: "Hinglish", hourAsked: false, upay: true })!;
+  const body = v5Body(reply, { version: "v5" });
   assertEquals(body.verdict, reply.bubbles[0]);
-  assert((body.opening as string).length > 0);
+  assertEquals(body.opening, reply.bubbles.slice(1).join("\n\n"));
   assertEquals(body.sections, []);
-  assertEquals(body.remedy_bubbles, reply.remedyBubbles);
-  assertEquals(body.remedy_hook, true);
+  assertEquals(body.offer, "none");
   assertEquals(body.v, "v5");
 
-  const plain = v5Body({ ...reply, offer: "none" }, { version: "v5" });
-  assert(!("remedy_bubbles" in plain));
+  // A reply stored with an offer before 28 Sep keeps its hidden upay for `serveRemedy`.
+  const legacy = v5Body(
+    { ...reply, offer: "remedy", remedyBubbles: ["Har Shukravar mantra 11 baar.", "Kal aaiye."] },
+    { version: "v5", remedyHook: true },
+  );
+  assertEquals(legacy.remedy_bubbles, ["Har Shukravar mantra 11 baar.", "Kal aaiye."]);
+  assertEquals(legacy.remedy_hook, true);
 });
 
 // ---------------------------------------------------------------- accepting the upay
@@ -283,9 +333,15 @@ Deno.test("a detail just given is thanked for, said back, and the earlier questi
   assert(unasked.includes("answer anything else they ask in this message."));
   assert(!unasked.includes("the question they asked before it"));
 
-  const failed = buildUserPromptV5("pata nahi 15 ya 16", context({ captureFailed: "dob" }));
-  assert(failed.includes("could not be read as one"));
-  assert(failed.includes('"ask_for" to "dob"'));
+  // Not read: nothing is called saved, and the sawal asks again — the code's to say, not the model's.
+  const sawal = sawalFor({
+    topic: "marriage", message: "pata nahi 15 ya 16", care: false, dob: true, hour: true, place: true,
+    hourAsks: { asked: 0, declined: false }, dobAsks: 1, placeAsks: 0, asked: [], captureFailed: "dob",
+  });
+  assertEquals(sawal.askFor, "dob");
+  const failed = flat(buildUserPromptV5("pata nahi 15 ya 16", context({ captureFailed: "dob", sawal })));
+  assert(failed.includes("could not be read as one. Nothing is saved"));
+  assert(failed.includes("THE QUESTION TO ASK — the \"sawal\", chosen in code. Exactly one question, this one: their date of birth, once more"));
 });
 
 Deno.test("a stated rashi is accepted without the hour, and reconciled gently with it", () => {
@@ -298,26 +354,29 @@ Deno.test("a stated rashi is accepted without the hour, and reconciled gently wi
   assert(known.includes("Say so once, gently"));
 });
 
-Deno.test("the hook follows the flag, and is given once a session", () => {
-  assert(buildUserPromptV5("x", context()).includes("never promise one"));
-  assert(buildUserPromptV5("x", context({ planEnabled: true })).includes("3-month plan"));
-  assert(buildUserPromptV5("x", context({ hookGiven: true })).includes("already given this session"));
+Deno.test("the hook rides with the upay, follows the flag, and is given once a session", () => {
+  const upay = upayFor("marriage", { now: MONDAY });
+  // No upay, no hook: it is an invitation back to see the upay work.
+  assert(!buildUserPromptV5("x", context()).includes("THE HOOK"));
+  assert(buildUserPromptV5("x", context({ upay })).includes("never promise one"));
+  assert(buildUserPromptV5("x", context({ upay, planEnabled: true })).includes("3-month plan"));
+  assert(buildUserPromptV5("x", context({ upay, hookGiven: true })).includes("already given this session"));
 });
 
-Deno.test("an upay offered and passed over is not asked about again, and stays one tap away", () => {
+Deno.test("an upay offered before, and passed over, is never brought up again", () => {
   const offered = flat(buildUserPromptV5("jeevansathi kaisa hoga?", context({ upaysOffered: ["marriage"] })));
-  assert(offered.includes("THE UPAY ALREADY OFFERED, not taken yet: marriage"));
-  assert(offered.includes("do not write the offer line again"));
-  assert(offered.includes('Keep "offer" as "remedy"'));
+  assert(offered.includes("An upay was offered earlier, on marriage, and not taken. Do not bring the offer up again."));
+  assert(!offered.includes('"offer"'));
 
-  assert(!buildUserPromptV5("x", context()).includes("ALREADY OFFERED"));
-  assert(!buildUserPromptV5("x", context({ upaysOffered: [] })).includes("ALREADY OFFERED"));
+  assert(!buildUserPromptV5("x", context()).includes("offered earlier"));
+  assert(!buildUserPromptV5("x", context({ upaysOffered: [] })).includes("offered earlier"));
 });
 
-Deno.test("a flagged conversation stays gentle and offers nothing", () => {
-  const prompt = buildUserPromptV5("x", context({ care: true }));
+Deno.test("a flagged conversation stays gentle and gives no upay, even one handed in", () => {
+  const prompt = buildUserPromptV5("x", context({ care: true, upay: upayFor("marriage", { now: MONDAY }) }));
   assert(prompt.includes("THEY SAID THEY WANTED TO DIE"));
-  assert(prompt.includes('"offer" is "none"'));
+  assert(prompt.includes("No upay"));
+  assert(!prompt.includes("THE UPAY FOR TODAY"));
   assert(prompt.includes("14416"));
 });
 
@@ -557,7 +616,7 @@ Deno.test("the options rule keeps every chip on the reply's topic, with a menu f
 
 Deno.test("every example carries options, and none of them leaves its own topic", () => {
   const examples = PROMPT.slice(PROMPT.indexOf("EXAMPLES"));
-  const topics = ["marriage", "marriage", "career", "marriage", "love", "children", "love", "marriage"] as const;
+  const topics = ["marriage", "career", "marriage", "marriage", "marriage", "love", "debt", "marriage", "marriage"] as const;
   const lists = [...examples.matchAll(/options: (\[[^\]]*\])/g)].map((m) => JSON.parse(m[1]) as string[]);
   assertEquals(lists.length, topics.length);
   lists.forEach((options, i) => {
@@ -722,23 +781,23 @@ Deno.test("love and marriage, work and studies, money and debt lead into each ot
 const MARRIAGE = {
   kind: "answer",
   topic: "marriage",
-  bubbles: ["‹window› shaadi ka sabse accha samay hai.", "Is time Shukra ki dasha chalegi.", "Aaj ka upay bataun?"],
-  offer: "remedy",
-  remedy_bubbles: ["Har Shukravar mantra 11 baar.", "Kal aaiye.", "Rishta kaun dhoond raha hai?"],
+  answer: ["‹window› shaadi ka sabse accha samay hai.", "Is time Shukra ki dasha chalegi."],
+  upay: "",
+  sawal: "Rishta kaun dhoond raha hai?",
   options: ["Haan, upay batao 🙏", "Jeevansathi kaisa hoga?", "Naukri kab pakki hogi?"],
-  ask_for: "none",
 };
 
 Deno.test("an off-topic chip is dropped and the topic's own follow-up takes its place", () => {
+  // Nor is a yes to an upay kept: no reply offers one, and an upay comes when it is due.
   const reply = normaliseChatReplyV5(MARRIAGE, { language: "Hinglish", hourAsked: false })!;
-  assertEquals(reply.options, ["Haan, upay batao 🙏", "Jeevansathi kaisa hoga?", "Love ya arrange?"]);
+  assertEquals(reply.options, ["Jeevansathi kaisa hoga?", "Love ya arrange?"]);
 
-  // A yes the model wrote under no offer would be a yes to nothing.
-  const none = normaliseChatReplyV5(
-    { ...MARRIAGE, offer: "none", options: ["Haan, upay batao 🙏", "Love ya arrange?", "Jeevansathi kaisa hoga?"] },
+  // A yes to the sawal is an answer, not an acceptance, and stays; a chip asking for an upay goes.
+  const answers = normaliseChatReplyV5(
+    { ...MARRIAGE, options: ["Haan, ek rishta aaya hai", "Haan", "Koi upay batao", "Abhi koi baat nahi"] },
     { language: "Hinglish", hourAsked: false },
   )!;
-  assertEquals(none.options, ["Love ya arrange?", "Jeevansathi kaisa hoga?"]);
+  assertEquals(answers.options, ["Haan, ek rishta aaya hai", "Haan", "Abhi koi baat nahi"]);
 });
 
 Deno.test("nothing they already asked or passed over is offered back, in any spelling of it", () => {
@@ -746,17 +805,17 @@ Deno.test("nothing they already asked or passed over is offered back, in any spe
     { ...MARRIAGE, options: ["Love ya arrange?", "jeevansathi kaisa hoga", "Ghar wale maanenge?"] },
     { language: "Hinglish", hourAsked: false, asked: ["Meri shaadi kab hogi?", "Jeevansathi kaisa hoga?"] },
   )!;
-  assertEquals(reply.options, ["Haan, upay batao 🙏", "Love ya arrange?", "Ghar wale maanenge?"]);
+  assertEquals(reply.options, ["Love ya arrange?", "Ghar wale maanenge?"]);
 
   const topUp = normaliseChatReplyV5(
     { ...MARRIAGE, options: ["Naukri kab pakki hogi?"] },
     { language: "Hinglish", hourAsked: false, asked: ["Jeevansathi kaisa hoga?"] },
   )!;
-  assertEquals(topUp.options, ["Haan, upay batao 🙏", "Love ya arrange?", "Shaadi mein deri kyun?"]);
+  assertEquals(topUp.options, ["Love ya arrange?", "Shaadi mein deri kyun?"]);
 
   // The last reply's chips, untapped, come back in [asked] — and are not offered twice running.
   const next = normaliseChatReplyV5(
-    { ...MARRIAGE, offer: "none", options: ["Jeevansathi kaisa hoga?", "Love ya arrange?", "Ghar wale maanenge?"] },
+    { ...MARRIAGE, options: ["Jeevansathi kaisa hoga?", "Love ya arrange?", "Ghar wale maanenge?"] },
     {
       language: "Hinglish",
       hourAsked: false,
@@ -775,7 +834,7 @@ Deno.test("nothing they already asked or passed over is offered back, in any spe
       asked: ["Jeevansathi kaisa hoga?", "Meri shaadi kab hogi?", "Haan, upay batao 🙏", "Jeevansathi kaisa hoga?", "Love marriage ya arrange?"],
     },
   )!;
-  assertEquals(live.options, ["Haan, upay batao 🙏", "Rishta kab tak aayega?", "Shaadi mein deri kyun?"]);
+  assertEquals(live.options, ["Rishta kab tak aayega?", "Shaadi mein deri kyun?"]);
   assertEquals(onTopicOptions(["Shaadi kab hogi?"], { topic: "marriage", asked: ["meri shaadi kab hogi"] }), []);
   // The longer after the shorter is a new chip, and a word they merely used is not a question asked.
   assertEquals(onTopicOptions(["Love marriage ya arrange?"], { topic: "marriage", asked: ["Love ya arrange?"] }), ["Love marriage ya arrange?"]);
@@ -784,17 +843,17 @@ Deno.test("nothing they already asked or passed over is offered back, in any spe
 
 Deno.test("the top-up is in their language, Marathi too, and never on an ask or after a crisis", () => {
   const kannada = normaliseChatReplyV5(
-    { ...MARRIAGE, topic: "career", offer: "none", options: ["ಮದುವೆ ಯಾವಾಗ?"] },
+    { ...MARRIAGE, topic: "career", options: ["ಮದುವೆ ಯಾವಾಗ?"] },
     { language: "Kannada", hourAsked: false },
   )!;
   assertEquals(kannada.options, ["ಸರ್ಕಾರಿ ಅಥವಾ ಖಾಸಗಿ ಕೆಲಸ?", "ಬಡ್ತಿ ಯಾವಾಗ ಸಿಗುತ್ತದೆ?"]);
 
   const marathi = normaliseChatReplyV5({ ...MARRIAGE, options: ["नोकरी कधी मिळेल?"] }, { language: "Marathi", hourAsked: false })!;
-  assertEquals(marathi.options, [acceptChipFor("Marathi"), "जोडीदार कसा असेल?", "लव्ह की अरेंज लग्न?"]);
+  assertEquals(marathi.options, ["जोडीदार कसा असेल?", "लव्ह की अरेंज लग्न?"]);
 
-  const ask = normaliseChatReplyV5({ ...MARRIAGE, kind: "ask", offer: "none", options: [] }, { language: "Hinglish", hourAsked: false })!;
+  const ask = normaliseChatReplyV5({ ...MARRIAGE, kind: "ask", answer: [], options: [] }, { language: "Hinglish", hourAsked: false })!;
   assertEquals(ask.options, []);
-  const care = normaliseChatReplyV5({ ...MARRIAGE, kind: "chat", offer: "none", options: [] }, { language: "Hinglish", hourAsked: false, care: true })!;
+  const care = normaliseChatReplyV5({ ...MARRIAGE, kind: "chat", options: [] }, { language: "Hinglish", hourAsked: false, care: true })!;
   assertEquals(care.options, []);
 });
 
@@ -1042,6 +1101,96 @@ Deno.test("no kundali line above a death, an illness or despair; it waits for th
   // The prompt holds it back too, for a fear the words above miss.
   const prompt = flat(buildUserPromptV5("x", kundaliContext(WHOLE, "x")));
   assert(prompt.includes("Never before sympathy. If they tell you of a loss, an illness, an accident or a fear, leave the line out"));
+});
+
+Deno.test("a day the Moon changed sign still gets a season, the one both signs agree on", () => {
+  // Live (review, 28 Sep): 15 Aug 1998, no hour, "Naukri kab lagegi?" — Chandra moved from Mesha
+  // into Vrishabha that day, THE TIMING was UNKNOWN, and the answer had no month or year.
+  const chart = computeChart({ dob: "1998-08-15", asOf: MONDAY })!;
+  assertEquals([chart.moonRashi, chart.moonRashiCandidates], [null, ["Mesha", "Vrishabha"]]);
+  assertEquals(transitTiming(chart.moonRashi, MONDAY), null);
+
+  const either = transitTimingEither(chart.moonRashiCandidates, MONDAY)!;
+  const [mesha, vrishabha] = chart.moonRashiCandidates.map((rashi) => transitTiming(rashi, MONDAY)!);
+  assertEquals(either.either, ["Mesha", "Vrishabha"]);
+  for (const { topic, window } of either.topics) {
+    assert(window, topic);
+    assertEquals([window.how, window.guruHouse, window.favours], ["either", null, null], topic);
+    const a = mesha.topics.find((t) => t.topic === topic)!.window!;
+    const b = vrishabha.topics.find((t) => t.topic === topic)!.window!;
+    const shares = Math.min(a.endJd, b.endJd) - Math.max(a.startJd, b.startJd) >= 60;
+    // The part both share, or else the stretch that covers both — never wider than the two.
+    if (shares) {
+      assertEquals([window.startJd, window.endJd], [Math.max(a.startJd, b.startJd), Math.min(a.endJd, b.endJd)], topic);
+    } else {
+      assertEquals([window.startJd, window.endJd], [Math.min(a.startJd, b.startJd), Math.max(a.endJd, b.endJd)], topic);
+    }
+  }
+
+  const block = flat(describeTransits(either));
+  assert(block.includes("Chandra moved from Mesha into Vrishabha"));
+  assert(block.includes("Never name Mesha or Vrishabha as their rashi, and never a house for Guru"));
+  assert(!block.includes("house from their Chandra"));
+  assert(/- A job, [^—]+: from about \w+ 20\d\d to \w+ 20\d\d|- A job, [^—]+: now, through about/.test(block));
+
+  const prompt = buildUserPromptV5("Naukri kab lagegi?", context({ chart, transits: either }));
+  assert(!prompt.includes("THE TIMING: UNKNOWN"));
+  assert(prompt.includes("each window below is the season both signs agree on"));
+  // A settled day is read as before, and one sign alone is no pair.
+  assert(describeTransits(transitTiming("Tula", MONDAY)!).includes("over their rashi, Tula"));
+  assertEquals(transitTimingEither(["Tula"], MONDAY), null);
+});
+
+Deno.test("across twenty years of birth dates, none is left without a window for want of the hour", () => {
+  // 44% of these days the Moon changed sign; every one of them now has a season for every matter.
+  let unsettled = 0;
+  for (let ms = Date.parse("1985-01-01"); ms < Date.parse("2005-01-01"); ms += 86_400_000 * 11) {
+    const chart = computeChart({ dob: new Date(ms).toISOString().slice(0, 10), asOf: MONDAY })!;
+    if (chart.moonRashi) continue;
+    unsettled++;
+    const either = transitTimingEither(chart.moonRashiCandidates, MONDAY)!;
+    for (const { topic, window } of either.topics) {
+      assert(window && window.endJd - window.startJd >= 60, `${chart.moonRashiCandidates} ${topic}`);
+      assert(window.endJd <= either.asOfJd + 24 * 30.44 + 7, `${topic}: past two years`);
+    }
+  }
+  assert(unsettled > 200, `${unsettled}`);
+});
+
+Deno.test("the rashi a first reply named is not named again when the hour comes", () => {
+  // Live (review): turn 1 "aapki Dhanu rashi ke hisaab se…", turn 2 "…aapki Dhanu rashi aur
+  // Purva Ashadha nakshatra hai".
+  const chart = computeChart({ ...WHOLE, asOf: TODAY })!;
+  const timing = chatTiming(chart, { dob: WHOLE.dob, asOf: TODAY, v5: true });
+  const transits = transitTiming(chart.moonRashi, TODAY);
+  const named = kundaliLineFor(chart, { timing, transits, question: "shaadi kab?", rashiNamed: true })!;
+  assertEquals(named.rashiNamed, true);
+  assertEquals(kundaliLineFor(chart, { timing, transits, question: "shaadi kab?" })!.rashiNamed, undefined);
+
+  const captured = { field: "birth_time" as const, said: "5:30 AM", question: "Meri shaadi kab hogi?" };
+  const later = flat(buildUserPromptV5("subah 5:30", context({ chart, timing, transits, kundaliLine: named, captured })));
+  assert(later.includes(`aapki ${chart.nakshatra} nakshatra hai`));
+  assert(!later.includes(`${chart.moonRashi} rashi aur`));
+  assert(later.includes("An earlier reply already named their rashi: name only the nakshatra now"));
+  assert(later.includes("do not name or explain their rashi again"));
+
+  // The first reply, or a line whose rashi was not settled before, still names it.
+  const first = flat(buildUserPromptV5("x", kundaliContext(WHOLE, "x")));
+  assert(first.includes(`aapki ${chart.moonRashi} rashi aur ${chart.nakshatra} nakshatra hai`));
+});
+
+Deno.test("the reply to a place is thanked and checked, and claims a whole kundali only with one", () => {
+  const system = flat(PROMPT);
+  // Example 9 is the case with THEIR KUNDALI, and its only question is the check.
+  assert(system.includes("with THE DETAIL THEY JUST GAVE and THEIR KUNDALI — only then is the whole kundali there to speak of"));
+  assert(system.includes('sawal: "‹place› — sahi hai na?"'));
+  assert(system.includes("After a place of birth just found, the sawal is the check on it"));
+  assert(!system.includes("except the check on a place of birth just saved"));
+  // Without the hour there is no kundli, and the block says so (Kannada, live: "now I can see your
+  // chart properly", with the hour declined).
+  const captured = { field: "birth_place" as const, said: "Mysuru, Karnataka", question: null };
+  const prompt = flat(buildUserPromptV5("ಮೈಸೂರು", context({ chart: computeChart({ dob: WHOLE.dob, asOf: TODAY }), captured })));
+  assert(prompt.includes("Their hour of birth is still not on file, so there is no whole kundali: never say the kundali is now complete, clearer or fully seen"));
 });
 
 Deno.test("the kundali line leaves v4 alone: the v4 prompt carries none of it", () => {

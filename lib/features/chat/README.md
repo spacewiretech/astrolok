@@ -34,6 +34,9 @@ between them. Familiar on purpose — the green bar, the beige wallpaper, bubble
   `ChatRatingCard`.
 - `chat_birth_time_sheet.dart` — the careful birth-time picker (no preset time), opened from the
   "⏰" button under Astro's ask. Declares: `askBirthTime`, `birthTimeSentence`, `formatBirthClock`.
+- `chat_birth_place_sheet.dart` — the kundali form's place search in a sheet, opened from the "📍"
+  button under Astro's ask; hands back the picked row with its search session, as a
+  `ChatBirthPlace`. Declares: `askBirthPlace`.
 
 ## How a reply arrives
 
@@ -48,7 +51,8 @@ The transport is not streaming, so the chat stages it the way a person sends mes
    1.5 s: at once after a normal wait, a moment later for one that came back faster (a served
    upay). One that lands before 900 ms turns the ticks blue and starts the typing there.
 3. Each later bubble follows about two seconds on, behind "typing…" again (`ChatPacing`: 1.5 s +
-   7 ms a character, 1.8–2.6 s). Reply buttons and the rating card wait for the last one.
+   7 ms a character, 1.8–2.6 s), so a four-message answer takes about six seconds to finish
+   arriving. Reply buttons — the ⏰/📍 ones included — and the rating card wait for the last one.
 
 Staging is display-only — leaving the screen or switching threads mid-delivery loses nothing, it just
 shows whole next time. It is conversation timing, not animation: reduced motion keeps it and only
@@ -58,16 +62,39 @@ composer. Tests override `chatPacingProvider` with `ChatPacing.instant()`.
 
 ## v5 and older replies
 
-The app sends `chat_ui: 2` with every turn; only such a client is answered with prompt v5 — short
-bubbles, the day's upay offered ("Haan, upay batao 🙏" is the first reply button) and served on a
-yes without using a question, a time window for every "kab", and birth details asked for in the
-conversation. Older builds keep v4. `AstroMessage.displayBubbles` turns any older card (verdict,
-title + opening, sections) into bubbles, so a conversation started before v5 reads as a chat too.
+The app sends `chat_ui: 2` with every turn; only such a client is answered with prompt v5. A v5
+answer is up to four bubbles, in order: the answer (with a time window for every "kab"), the
+chart's reason, the upay with an invitation to come back — once Astro knows enough, usually the
+third answer, and not again in the thread — and a question about their situation, which is where
+the hour and the place of birth are asked for. The server decides all of it; the screen only
+shows the bubbles in order. Older builds keep v4. `AstroMessage.displayBubbles` turns any
+older card (verdict, title + opening, sections) into bubbles, so a conversation started before v5
+reads as a chat too.
+
+**Replies from before the upay was folded in** ended by offering it: `offer: "remedy"`, with "Haan,
+upay batao 🙏" as the first reply button, served on a yes as a `remedy` turn without using a
+question. New replies no longer offer, but those rows are in the database and cache, so the yes
+still works and the rating card still holds back over an unanswered offer.
 
 When Astro asks for the hour, "⏰ Samay chunein" opens the picker and "Pata nahi" answers; typing
 the time works as well — the server reads it (`_shared/birth_details.ts`), saves it, and answers the
 earlier question in the same turn. A saved detail comes back as `ChatReply.user`, installed the way
 Profile's birth-time picker installs it.
+
+When it asks for the place (`ask_for: "birth_place"`), "📍 Jagah chunein" opens the place search
+(`place-search` autocomplete, the kundali form's `PlaceSearchField`). A pick is sent as the row's
+description for the transcript, plus `birth_place: {place_id, description, session_token}` so the
+server saves that exact place; entry `birth_place`. The app makes no Details call — the server
+resolves the id, under the search's own session token, so Google bills the typing and the lookup
+as one session the way it bills the kundali form's.
+Typing the town works too (the hint says "Jaise: Jaipur, Rajasthan" in each language), and the
+server looks the words up. With `place_search_enabled` off there is no button, only the hint. A
+picked place whose turn fails comes back to the composer as words, and resending it is a typed
+town.
+
+The chat never makes or changes a kundali. The Kundali screens still ask for the details
+themselves and still take their 24 hours; the only kundali row a chat turn touches is the existing
+recast when someone corrects a date or hour of birth.
 
 ## Care replies
 

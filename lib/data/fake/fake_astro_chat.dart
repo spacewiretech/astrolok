@@ -9,13 +9,14 @@ import '../repositories/chat_repository.dart';
 /// real model call per turn.
 ///
 /// The replies are written in the register the prompt asks for: an answer committed to first, a
-/// computed detail cited, a hedged claim, a question back, and a nakshatra that is only named
-/// once a birth time is known. A fake that answered in lorem ipsum would hide exactly the layout
-/// problems this exists to surface — three sections of real prose wrap very differently from
-/// three short strings.
+/// window for a "kab", the chart's reason in plain words, and a question back. A fake that
+/// answered in lorem ipsum would hide exactly the layout problems this exists to surface — four
+/// real messages and three buttons wrap very differently from four short strings.
 ///
-/// It seeds two finished conversations so the sidebar has something in it on a fresh checkout.
-/// A drawer that is always empty is a drawer nobody notices is broken.
+/// It seeds three finished conversations so the sidebar has something in it on a fresh checkout.
+/// A drawer that is always empty is a drawer nobody notices is broken. One of them ends on the
+/// offer of an upay the way v5 replies used to, so the yes chip those rows still carry can be
+/// walked too.
 class FakeChatRepository implements ChatRepository {
   FakeChatRepository({this.latency = const Duration(milliseconds: 1400)}) {
     _seed();
@@ -40,14 +41,12 @@ class FakeChatRepository implements ChatRepository {
   /// checkout at the same point it would in production.
   static const _rateAfter = 5;
 
-  /// True while the newest scripted reply is waiting for its offered upay to be accepted.
-  bool _offered = false;
-
   @override
   Future<ChatReply> send(
     String message, {
     String? threadId,
     String entry = 'composer',
+    ChatBirthPlace? birthPlace,
   }) async {
     await Future<void>.delayed(latency);
 
@@ -58,6 +57,8 @@ class FakeChatRepository implements ChatRepository {
         : _open();
 
     final transcript = _threads[id]!;
+    // Read before this turn is added: the script follows what the last reply asked for.
+    final replies = transcript.where((turn) => !turn.isUser).toList();
 
     transcript.add(
       AstroMessage(
@@ -68,7 +69,12 @@ class FakeChatRepository implements ChatRepository {
       ),
     );
 
-    final reply = _scripted(_turn++, message);
+    _turn++;
+    final reply = _scripted(
+      said: message,
+      last: replies.isEmpty ? null : replies.last,
+      place: birthPlace,
+    );
     transcript.add(reply);
 
     final existing = _summaries[id]!;
@@ -175,10 +181,10 @@ class FakeChatRepository implements ChatRepository {
     return id;
   }
 
-  /// Two conversations already had, so the drawer has something to group.
+  /// Three conversations already had, so the drawer has something to group.
   ///
-  /// Dated deliberately across the buckets `groupThreads` sorts into — one today, one last week —
-  /// so the headings are visible without waiting a week to see them.
+  /// Dated deliberately across the buckets `groupThreads` sorts into — today, yesterday, last
+  /// week — so the headings are visible without waiting a week to see them.
   void _seed() {
     final now = DateTime.now();
 
@@ -250,29 +256,64 @@ class FakeChatRepository implements ChatRepository {
       lastMessageAt: now.subtract(const Duration(days: 4)),
     );
 
+    // Before the upay was folded into the answer, a v5 reply ended by offering it, with the yes as
+    // its first button. Rows like this are in the database and must still be answerable.
+    _threads['fake-thread-seed-c'] = [
+      AstroMessage(
+        id: 'fake-seed-c-0',
+        role: ChatRole.user,
+        createdAt: now.subtract(const Duration(days: 1)),
+        text: 'Meri shaadi kab hogi?',
+      ),
+      AstroMessage(
+        id: 'fake-seed-c-1',
+        role: ChatRole.astro,
+        createdAt: now.subtract(const Duration(days: 1)),
+        kind: ReplyKind.answer,
+        topic: 'marriage',
+        offersRemedy: true,
+        bubbles: const [
+          'Aapki kundali ke hisaab se 2027 ke middle se 2028 ke end tak shaadi ka sabse accha '
+              'samay hai.',
+          'Is time Shukra ki dasha chalegi, jo rishton ke liye shubh hai.',
+          'Kya main aapko aaj ka upay bataun? 🙏',
+        ],
+        options: const ['Haan, upay batao 🙏', 'Jeevansathi kaisa hoga?'],
+      ),
+    ];
+    _summaries['fake-thread-seed-c'] = ChatThreadSummary(
+      id: 'fake-thread-seed-c',
+      title: 'Shaadi ka samay',
+      preview: 'Aapki kundali ke hisaab se 2027 ke middle se 2028 ke end tak shaadi ka sabse accha',
+      lastMessageAt: now.subtract(const Duration(days: 1)),
+    );
+
     _facts.add(const AstroFact(key: 'works_as', value: 'a schoolteacher in Pune'));
   }
 
-  /// A v5 conversation, scripted: an answer that ends by offering the day's upay, the upay itself
-  /// when they say yes, an ask for the hour, and a thank-you that answers with the refined window.
+  /// A v5 conversation, scripted in the shape the server now writes: the answer, its reason, and
+  /// a question back about their real situation — asking for the hour first, then the place — and
+  /// on the third answer, once there is enough to go on, the upay and the invitation to come back,
+  /// together in one message before the question. Four messages at most, and the rashi only in
+  /// the first.
   ///
-  /// Written in the register the v5 prompt asks for — short Hinglish messages, a window in the
-  /// first one — because three real sentences wrap very differently from three short strings, and
-  /// the chat screen's timing (typing between bubbles) is what this exists to make visible.
-  AstroMessage _scripted(int turn, String said) {
+  /// Follows what the last reply asked for rather than reading the words, so the whole arc can be
+  /// walked with the buttons alone. Every thread is about marriage: the point is the shape and the
+  /// pacing, not a second astrologer.
+  AstroMessage _scripted({
+    required String said,
+    required AstroMessage? last,
+    required ChatBirthPlace? place,
+  }) {
     final id = 'fake-astro-${_nextId++}';
     final now = DateTime.now();
-    final lower = said.toLowerCase();
 
     AstroMessage astro({
       required List<String> bubbles,
       ReplyKind kind = ReplyKind.answer,
-      String topic = 'marriage',
-      bool offer = false,
       List<String> options = const [],
       AskFor askFor = AskFor.none,
     }) {
-      _offered = offer;
       return AstroMessage(
         id: id,
         role: ChatRole.astro,
@@ -282,15 +323,16 @@ class FakeChatRepository implements ChatRepository {
         verdict: bubbles.length > 1 ? bubbles.first : '',
         text: bubbles.length > 1 ? bubbles.skip(1).join('\n\n') : bubbles.first,
         kind: kind,
-        topic: topic,
-        offersRemedy: offer,
+        topic: 'marriage',
         options: options,
         askFor: askFor,
       );
     }
 
-    // They accepted the upay the last reply offered.
-    if (_offered && RegExp(r'haan|ha |yes|upay|हाँ').hasMatch('$lower ')) {
+    // A yes to an upay offered by a reply from before the offer went away — the seeded thread.
+    if (last != null &&
+        last.offersRemedy &&
+        RegExp(r'haan|ha |yes|upay|हाँ').hasMatch('${said.toLowerCase()} ')) {
       return astro(
         kind: ReplyKind.remedy,
         bubbles: const [
@@ -302,51 +344,69 @@ class FakeChatRepository implements ChatRepository {
       );
     }
 
-    // They answered the ask for the hour.
-    if (RegExp(r'\d|pata nahi|i do not know').hasMatch(lower) && turn > 1) {
-      _facts.add(const AstroFact(key: 'birth_time', value: 'the evening'));
+    // The first answer: the window, the reason, and the hour asked for. The ⏰ and "Pata nahi"
+    // buttons are the view's, raised by the ask; the server sends no options beside them.
+    if (last == null) {
       return astro(
-        bubbles: const [
-          'Shukriya! 7:30 PM note kar liya — galat ho to bata dijiye.',
-          'Ab aur pakka: March se August 2027 ke beech naukri ke sabse acche chances hain.',
-          'Kya main aapko aaj ka upay bataun? 🙏',
-        ],
-        topic: 'career',
-        offer: true,
-        options: const ['Haan, upay batao 🙏', 'Kis field mein?'],
-      );
-    }
-
-    if (turn == 0) {
-      return astro(
-        bubbles: const [
-          'Aapki kundali ke hisaab se 2027 ke middle se 2028 ke end tak shaadi ka sabse accha '
-              'samay hai.',
-          'Is time Shukra ki dasha chalegi, jo rishton ke liye shubh hai.',
-          'Kya main aapko aaj ka upay bataun? 🙏',
-        ],
-        offer: true,
-        options: const ['Haan, upay batao 🙏', 'Jeevansathi kaisa hoga?', 'Love ya arrange?'],
-      );
-    }
-
-    if (turn == 2 || lower.contains('naukri') || lower.contains('career')) {
-      return astro(
-        kind: ReplyKind.ask,
-        topic: 'career',
-        bubbles: const [
-          'Aap kis samay paida hue the? Jaise subah 7:30 ya raat 10 baje — isse main aur pakka '
-              'bata sakta hoon.',
-        ],
         askFor: AskFor.birthTime,
+        bubbles: const [
+          'Aapki Vrishabha rashi ke hisaab se 2027 ke beech se 2028 ke end tak shaadi ka sabse '
+              'accha samay hai.',
+          'Us samay Shukra ki dasha chalegi, jo rishton ke liye shubh hai — aapki kundali is '
+              'maamle mein acchi hai.',
+          'Aap kis samay paida hue the? Jaise subah 7:30 ya raat 10 baje — isse mahina bhi bata '
+              'paunga.',
+        ],
       );
     }
 
+    // They gave the hour (or said they do not know it): a sharper window, then the place.
+    if (last.askFor == AskFor.birthTime) {
+      final hour = RegExp(r'\d{1,2}(:\d{2})?\s*(am|pm)?', caseSensitive: false)
+          .firstMatch(said)
+          ?.group(0)
+          ?.trim();
+      if (hour != null) _facts.add(AstroFact(key: 'birth_time', value: hour));
+      return astro(
+        askFor: AskFor.birthPlace,
+        bubbles: [
+          hour == null
+              ? 'Koi baat nahi — bina samay ke bhi saaf dikhta hai: 2027 ka doosra hissa sabse '
+                  'shubh hai.'
+              : 'Shukriya! $hour se dekha — March se August 2027 sabse mazboot mahine hain.',
+          'Aapke saatve ghar par Guru ki nazar hai, jo accha rishta laati hai.',
+          'Aapka janm kis shehar mein hua tha? Isse lagna pakka ho jayega.',
+        ],
+      );
+    }
+
+    // They gave the place — picked, or typed. The third answer: enough is known for the upay.
+    if (last.askFor == AskFor.birthPlace) {
+      final where = (place?.description ?? said).split(',').first.trim();
+      _facts.add(AstroFact(key: 'birth_place', value: place?.description ?? said));
+      return astro(
+        bubbles: [
+          '$where ke hisaab se dekha — April se June 2027 mein rishta pakka hone ke sabse acche '
+              'yog hain.',
+          'Us samay Guru aapke saatve ghar se guzrega, aur wahan Shukra pehle se mazboot hai.',
+          'Agle 4 hafte har Shukravar Maa Katyayani ka mantra 11 baar padhiye. Kal wapas aaiye, '
+              'upay ka asar dekhte hain 🙏',
+          'Ek baat bataiye — rishta ghar wale dhoond rahe hain ya aap khud?',
+        ],
+        options: const [
+          'Ghar wale dhoond rahe hain',
+          'Main khud dhoond raha hoon',
+          'Jeevansathi kaisa hoga?',
+        ],
+      );
+    }
+
+    // Everything after: answer, reason, question. The upay has been given, and is not repeated.
     return astro(
-      kind: ReplyKind.chat,
       bubbles: const [
         'Aapka jeevansathi samajhdar aur shaant swabhav ka hoga.',
-        'Rishta aapsi izzat aur dosti par tikega.',
+        'Saatve ghar ka swami Budh hai, jo baat-cheet se judne wala rishta deta hai.',
+        'Aapko kaisa jeevansathi chahiye — naukri wala ya apna kaam karne wala?',
       ],
       options: const ['Love ya arrange?', 'Ghar wale maanenge?', 'Naukri kab lagegi?'],
     );

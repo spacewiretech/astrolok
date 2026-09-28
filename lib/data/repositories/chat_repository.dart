@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../models/app_user.dart';
 import '../models/astro_message.dart';
 
@@ -13,9 +15,19 @@ abstract interface class ChatRepository {
   /// conversation rather than failing, so a stale id cannot leave someone unable to talk.
   ///
   /// [entry] is which affordance produced it — `composer`, `quick_reply`, `topic`, `reading`,
-  /// `push`, `birth_time`. The server answers a button's English opener in the user's language
-  /// rather than in English.
-  Future<ChatReply> send(String message, {String? threadId, String entry = 'composer'});
+  /// `push`, `birth_time`, `birth_place`. The server answers a button's English opener in the
+  /// user's language rather than in English.
+  ///
+  /// [birthPlace] is the row they picked in the chat's place search, sent beside [message] (its
+  /// description, so the transcript reads as their own words). The server resolves the id rather
+  /// than geocoding the text: a typed town still works, but it is the likeliest match for the
+  /// words, and a picked one is the exact row they chose.
+  Future<ChatReply> send(
+    String message, {
+    String? threadId,
+    String entry = 'composer',
+    ChatBirthPlace? birthPlace,
+  });
 
   /// Every conversation, newest first, for the sidebar.
   Future<ChatThreadList> threads();
@@ -42,6 +54,43 @@ abstract interface class ChatRepository {
   ///
   /// Asked once per account, which the server enforces: a second answer changes nothing.
   Future<void> rate({required String threadId, int? rating, String? comment});
+}
+
+/// A birth place picked from the search under Astro's ask: the Google row's id and what it said.
+///
+/// Not a `BirthPlace`: that is coordinates and a zone, which cost a Details call to learn. The
+/// chat sends only what the search already returned and leaves resolving it to the server, which
+/// has to look the place up anyway before it can save it.
+@immutable
+class ChatBirthPlace {
+  const ChatBirthPlace({required this.placeId, required this.description, this.sessionToken});
+
+  final String placeId;
+
+  /// "Jaipur, Rajasthan, India" — the row as it was shown.
+  final String description;
+
+  /// The search's billing session, which the server's Details call closes. Google bills the
+  /// keystrokes of a session that ends in a Details call as that one lookup; without it, every
+  /// autocomplete request of the search was billed on its own, and the lookup again beside them.
+  final String? sessionToken;
+
+  /// The `birth_place` object `astro-chat` reads.
+  Map<String, String> toRequest() => {
+        'place_id': placeId,
+        'description': description,
+        'session_token': ?sessionToken,
+      };
+
+  @override
+  bool operator ==(Object other) =>
+      other is ChatBirthPlace &&
+      other.placeId == placeId &&
+      other.description == description &&
+      other.sessionToken == sessionToken;
+
+  @override
+  int get hashCode => Object.hash(placeId, description, sessionToken);
 }
 
 /// What comes back from one turn.

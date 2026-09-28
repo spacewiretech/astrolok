@@ -17,8 +17,10 @@ class ChatGreeting {
     required this.topics,
     required this.pickTime,
     required this.dontKnow,
+    required this.pickPlace,
     required this.dobHint,
     required this.timeHint,
+    required this.placeHint,
     required this.placeholder,
   });
 
@@ -37,9 +39,16 @@ class ChatGreeting {
   /// Sent when they do not know their birth time. The server reads it in every language.
   final String dontKnow;
 
-  /// Composer hints while Astro is waiting for a date or an hour of birth.
+  /// The button that opens the place search when Astro asks where they were born.
+  final String pickPlace;
+
+  /// Composer hints while Astro is waiting for a date, an hour or a place of birth.
+  ///
+  /// The place's names a town and its state. Typing works as well as the button — the server
+  /// looks the words up — and a bare "Rampur" is one of dozens.
   final String dobHint;
   final String timeHint;
+  final String placeHint;
 
   final String placeholder;
 
@@ -62,9 +71,11 @@ class ChatGreeting {
         'Paisa aur karz kab sudhrega?',
       ],
       pickTime: '⏰ Samay chunein',
+      pickPlace: '📍 Jagah chunein',
       dontKnow: 'Pata nahi',
       dobHint: 'Jaise 15 August 1998',
       timeHint: 'Jaise shaam 7:30',
+      placeHint: 'Jaise: Jaipur, Rajasthan',
       placeholder: 'Message',
     ),
     'hindi': ChatGreeting(
@@ -80,9 +91,11 @@ class ChatGreeting {
         'पैसा और कर्ज़ कब सुधरेगा?',
       ],
       pickTime: '⏰ समय चुनें',
+      pickPlace: '📍 जगह चुनें',
       dontKnow: 'पता नहीं',
       dobHint: 'जैसे 15 अगस्त 1998',
       timeHint: 'जैसे शाम 7:30',
+      placeHint: 'जैसे: जयपुर, राजस्थान',
       placeholder: 'संदेश',
     ),
     'english': ChatGreeting(
@@ -98,9 +111,11 @@ class ChatGreeting {
         'When will money and debt improve?',
       ],
       pickTime: '⏰ Choose time',
+      pickPlace: '📍 Choose place',
       dontKnow: 'I do not know',
       dobHint: 'e.g. 15 August 1998',
       timeHint: 'e.g. 7:30 in the evening',
+      placeHint: 'e.g. Jaipur, Rajasthan',
       placeholder: 'Message',
     ),
     'kannada': ChatGreeting(
@@ -116,9 +131,11 @@ class ChatGreeting {
         'ಹಣ ಮತ್ತು ಸಾಲ ಯಾವಾಗ ಸುಧಾರಿಸುತ್ತದೆ?',
       ],
       pickTime: '⏰ ಸಮಯ ಆರಿಸಿ',
+      pickPlace: '📍 ಸ್ಥಳ ಆರಿಸಿ',
       dontKnow: 'ಗೊತ್ತಿಲ್ಲ',
       dobHint: 'ಉದಾ: 15 ಆಗಸ್ಟ್ 1998',
       timeHint: 'ಉದಾ: ಸಂಜೆ 7:30',
+      placeHint: 'ಉದಾ: ಮೈಸೂರು, ಕರ್ನಾಟಕ',
       placeholder: 'ಸಂದೇಶ',
     ),
     'tamil': ChatGreeting(
@@ -135,9 +152,11 @@ class ChatGreeting {
         'பணம், கடன் எப்போது சரியாகும்?',
       ],
       pickTime: '⏰ நேரம் தேர்வு செய்க',
+      pickPlace: '📍 இடம் தேர்வு செய்க',
       dontKnow: 'தெரியாது',
       dobHint: 'உதா: 15 ஆகஸ்ட் 1998',
       timeHint: 'உதா: மாலை 7:30',
+      placeHint: 'உதா: மதுரை, தமிழ்நாடு',
       placeholder: 'செய்தி',
     ),
     'telugu': ChatGreeting(
@@ -153,9 +172,11 @@ class ChatGreeting {
         'డబ్బు, అప్పు ఎప్పుడు మెరుగవుతాయి?',
       ],
       pickTime: '⏰ సమయం ఎంచుకోండి',
+      pickPlace: '📍 స్థలం ఎంచుకోండి',
       dontKnow: 'తెలియదు',
       dobHint: 'ఉదా: 15 ఆగస్టు 1998',
       timeHint: 'ఉదా: సాయంత్రం 7:30',
+      placeHint: 'ఉదా: విజయవాడ, ఆంధ్రప్రదేశ్',
       placeholder: 'సందేశం',
     ),
     'malayalam': ChatGreeting(
@@ -172,9 +193,11 @@ class ChatGreeting {
         'പണവും കടവും എപ്പോൾ മെച്ചപ്പെടും?',
       ],
       pickTime: '⏰ സമയം തിരഞ്ഞെടുക്കൂ',
+      pickPlace: '📍 സ്ഥലം തിരഞ്ഞെടുക്കൂ',
       dontKnow: 'അറിയില്ല',
       dobHint: 'ഉദാ: 15 ഓഗസ്റ്റ് 1998',
       timeHint: 'ഉദാ: വൈകുന്നേരം 7:30',
+      placeHint: 'ഉദാ: തൃശ്ശൂർ, കേരളം',
       placeholder: 'സന്ദേശം',
     ),
   };

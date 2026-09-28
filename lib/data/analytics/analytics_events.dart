@@ -217,6 +217,14 @@ abstract final class Ev {
   /// picker's 9 AM default taught people to accept.
   static const chatBirthTimeChosen = 'Chat Birth Time Chosen';
 
+  /// The birth place sheet opened, from "📍 Jagah chunein" under a reply that asked where they
+  /// were born.
+  static const chatBirthPlaceOpened = 'Chat Birth Place Opened';
+
+  /// A row was picked in that sheet — sent as the next message. Typing the town instead is not
+  /// counted here; it is a `Chat Message Sent` from the composer.
+  static const chatBirthPlaceChosen = 'Chat Birth Place Chosen';
+
   // ---------------------------------------------------------------- profile
 
   static const profileViewed = 'Profile Viewed';

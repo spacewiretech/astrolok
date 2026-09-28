@@ -20,24 +20,85 @@ signature check. No network, no database.
   words and shorter body; v3's dasha and remedies; v2 and v1 as rollbacks), the user prompt's
   correction, known-rashi, timing and hour-of-birth blocks, `birthHourAsks` in every language the
   picker offers, and `detectLanguageSwitch`.
-- `chat_v5_test.ts` (61) — chat v5: the prompt's rules (a window in the first sentence, santan as a
-  period, names refused, one person's mind never read, the crisis stop, examples with no real
-  year, no birth detail called saved unless it was), the schema, the normaliser (the yes chip, no
-  offer without an upay, no second hour ask, a reply giving a helpline made a care reply with no
-  astrology chip), accepting the upay in every language, the user prompt's blocks, the
-  birth-detail parsers and the one date read unasked, Guru/Shani ingress months, the v5 timing
-  topics, and the southern-script and Marathi language switches — v5's only, v4 switching as it
-  shipped. Then the chips: a menu per topic and chips on every example, `topicsOf` in every
-  script and its look-alikes (ghar wale, upay kaam karega, exam, Dhanu, ಹಣೆ, വരുമാനം, the remedy
-  working), English "work" and every language's word for pay, the production drift dropped, the partner's work kept under marriage, the allowed pairs, the top-up
-  in their language (Marathi too) and never on an ask or after a crisis, nothing already asked or
-  passed over offered again, the upay turn's guard, and every fallback chip on its own topic.
+- `chat_v5_test.ts` (66) — chat v5: the prompt's rules (the answer's four parts, the offer gone
+  and named only to forbid it, the upay the code's, hope only from THE GOOD IN THEIR CHART, a
+  window in the first sentence, santan as a period, names refused, one person's mind never read,
+  the crisis stop, examples with no real year, no birth detail called saved unless it was), the
+  schema (`answer`, `upay`, `sawal`; no `ask_for`, `offer` or `remedy_bubbles`), the normaliser
+  (no offer and no yes chip on a new reply, an upay only where code asked for one, a reply giving
+  a helpline made a care reply with no upay and no astrology chip), an offer stored before 28 Sep
+  still carrying its hidden upay, accepting that upay in every language, the user prompt's
+  blocks (the hook riding with the upay, an old offer never brought up), the birth-detail parsers
+  and the one date read unasked, Guru/Shani ingress months, the v5 timing topics, and the
+  southern-script and Marathi language switches — v5's only, v4 switching as it shipped. Then
+  the chips: a menu per topic and chips on every example, `topicsOf` in every script and its
+  look-alikes (ghar wale, upay kaam karega, exam, Dhanu, ಹಣೆ, വരുമാനം, the remedy working),
+  English "work" and every language's word for pay, the production drift dropped, the partner's
+  work kept under marriage, the allowed pairs, the top-up in their language (Marathi too) and
+  never on an ask or after a crisis, nothing already asked or passed over offered again, a yes
+  that answers the sawal kept, the upay turn's guard, and every fallback chip on its own topic.
   Then the kundali line: on the first reply with the whole chart (rashi and nakshatra, the rashi
   said once), never without the hour, "sthan" only with a place on file, on the turn a captured
   hour completes the chart, once a thread and never after a crisis, "the time ahead is good" only
   with a window inside a year (the softer line otherwise), only the matter they asked about
   named, never above a death, an illness or despair (owed to their next question instead), and
-  none of it in v4.
+  none of it in v4. And from the review of 28 Sep: a day the Moon changed sign getting the season
+  both signs agree on (15 Aug 1998, live), no birth date in twenty years left without a window
+  for want of the hour, the rashi a first reply named not named again when the hour comes, and
+  the reply to a place checked, with example 9 the only one that speaks of a whole kundali.
+- `chat_upay_test.ts` (44) — the v5 answer turn's arc. The upay: India's weekday across midnight
+  UTC, every topic on every day giving one concrete upay with a day, a count and a length and
+  nothing costly, today's own before today's deity before a named later day (Tuesday's Hanuman
+  Chalisa, Monday's 16 Somvar for shaadi, "Kal Mangalvar hai" for a Monday's debt), a morning
+  practice after midday starting tomorrow, Hanuman Chalisa and a doctor for health, the exam row
+  for a government job, nothing twice in a thread, the dasha and a weak graha breaking ties, and
+  the block's facts and hook. Asking for one in every script, and "upay kaise karun?" after one
+  not asking for another. The due rule: third answer with enough context, fourth anyway, at once
+  when asked, never in care or above a loss, once per topic. The thread's memory (answers,
+  upays given — legacy remedy turns too — questions asked) and each turn's topic. The sawal:
+  date, then hour, then place, then their situation, each once; a detail called wrong,
+  unreadable or without am/pm asked again once; `saysOwnDetailWrong`; no situational question
+  twice; a greeting and a care thread; every question's answers passing the chip guard; a place
+  said once named. The shape: jawab, kyun, upay, sawal in that order, four messages and 100 words
+  at most — the live 109- and 111-word replies cut at a clause, never the "kyonki…", the window,
+  the kundali line or the upay — one question, a chat and an ask and a care reply, `ask_for` from
+  code only. The prompt's three new blocks, only when due; THE GOOD IN THEIR CHART only true;
+  an offer stored before 28 Sep still served; and none of it in v4. The review of 28 Sep: a Mangal
+  dosh or a fear getting Hanuman Chalisa every day; the invitation back fitting when the upay
+  starts; the next upay waiting for the third or fourth answer since the last; a long thread read
+  whole giving no remedy or hook twice; a bare "upay batao" after its answer being the answer; a
+  question about the upay with "aur"/"or" not asking for another; a question on no subject asked
+  what is behind it (and the love and abroad phrasings read); a death asked about them, not for a
+  birth detail; idioms not read as a detail called wrong, and the same detail again changing
+  nothing; the place answer's topic from the thread; THE KUNDALI LINE with an upay (the live 106
+  and 116 words) under a hundred, and exactly a hundred cut.
+- `chat_birth_place_test.ts` (25) — the place of birth told in the v5 chat, with every Places and
+  Time Zone call answered by a recorded `fetch` and the database by one that records each table
+  it is asked for. A typed town searched India-first (the sentence around it dropped, in Hindi
+  too), its top match located and saved with coordinates, zone and `birth_coords_at`, said back
+  without "India" and answering the question asked before the details were; a picked row looked
+  up by id with the app's session token, and saved in the words it was shown in; typed words
+  saved as Google names the place ("Rampur, UP" was seen live). Never searched: a question, a
+  subject, "pata nahi", a yes, a greeting, a date or an hour, an unasked town; place words kept
+  in a name ("Cape Town"), the southern scripts' sentences and fused "in" dropped, localities
+  named for a subject ("Laxmi Nagar") searched, and a place with a question after it searched as
+  the place. Not found, Google
+  refusing, a bad id or zone: nothing saved, `failed`, and the sawal asks once more for the town
+  and state, then lets it go; no failure ever reaches the log with the place in it, and search
+  switched off spends nothing. Coordinates on file (or the place id alone) never overwritten nor
+  looked up; words never located replaced; a correction replaces it; any "nahi" to the place said
+  back — the live "Nahi abhi tak nahi" too — takes it off the account and searches nothing, while
+  ಇಲ್ಲಿ ("here") and അല്ലെങ്കിൽ ("or") are not a no. Every flow writes `users` alone: never
+  `kundalis`, never a re-cast. The check as the reply's only question, the no-kundli block that
+  never calls the kundali complete, and the not-found block; "sthan" only for a located place.
+- `mini_kundli_test.ts` (10) — the chat's small kundli: cast only with the date, hour,
+  coordinates and zone (a string latitude too); THEIR KUNDALI inside THEIR CHART only then; for
+  a fixed chart every graha's rashi, house and dignity, the matter houses' lords and the dasha
+  lords pinned and equal to `computeKundaliChart`'s, and the same over 120 births across forty
+  years and three clocks; born off India's clock, Chandra left out where the two charts differ and
+  the dasha always THEIR CHART's; every strength checked true against the chart (and none for a
+  chart with none); the grahas an upay would strengthen, and `upayFor` choosing the kundli's
+  graha's day and saying so; and no database, `kundalis` or re-cast in either new module.
 - `chat_timing_test.ts` (17) — the windows v4 answers "when" with: karakas and house lords from
   Chandra, the soonest favoured period and never a past one, back-to-back periods merged, a
   closing period not offered as "now", a favoured Mahadasha bridging a long wait, no marriage
@@ -101,7 +162,7 @@ signature check. No network, no database.
   ```
 
   The root README quotes `deno test functions/tests/payments_test.ts` for the payments file
-  alone. 512 tests in total.
+  alone. 575 tests in total.
 - Everything under test is deliberately pure, which is why the normalisers in `_shared/` take
   and return plain data rather than touching the DB themselves.
 - `mixpanel_test.ts` guards a specific past failure: the server `$insert_id` must key on the
