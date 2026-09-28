@@ -419,6 +419,45 @@ export async function fetchSubscriptionPayments(
     .filter((payment): payment is WebhookPayment => payment !== null);
 }
 
+/**
+ * Asks Cashfree to try a failed recurring charge again on [date], an IST `YYYY-MM-DD`.
+ *
+ * Cashfree reads only the date of `next_scheduled_time` and ignores the time, and for a UPI
+ * mandate it sends the pre-debit notice itself, which has to go out 25 hours ahead. It allows 3
+ * retries per billing cycle. [paymentId] is Cashfree's `payment_id` for the charge (for example
+ * `1404429_808_1789806387047`), not the numeric `cf_payment_id`.
+ *
+ * The retry is a new charge, not the failed one run again. Seen live on 2026-09-28: the response
+ * was a fresh `INITIALIZED` payment with its own `payment_id` and `cf_payment_id`, with
+ * `retry_attempts: 1`, scheduled 24 hours after the request on the date asked for. The failed
+ * charge stays FAILED. Retry the *latest* failed charge for the next attempt.
+ *
+ * The idempotency key is per charge and attempt, so a run that dies after the call and resends
+ * gets the original answer back instead of asking twice.
+ */
+export function retrySubscriptionPayment(
+  settings: CashfreeSettings,
+  subscriptionId: string,
+  paymentId: string,
+  date: string,
+  idempotencyKey: string,
+): Promise<Record<string, unknown>> {
+  return request(
+    settings,
+    "POST",
+    `/subscriptions/${encodeURIComponent(subscriptionId)}/payments/${
+      encodeURIComponent(paymentId)
+    }/manage`,
+    {
+      subscription_id: subscriptionId,
+      payment_id: paymentId,
+      action: "RETRY",
+      action_details: { next_scheduled_time: `${date}T00:00:00+05:30` },
+    },
+    idempotencyKey,
+  );
+}
+
 export function cancelSubscription(
   settings: CashfreeSettings,
   subscriptionId: string,
