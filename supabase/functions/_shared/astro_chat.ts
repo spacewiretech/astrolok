@@ -925,11 +925,18 @@ export const CHAT_TIMING_RULE =
   computed from their dasha, gives it — and only as a leaning, "the yog is strongest around
   2027", never as a promise. Never a year that block does not give.`;
 
-/** `chat_prompt_version` values. Anything unrecognised is treated as [PROMPT_V4]. */
+/**
+ * `chat_prompt_version` values. Anything unrecognised is treated as [PROMPT_V4].
+ *
+ * v5 is recognised but is not the fallback: it only reaches a client that says it can show it
+ * (`chat_ui: 2`, the WhatsApp-style screen), so for everyone else the current prompt is v4. See
+ * [effectiveVersion], and `astro_chat_v5.ts` for the prompt itself.
+ */
 export const PROMPT_V1 = "v1";
 export const PROMPT_V2 = "v2";
 export const PROMPT_V3 = "v3";
 export const PROMPT_V4 = "v4";
+export const PROMPT_V5 = "v5";
 
 /**
  * The version a `chat_prompt_version` cell selects.
@@ -940,7 +947,25 @@ export const PROMPT_V4 = "v4";
  */
 export function promptVersion(raw: string | null | undefined): string {
   const value = (raw ?? "").trim().toLowerCase();
-  return value === PROMPT_V1 || value === PROMPT_V2 || value === PROMPT_V3 ? value : PROMPT_V4;
+  return [PROMPT_V1, PROMPT_V2, PROMPT_V3, PROMPT_V5].includes(value) ? value : PROMPT_V4;
+}
+
+/**
+ * The version one turn is answered with: the dashboard's choice, stepped down to v4 for a client
+ * that cannot show v5.
+ *
+ * v5 answers in short bubbles, offers the remedy as a follow-up and asks for birth details in
+ * the conversation — a shape only the WhatsApp-style screen (`chat_ui: 2`) is built for. Builds
+ * before it keep the v4 they have. A rollback below v4 applies to everyone.
+ */
+export function effectiveVersion(configured: string, chatUi: number): string {
+  const version = promptVersion(configured);
+  return version === PROMPT_V5 && chatUi < 2 ? PROMPT_V4 : version;
+}
+
+/** True for v4 and every version after it — the ones that read THE TIMING and ask the hour once. */
+export function atLeastV4(version: string): boolean {
+  return version === PROMPT_V4 || version === PROMPT_V5;
 }
 
 /**
@@ -970,7 +995,9 @@ export function chatSystemPrompt(
     });
   }
 
-  if (selected === PROMPT_V4) {
+  // v5 has its own entry points (`chatSystemPromptV5` in astro_chat_v5.ts). A caller that hands it
+  // here gets v4 — the closest shape that renders everywhere — rather than falling through to v3.
+  if (selected === PROMPT_V4 || selected === PROMPT_V5) {
     return panditSystemPrompt({
       voice: `${CHAT_VOICE_V4}\n\n${
         languageBlock(language, { conversation: true, plain: true })
@@ -1428,28 +1455,7 @@ export function normaliseChatReply(raw: unknown): NormalisedReply | null {
     if (options.length === 4) break;
   }
 
-  const remember: Array<{ key: string; value: string }> = [];
-  const seen = new Set<string>();
-  for (const entry of Array.isArray(root.remember) ? root.remember : []) {
-    const fact = (entry ?? {}) as Record<string, unknown>;
-    const said = text(fact.key, 40).toLowerCase().replace(/\s+/g, "_");
-    const rashiKey = RASHI_KEYS.get(said);
-    const key = rashiKey ?? said;
-
-    // A rashi is spelled one way, so "Makar", "मकर" and "Makara" are one fact rather than three.
-    // Anything the lookup cannot read is kept exactly as they said it.
-    const heard = text(fact.value, 200);
-    const value = rashiKey ? (rashiFromName(heard) ?? heard) : heard;
-
-    // A key that is not a slug — or is a whole sentence wearing underscores — is not a key. See
-    // MAX_KEY_WORDS for why the length check matters as much as the shape one.
-    if (!KEY_PATTERN.test(key) || key.split("_").length > MAX_KEY_WORDS) continue;
-    if (!value || seen.has(key)) continue;
-
-    seen.add(key);
-    remember.push({ key, value });
-    if (remember.length === 5) break;
-  }
+  const remember = normaliseRemember(root.remember);
 
   const askFor = ASK_FOR.includes(root.ask_for as AskFor)
     ? root.ask_for as AskFor
@@ -1469,6 +1475,36 @@ export function normaliseChatReply(raw: unknown): NormalisedReply | null {
     remember,
     askFor,
   };
+}
+
+/**
+ * The facts a reply asked to remember, cleaned up — shared by every prompt version, so a fact is
+ * keyed the same way whichever craft wrote it.
+ */
+export function normaliseRemember(raw: unknown): Array<{ key: string; value: string }> {
+  const remember: Array<{ key: string; value: string }> = [];
+  const seen = new Set<string>();
+  for (const entry of Array.isArray(raw) ? raw : []) {
+    const fact = (entry ?? {}) as Record<string, unknown>;
+    const said = text(fact.key, 40).toLowerCase().replace(/\s+/g, "_");
+    const rashiKey = RASHI_KEYS.get(said);
+    const key = rashiKey ?? said;
+
+    // A rashi is spelled one way, so "Makar", "मकर" and "Makara" are one fact rather than three.
+    // Anything the lookup cannot read is kept exactly as they said it.
+    const heard = text(fact.value, 200);
+    const value = rashiKey ? (rashiFromName(heard) ?? heard) : heard;
+
+    // A key that is not a slug — or is a whole sentence wearing underscores — is not a key. See
+    // MAX_KEY_WORDS for why the length check matters as much as the shape one.
+    if (!KEY_PATTERN.test(key) || key.split("_").length > MAX_KEY_WORDS) continue;
+    if (!value || seen.has(key)) continue;
+
+    seen.add(key);
+    remember.push({ key, value });
+    if (remember.length === 5) break;
+  }
+  return remember;
 }
 
 /**

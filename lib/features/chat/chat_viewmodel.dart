@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/models/app_user.dart';
 import '../../data/models/astro_message.dart';
 import '../../data/analytics/analytics.dart';
 import '../../data/analytics/analytics_events.dart';
@@ -25,15 +28,38 @@ import 'chat_threads_viewmodel.dart';
 class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
   bool _disposed = false;
 
+  /// Which build of this conversation is on screen. "New chat" invalidates the draft, and
+  /// Riverpod builds the same instance again rather than a new one — so [_disposed] is reset
+  /// under a turn still in flight, and without this its reply would land in the new chat: an
+  /// answer with no question, in a "new" chat that was the old thread all along. A turn checks
+  /// the build it started in instead.
+  int _generation = 0;
+
+  /// The pause before the next bubble of the reply being delivered. Cancelled on dispose and on a
+  /// new send — see [finishDelivery].
+  Timer? _delivery;
+
+  /// Moves the turn in flight from the clock to one tick to read — see [SendStage].
+  Timer? _stage;
+
+  /// Runs from the moment "typing…" goes up until it has been up for [ChatPacing.firstTyping]. A
+  /// reply that lands meanwhile parks the showing of its first message in [_afterFloor].
+  Timer? _typingFloor;
+  VoidCallback? _afterFloor;
+
   @override
   ChatState build(String threadId) {
     _disposed = false;
+    _generation++;
 
     // Resolved here, not inside onDispose: reading a provider from a container that is already
     // tearing down throws, and the dispose callback runs after this one is gone.
     final speech = ref.read(readingSpeechProvider);
     ref.onDispose(() {
       _disposed = true;
+      _delivery?.cancel();
+      _stage?.cancel();
+      _typingFloor?.cancel();
       // A reading that keeps talking after the user has left the screen is a one-star review.
       speech.stop();
     });
@@ -136,6 +162,9 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
     final trimmed = message.trim();
     if (trimmed.isEmpty || state.sending || state.exhausted) return;
 
+    final generation = _generation;
+    bool gone() => _disposed || generation != _generation;
+
     final startedAt = DateTime.now();
     // Counted before the send, so a turn that fails still has its question counted. The two
     // together are the only way to see a conversation that ended because the app broke.
@@ -150,9 +179,12 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
       P.turnIndex: turnIndex,
     });
 
+    // A reply still arriving bubble by bubble is shown whole the moment they answer it.
+    finishDelivery();
+
     // Anything the sage is speaking is now about the previous turn.
     await stopSpeech();
-    if (_disposed) return;
+    if (gone()) return;
 
     final mine = AstroMessage(
       id: 'pending-${DateTime.now().microsecondsSinceEpoch}',
@@ -164,15 +196,18 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
     state = state.copyWith(
       messages: [...state.messages, mine],
       sending: true,
+      sendStage: SendStage.queued,
       clearError: true,
       clearPending: true,
       clearRevealing: true,
     );
+    _advanceStage();
 
     try {
       final reply = await ref.read(chatRepositoryProvider).send(
             trimmed,
             threadId: _target,
+            entry: entry,
           );
       if (_disposed) return;
 
@@ -180,6 +215,16 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
       // the new reply — the listen control above all.
       final savedLanguage = reply.savedLanguage;
       if (savedLanguage != null) _adoptLanguage(savedLanguage);
+
+      // A date or hour of birth given in the chat was saved: the account, its chart and Profile
+      // move with it now rather than at the next sign-in.
+      final saved = reply.user;
+      if (saved != null) _adoptUser(saved);
+
+      // Both of those are the account's, whichever chat is on screen. The rest is the chat's: a
+      // "New chat" since the send has put another conversation here, and the reply belongs to the
+      // one on the server, where it is saved and waiting.
+      if (gone()) return;
 
       // An answer already given this run stands even if saving it failed; see
       // [chatRatingDoneProvider].
@@ -191,16 +236,24 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
         });
       }
 
+      _stage?.cancel();
+      // Landed before Astro had "read" it: the typing starts now, with the reply held behind it.
+      if (_typingFloor == null) _startTypingFloor();
+
       state = state.copyWith(
         messages: [...state.messages, reply.message],
         threadId: reply.threadId,
         title: state.title.isEmpty ? reply.threadTitle : state.title,
         remaining: reply.remaining,
         sending: false,
-        // The one message allowed to animate itself in.
+        sendStage: SendStage.queued,
+        // The one message allowed to arrive bubble by bubble — none of it yet: [_deliver] decides
+        // when the first shows, and paces the rest.
         revealingId: reply.message.id,
+        shownBubbles: 0,
         ratingDue: askRating,
       );
+      _deliver(reply.message);
       analytics.track(Ev.chatReplyReceived, {
         P.threadId: reply.threadId,
         P.turnIndex: turnIndex,
@@ -211,6 +264,10 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
         P.hasVerdict: reply.message.verdict.isNotEmpty,
         P.optionCount: reply.message.options.length,
         P.askFor: reply.message.askFor.name,
+        P.bubbleCount: reply.message.displayBubbles.length,
+        P.replyKind: reply.message.kind.name,
+        P.offersRemedy: reply.message.offersRemedy,
+        if (reply.message.topic.isNotEmpty) P.topic: reply.message.topic,
         // How much of the daily allowance is left. The turn where this hits zero is the turn a
         // conversation ends against its will.
         P.count: reply.remaining,
@@ -228,16 +285,16 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
     } on ChatLimitReachedException catch (e) {
       // Not a failure the user can retry past, so the message comes back out and the composer
       // closes with the server's own explanation.
-      _rollBack(mine, e.message, remaining: 0);
+      _rollBack(mine, e.message, remaining: 0, stale: gone());
     } on ChatNotEntitledException catch (e) {
-      _rollBack(mine, e.message, outcome: ChatOutcome.notEntitled);
+      _rollBack(mine, e.message, outcome: ChatOutcome.notEntitled, stale: gone());
     } on ChatSignedOutException catch (e) {
-      _rollBack(mine, e.message, outcome: ChatOutcome.signedOut);
+      _rollBack(mine, e.message, outcome: ChatOutcome.signedOut, stale: gone());
     } on ChatException catch (e) {
-      _rollBack(mine, e.message);
+      _rollBack(mine, e.message, stale: gone());
     } catch (error) {
       debugPrint('[chat] send failed: $error');
-      _rollBack(mine, ChatCopy.sendFailed);
+      _rollBack(mine, ChatCopy.sendFailed, stale: gone());
     }
   }
 
@@ -255,6 +312,95 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
     ref.read(sessionStoreProvider).cacheUser(updated).catchError((Object error) {
       debugPrint('[chat] could not cache the new language: $error');
     });
+  }
+
+  /// Installs the account a turn saved birth details onto — the same door Profile's birth-time
+  /// picker uses, and into the session cache so an offline relaunch keeps it.
+  void _adoptUser(AppUser user) {
+    ref.read(entitlementProvider.notifier).set(user);
+    ref.read(sessionStoreProvider).cacheUser(user).catchError((Object error) {
+      debugPrint('[chat] could not cache the updated account: $error');
+    });
+  }
+
+  /// Clock, then one grey tick, then read — and "typing…" with it. Cancelled when the reply lands,
+  /// when the turn fails, and on dispose.
+  void _advanceStage() {
+    _stage?.cancel();
+    _typingFloor?.cancel();
+    _typingFloor = null;
+    _afterFloor = null;
+    final pacing = ref.read(chatPacingProvider);
+
+    if (pacing.instant) {
+      state = state.copyWith(sendStage: SendStage.read);
+      return;
+    }
+
+    _stage = Timer(pacing.sentAfter, () {
+      if (_disposed || !state.sending) return;
+      state = state.copyWith(sendStage: SendStage.sent);
+      _stage = Timer(pacing.readAfter - pacing.sentAfter, () {
+        if (_disposed || !state.sending) return;
+        state = state.copyWith(sendStage: SendStage.read);
+        _startTypingFloor();
+      });
+    });
+  }
+
+  void _startTypingFloor() {
+    final pacing = ref.read(chatPacingProvider);
+    if (pacing.instant) return;
+    _typingFloor = Timer(pacing.firstTyping, () {
+      final release = _afterFloor;
+      _afterFloor = null;
+      release?.call();
+    });
+  }
+
+  /// Sends [reply]'s bubbles one at a time, the way a person sends messages.
+  ///
+  /// The first shows at once if "typing…" has already been up for [ChatPacing.firstTyping] — the
+  /// wait for the server was the typing — else once it has, so a reply that lands in a fraction
+  /// of a second (a served upay) still reads as written rather than pasted. Each later one follows
+  /// about two seconds on, behind "typing…" again.
+  ///
+  /// Display only: the whole reply is already in the transcript, the cache and the sidebar, so
+  /// leaving the screen or switching conversations mid-delivery loses nothing — it simply shows
+  /// whole the next time.
+  void _deliver(AstroMessage reply) {
+    _delivery?.cancel();
+    final bubbles = reply.displayBubbles;
+    final pacing = ref.read(chatPacingProvider);
+
+    if (pacing.instant) {
+      state = state.copyWith(shownBubbles: bubbles.length, clearRevealing: true);
+      return;
+    }
+
+    void show(int count) {
+      if (_disposed || state.revealingId != reply.id) return;
+      if (count >= bubbles.length) {
+        state = state.copyWith(shownBubbles: bubbles.length, clearRevealing: true);
+        return;
+      }
+      state = state.copyWith(shownBubbles: count);
+      _delivery = Timer(pacing.pauseBefore(bubbles[count]), () => show(count + 1));
+    }
+
+    if (_typingFloor?.isActive ?? false) {
+      _afterFloor = () => show(1);
+    } else {
+      show(1);
+    }
+  }
+
+  /// Shows the reply being delivered in full, now — when they send another message before it has
+  /// finished arriving.
+  void finishDelivery() {
+    _delivery?.cancel();
+    _delivery = null;
+    if (state.revealingId != null) state = state.copyWith(clearRevealing: true);
   }
 
   /// Answers the rating card: 1 (worst) to 5 (best) with an optional written [comment], or null
@@ -298,11 +444,15 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
   /// The single failure exit, so every way a turn can fail is counted with its reason —
   /// `limit_reached` and `not_entitled` are the product working as designed, and only the rest
   /// are something broken.
+  ///
+  /// [stale]: the screen has moved on since the send — left, or a new chat started — so the
+  /// failure is counted and nothing else. The timers are a newer turn's by now, if anyone's.
   void _rollBack(
     AstroMessage mine,
     String message, {
     int? remaining,
     ChatOutcome? outcome,
+    bool stale = false,
   }) {
     analytics.track(Ev.chatReplyFailed, {
       P.threadId: state.threadId,
@@ -310,12 +460,16 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
       P.message: message,
       P.chars: mine.text.length,
     });
+    if (stale) return;
 
-    if (_disposed) return;
+    _stage?.cancel();
+    _typingFloor?.cancel();
+    _afterFloor = null;
 
     state = state.copyWith(
       messages: state.messages.where((m) => m.id != mine.id).toList(),
       sending: false,
+      sendStage: SendStage.queued,
       error: message,
       pending: mine.text,
       remaining: remaining,
@@ -396,11 +550,6 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
     state = state.copyWith(pending: text);
   }
 
-  /// Called once a reply has finished animating in, so it does not do it again on the next
-  /// rebuild — a keyboard opening should not replay the last answer.
-  void revealed(String id) {
-    if (state.revealingId == id) state = state.copyWith(clearRevealing: true);
-  }
 
   /// Writes the conversation to the cache, and hands it back so the caller can put the same
   /// conversation in the sidebar without asking the server for it a second time.
@@ -422,6 +571,61 @@ class ChatViewModel extends AutoDisposeFamilyNotifier<ChatState, String> {
     return thread;
   }
 }
+
+/// The rhythm of a turn: when the ticks move, when "typing…" starts, and how long Astro "types"
+/// before each message.
+///
+/// Conversation timing, not animation, so it holds under reduced motion too. A provider so tests
+/// can make it instant.
+@immutable
+class ChatPacing {
+  const ChatPacing({
+    this.sentAfter = const Duration(milliseconds: 300),
+    this.readAfter = const Duration(milliseconds: 900),
+    this.firstTyping = const Duration(milliseconds: 1500),
+    this.base = const Duration(milliseconds: 1500),
+    this.perChar = const Duration(milliseconds: 7),
+    this.shortest = const Duration(milliseconds: 1800),
+    this.longest = const Duration(milliseconds: 2600),
+  });
+
+  /// Every tick and every bubble at once. For tests.
+  const ChatPacing.instant()
+      : sentAfter = Duration.zero,
+        readAfter = Duration.zero,
+        firstTyping = Duration.zero,
+        base = Duration.zero,
+        perChar = Duration.zero,
+        shortest = Duration.zero,
+        longest = Duration.zero;
+
+  /// The clock turns to one grey tick.
+  final Duration sentAfter;
+
+  /// One tick turns to two blue ones, and "typing…" starts. From the send, not from [sentAfter].
+  final Duration readAfter;
+
+  /// The least "typing…" before a reply's first message, for a reply that lands faster.
+  final Duration firstTyping;
+
+  /// The pause before each later message: [base] plus [perChar] of it, within [shortest] and
+  /// [longest] — about two seconds for the ~80 characters a v5 message runs to.
+  final Duration base;
+  final Duration perChar;
+  final Duration shortest;
+  final Duration longest;
+
+  bool get instant => longest == Duration.zero;
+
+  Duration pauseBefore(String bubble) {
+    final ms = base.inMilliseconds + perChar.inMilliseconds * bubble.length;
+    return Duration(
+      milliseconds: ms.clamp(shortest.inMilliseconds, longest.inMilliseconds),
+    );
+  }
+}
+
+final chatPacingProvider = Provider<ChatPacing>((_) => const ChatPacing());
 
 final chatViewModelProvider =
     AutoDisposeNotifierProviderFamily<ChatViewModel, ChatState, String>(ChatViewModel.new);

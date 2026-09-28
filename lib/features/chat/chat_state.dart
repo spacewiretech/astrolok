@@ -15,6 +15,14 @@ enum ChatOutcome {
   threadGone,
 }
 
+/// How far the turn being sent has got, as WhatsApp's ticks tell it.
+///
+/// Timed, not observed: a turn is one non-streaming request, so the app never hears the moment the
+/// server has it. The stages follow the rhythm people read into a real chat instead — a clock
+/// while it leaves, one grey tick, then blue ticks the moment Astro starts typing, because a
+/// person reads a message before answering it. See [ChatPacing].
+enum SendStage { queued, sent, read }
+
 /// The chat screen's state.
 @immutable
 class ChatState {
@@ -32,6 +40,8 @@ class ChatState {
     this.canSpeak = false,
     this.outcome,
     this.ratingDue = false,
+    this.shownBubbles = 0,
+    this.sendStage = SendStage.queued,
   });
 
   /// Oldest first, as a transcript reads. The view reverses it for layout.
@@ -49,7 +59,8 @@ class ChatState {
   /// The first load, before anything can be painted.
   final bool loading;
 
-  /// A turn is in flight. The composer closes and the waiting bubble appears.
+  /// A turn is in flight. The composer closes, and the waiting bubble appears once the turn has
+  /// been read — see [sendStage].
   final bool sending;
 
   /// Questions left today. Null until the server has said.
@@ -68,6 +79,11 @@ class ChatState {
   /// bubble should show its stop button.
   final String? speakingId;
 
+  /// How many of [revealingId]'s bubbles are on screen so far. The rest arrive one at a time,
+  /// each after a "typing…" pause, the way a person sends messages. Ignored when nothing is
+  /// being revealed.
+  final int shownBubbles;
+
   /// The id of the one reply that should animate itself in, or null.
   ///
   /// Set when a reply arrives and never set for anything loaded from the cache or the server —
@@ -75,6 +91,9 @@ class ChatState {
   /// entrance each time it scrolled back into view, and a cold start would look like the whole
   /// conversation was being typed at once.
   final String? revealingId;
+
+  /// Where the turn in flight has got to. Meaningful only while [sending].
+  final SendStage sendStage;
 
   /// False when the device has no speech engine. The control is left out entirely rather than
   /// shown inert.
@@ -89,8 +108,37 @@ class ChatState {
   /// is reopened.
   final bool ratingDue;
 
-  /// True before the first turn — the opening screen with the four topic pills.
+  /// True before the first turn — the opening screen with the greeting and topic buttons.
   bool get isEmpty => messages.isEmpty && !sending;
+
+  /// The reply being delivered bubble by bubble, or null.
+  AstroMessage? get _revealing {
+    final id = revealingId;
+    if (id == null) return null;
+    for (final message in messages.reversed) {
+      if (message.id == id) return message;
+    }
+    return null;
+  }
+
+  /// Bubbles of [message] to show now — all of them, except for the reply still being delivered.
+  int visibleBubbles(AstroMessage message) {
+    final all = message.displayBubbles.length;
+    // Zero is allowed: a reply that landed faster than a person could have typed it is held
+    // behind "typing…" for a moment before its first message shows.
+    return message.id == revealingId ? shownBubbles.clamp(0, all) : all;
+  }
+
+  /// Astro is "typing…": the turn has been read and the request is still in flight, or a reply
+  /// still has bubbles to send.
+  bool get typing {
+    if (sending) return sendStage == SendStage.read;
+    final revealing = _revealing;
+    return revealing != null && shownBubbles < revealing.displayBubbles.length;
+  }
+
+  /// True while a reply is still arriving, bubble by bubble.
+  bool get delivering => revealingId != null;
 
   /// The day's allowance is spent. Distinct from [sending]: one is a pause, the other is a wall.
   bool get exhausted => remaining != null && remaining! <= 0;
@@ -101,7 +149,13 @@ class ChatState {
   ///
   /// Held back while a reply is still animating in: the card is a question about the
   /// conversation, and asking it over an answer that is still arriving competes with the answer.
-  bool get showRating => ratingDue && !sending && revealingId == null;
+  bool get showRating {
+    if (!ratingDue || sending || delivering || messages.isEmpty) return false;
+    final last = messages.last;
+    // Not over an offer still waiting for its answer, and never under a crisis reply — a five-face
+    // card there would read as asking them to score it.
+    return last.isUser || (!last.offersRemedy && last.kind != ReplyKind.care);
+  }
 
   /// Quick replies, taken only from the newest Astro turn.
   ///
@@ -109,14 +163,16 @@ class ChatState {
   /// the reply somewhere the user did not expect, and stale chips accumulating down the
   /// transcript would make the screen look like a form.
   List<String> get options {
-    if (sending || messages.isEmpty) return const [];
+    // Only once the last bubble has arrived: a button under a message that is still being typed
+    // answers something not yet said.
+    if (sending || delivering || messages.isEmpty) return const [];
     final last = messages.last;
     return last.isUser ? const [] : last.options;
   }
 
   /// What the newest Astro turn asked for, so the right control can be raised.
   AskFor get askFor {
-    if (sending || messages.isEmpty) return AskFor.none;
+    if (sending || delivering || messages.isEmpty) return AskFor.none;
     final last = messages.last;
     return last.isUser ? AskFor.none : last.askFor;
   }
@@ -135,6 +191,8 @@ class ChatState {
     bool? canSpeak,
     ChatOutcome? outcome,
     bool? ratingDue,
+    int? shownBubbles,
+    SendStage? sendStage,
     bool clearError = false,
     bool clearPending = false,
     bool clearSpeaking = false,
@@ -160,6 +218,8 @@ class ChatState {
       canSpeak: canSpeak ?? this.canSpeak,
       outcome: clearOutcome ? null : (outcome ?? this.outcome),
       ratingDue: ratingDue ?? this.ratingDue,
+      shownBubbles: shownBubbles ?? this.shownBubbles,
+      sendStage: sendStage ?? this.sendStage,
     );
   }
 }

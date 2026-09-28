@@ -31,19 +31,57 @@ enum ChatRole {
 enum AskFor {
   none,
   birthTime,
-  birthPlace;
+  birthPlace,
+
+  /// The date of birth, asked for in the chat only after they said the one on file is wrong.
+  dob;
 
   String get wire => switch (this) {
         AskFor.none => 'none',
         AskFor.birthTime => 'birth_time',
         AskFor.birthPlace => 'birth_place',
+        AskFor.dob => 'dob',
       };
 
   static AskFor parse(Object? raw) => switch (raw) {
         'birth_time' => AskFor.birthTime,
         'birth_place' => AskFor.birthPlace,
+        'dob' => AskFor.dob,
         _ => AskFor.none,
       };
+}
+
+/// What sort of turn an Astro reply is, in the WhatsApp-style chat (v5).
+enum ReplyKind {
+  /// A reading, from a v4 prompt or earlier — one card's worth of text.
+  reading,
+
+  /// An answer to a question: the answer, the reason, and usually the offer of today's upay.
+  answer,
+
+  /// The upay, served when they accepted the offer.
+  remedy,
+
+  /// Astro asking for a detail it lacks — a date or an hour of birth.
+  ask,
+
+  /// A short reply to small talk or to something Astro asked.
+  chat,
+
+  /// The fixed reply to someone in distress, with helpline numbers. Never rated under.
+  care;
+
+  static ReplyKind parse(Object? raw) => switch (raw) {
+        'answer' => ReplyKind.answer,
+        'remedy' => ReplyKind.remedy,
+        'ask' => ReplyKind.ask,
+        'chat' => ReplyKind.chat,
+        'care' => ReplyKind.care,
+        _ => ReplyKind.reading,
+      };
+
+  /// Null for [reading], which the server never names.
+  String? get wire => this == ReplyKind.reading ? null : name;
 }
 
 /// One of the labelled blocks under a reply's opening paragraph.
@@ -121,6 +159,10 @@ class AstroMessage {
     this.sections = const [],
     this.options = const [],
     this.askFor = AskFor.none,
+    this.bubbles = const [],
+    this.kind = ReplyKind.reading,
+    this.offersRemedy = false,
+    this.topic = '',
   });
 
   final String id;
@@ -150,7 +192,36 @@ class AstroMessage {
 
   final AskFor askFor;
 
+  /// A v5 reply's messages, in the order Astro sent them. Empty for a user turn and for every
+  /// reply written before v5 — see [displayBubbles], which is what the screen shows either way.
+  final List<String> bubbles;
+
+  final ReplyKind kind;
+
+  /// True when this reply ends by offering today's upay, and its first option is the yes.
+  final bool offersRemedy;
+
+  /// What the question was about — marriage, love, career… — as the server classified it.
+  final String topic;
+
   bool get isUser => role == ChatRole.user;
+
+  /// The messages this turn is shown as, one chat bubble each.
+  ///
+  /// A v5 reply is its [bubbles]. A reply from before v5 is broken into the same shape — the
+  /// answer, then the title and the opening, then each section — so a conversation that began as
+  /// cards reads as a chat when it is opened on the new screen. A user turn is its words.
+  List<String> get displayBubbles {
+    if (isUser) return [text];
+    if (bubbles.isNotEmpty) return bubbles;
+    return [
+      if (verdict.isNotEmpty) verdict,
+      [if (title.isNotEmpty) '$titleEmoji $title'.trim(), text]
+          .where((part) => part.isNotEmpty)
+          .join('\n'),
+      for (final section in sections) '${section.emoji} ${section.heading}\n${section.body}'.trim(),
+    ].where((bubble) => bubble.trim().isNotEmpty).toList(growable: false);
+  }
 
   /// Null when the payload is not a turn at all, or carries nothing to show.
   static AstroMessage? fromServer(Object? raw) {
@@ -164,7 +235,11 @@ class AstroMessage {
         ? _text(raw['text'])
         : _text(raw['opening']);
 
-    if (text.isEmpty) return null;
+    // A v5 reply carries its messages as `bubbles`, with `opening` filled beside them for older
+    // builds. Either is enough to show; neither is nothing to show.
+    final bubbles = role == ChatRole.user ? const <String>[] : _stringList(raw['bubbles']);
+
+    if (text.isEmpty && bubbles.isEmpty) return null;
 
     return AstroMessage(
       // A locally-composed turn has no server id yet, so it falls back to something stable
@@ -184,6 +259,10 @@ class AstroMessage {
       ],
       options: _stringList(raw['options']),
       askFor: AskFor.parse(raw['ask_for']),
+      bubbles: bubbles,
+      kind: ReplyKind.parse(raw['kind']),
+      offersRemedy: raw['offer'] == 'remedy',
+      topic: _text(raw['topic']),
     );
   }
 
@@ -198,6 +277,10 @@ class AstroMessage {
         'sections': [for (final section in sections) section.toJson()],
         'options': options,
         'ask_for': askFor.wire,
+        if (bubbles.isNotEmpty) 'bubbles': bubbles,
+        if (kind.wire != null) 'kind': kind.wire,
+        if (offersRemedy) 'offer': 'remedy',
+        if (topic.isNotEmpty) 'topic': topic,
       };
 
   /// What the listen button reads out.
@@ -208,12 +291,15 @@ class AstroMessage {
   /// The verdict comes first, ahead of even the title — spoken aloud, an answer that arrives
   /// after its own justification is worse than on the page, because a listener cannot skip ahead
   /// to find it.
-  String get spoken => [
-        if (verdict.isNotEmpty) verdict,
-        if (title.isNotEmpty) title,
-        text,
-        for (final section in sections) '${section.heading}. ${section.body}',
-      ].where((part) => part.trim().isNotEmpty).join('\n\n');
+  String get spoken => bubbles.isNotEmpty
+      // Emoji out, for the same reason as the title's below.
+      ? bubbles.map((b) => b.replaceAll(_emoji, '').trim()).join('\n\n')
+      : [
+          if (verdict.isNotEmpty) verdict,
+          if (title.isNotEmpty) title,
+          text,
+          for (final section in sections) '${section.heading}. ${section.body}',
+        ].where((part) => part.trim().isNotEmpty).join('\n\n');
 }
 
 /// One thing Astro has learned, as Profile shows it.
@@ -432,12 +518,22 @@ class ChatThread {
 
 /// The same line the server denormalises onto a thread: an answer if there is one, else words.
 String _previewOf(AstroMessage message) {
-  final line = message.verdict.isNotEmpty ? message.verdict : message.text;
+  final line = message.bubbles.isNotEmpty
+      ? message.bubbles.first
+      : message.verdict.isNotEmpty
+          ? message.verdict
+          : message.text;
   final flat = line.replaceAll(RegExp(r'\s+'), ' ').trim();
   return flat.length <= 100 ? flat : flat.substring(0, 100);
 }
 
 String _text(Object? raw) => raw?.toString().trim() ?? '';
+
+/// Emoji, as a device voice would otherwise read them aloud by name.
+final _emoji = RegExp(
+  r'[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]',
+  unicode: true,
+);
 
 List<String> _stringList(Object? raw) {
   if (raw is! List) return const [];

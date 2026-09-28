@@ -6,6 +6,30 @@ abstract final class ChatCopy {
   static const titleLead = 'Chat with';
   static const titleAccent = 'Astro';
 
+  // ---------------------------------------------------------------- the WhatsApp-style bar
+
+  /// Who the conversation is with, as the bar across the top names them.
+  static const astroName = 'Astro';
+
+  /// Under the name: "online" at rest, "typing…" while a reply is on its way.
+  static const online = 'online';
+  static const typing = 'typing…';
+
+  /// What a screen reader hears for the bouncing dots.
+  static const typingLabel = 'Astro is typing';
+
+  static const menu = 'More options';
+
+  /// Before a helpline number a screen reader reads out: "Call 14416".
+  static const call = 'Call';
+
+  /// The round button that returns a reader who scrolled up to the newest message.
+  static const latest = 'Go to the latest message';
+
+  /// Under the "no questions left today" note, because the composer has gone and someone who needs
+  /// to reach out must still find a number.
+  static const exhaustedHelpline = 'Feeling low? Tele-MANAS 14416 — free, 24 hours.';
+
   // ---------------------------------------------------------------- opening
 
   static const openingGreeting = 'What would you like to ask?';

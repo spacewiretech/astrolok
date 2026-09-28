@@ -113,6 +113,18 @@ export const TIPS_RULE = `- Every "tip" is a small, kind, practical nudge about 
   purchase, never a remedy, gemstone, ritual, fast or charm.`;
 
 /**
+ * The body and medicine, as every reading has always had it: not mentioned at all.
+ *
+ * The third bullet of [BOUNDARIES] that is the caller's to replace. Chat v5 replaces it with a
+ * version that still keeps illness, diagnosis and mental health out of every reading, but lets
+ * santan be read as a period of time — the v5 plan's children question, asked by 36% of those who
+ * ask about children at all — and lets a crisis referral be made rather than refused. Palm, face
+ * and every earlier chat keep this byte for byte.
+ */
+export const HEALTH_RULE = `- Never mention health, illness, diagnosis, recovery, fertility, pregnancy, or mental health.
+  Vitality, resilience and stamina are fine; the body and medicine are not.`;
+
+/**
  * What may be said about *when*, as the readings have always had it: nothing with a calendar in it.
  *
  * The second bullet of [BOUNDARIES] that is the caller's to replace. A palm or a face carries no
@@ -136,15 +148,14 @@ export const TIMING_RULE = `- Never guarantee an outcome about money, work, marr
  * carries all of them, so the forbidden list is spelled out item by item rather than left to the
  * model's own sense of what counts as a comment on appearance.
  */
-export const BOUNDARIES = boundariesWith(TIPS_RULE, TIMING_RULE);
+export const BOUNDARIES = boundariesWith(TIPS_RULE, TIMING_RULE, HEALTH_RULE);
 
-/** The block, with its counsel and timing bullets left open. Every other line in it is fixed. */
-function boundariesWith(tips: string, timing: string): string {
+/** The block, with its counsel, timing and health bullets left open. Every other line is fixed. */
+function boundariesWith(tips: string, timing: string, health: string): string {
   return `
 BOUNDARIES — these are absolute.
 
-- Never mention health, illness, diagnosis, recovery, fertility, pregnancy, or mental health.
-  Vitality, resilience and stamina are fine; the body and medicine are not.
+${health}
 ${timing}
 - Never use deterministic verbs. Not "you will", not "this means you have", not "you are going
   to". Always "tends to", "suggests", "leans toward", "people with features like yours often".
@@ -186,10 +197,11 @@ STYLE
  * Roman-letters rule in it is a *rendering* constraint, not a stylistic one — the PDF font
  * subset and the device TTS, neither of which the chat has. A feature that can honestly carry
  * another script says so by passing its own voice; palm and face pass nothing and keep the rule.
- * [BOUNDARIES] is deliberately not overridable, because it is the safety layer — except for two
- * bullets: [tips], which says what kind of advice may be offered, and [timing], which says whether
- * a window of years may be named. See [TIPS_RULE] and [TIMING_RULE]. Health, the appearance list
- * and deterministic verbs are fixed for every caller.
+ * [BOUNDARIES] is deliberately not overridable, because it is the safety layer — except for three
+ * bullets: [tips], which says what kind of advice may be offered, [timing], which says whether a
+ * window of years may be named, and [health], which chat v5 narrows for santan and a crisis
+ * referral. See [TIPS_RULE], [TIMING_RULE] and [HEALTH_RULE]. The appearance list and
+ * deterministic verbs are fixed for every caller.
  */
 export function panditSystemPrompt(
   {
@@ -199,6 +211,7 @@ export function panditSystemPrompt(
     voice = PANDIT_VOICE,
     tips = TIPS_RULE,
     timing = TIMING_RULE,
+    health = HEALTH_RULE,
   }: {
     craft: string;
     lengths: string;
@@ -206,10 +219,22 @@ export function panditSystemPrompt(
     voice?: string;
     tips?: string;
     timing?: string;
+    health?: string;
   },
 ): string {
-  return [voice, "", craft, "", grounding, "", boundariesWith(tips, timing), "", lengths, "", STYLE]
-    .join("\n");
+  return [
+    voice,
+    "",
+    craft,
+    "",
+    grounding,
+    "",
+    boundariesWith(tips, timing, health),
+    "",
+    lengths,
+    "",
+    STYLE,
+  ].join("\n");
 }
 
 /** Length budget lines shared by both readings, so the two stay comparable in weight. */

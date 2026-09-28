@@ -1,3 +1,4 @@
+import '../models/app_user.dart';
 import '../models/astro_message.dart';
 
 /// One turn of a conversation with Astro, and the transcript behind it.
@@ -10,7 +11,11 @@ abstract interface class ChatRepository {
   /// [threadId] is null for the first message of a new conversation — the server opens one and
   /// says which in [ChatReply.threadId]. Passing an id that no longer resolves starts a new
   /// conversation rather than failing, so a stale id cannot leave someone unable to talk.
-  Future<ChatReply> send(String message, {String? threadId});
+  ///
+  /// [entry] is which affordance produced it — `composer`, `quick_reply`, `topic`, `reading`,
+  /// `push`, `birth_time`. The server answers a button's English opener in the user's language
+  /// rather than in English.
+  Future<ChatReply> send(String message, {String? threadId, String entry = 'composer'});
 
   /// Every conversation, newest first, for the sidebar.
   Future<ChatThreadList> threads();
@@ -48,7 +53,13 @@ class ChatReply {
     this.remaining,
     this.savedLanguage,
     this.askRating = false,
+    this.user,
   });
+
+  /// The account as it stands after this turn, when the turn saved something onto it — a date or
+  /// hour of birth given in the chat. Installed the way Profile installs a saved birth time, so
+  /// Profile, the chart and the kundali all follow at once. Null when nothing was saved.
+  final AppUser? user;
 
   /// Set when this message moved the account's chat language and the server saved it — they wrote
   /// in Devanagari, or asked for Hindi in words. Null when nothing changed.

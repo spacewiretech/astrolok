@@ -20,10 +20,32 @@ signature check. No network, no database.
   words and shorter body; v3's dasha and remedies; v2 and v1 as rollbacks), the user prompt's
   correction, known-rashi, timing and hour-of-birth blocks, `birthHourAsks` in every language the
   picker offers, and `detectLanguageSwitch`.
+- `chat_v5_test.ts` (61) — chat v5: the prompt's rules (a window in the first sentence, santan as a
+  period, names refused, one person's mind never read, the crisis stop, examples with no real
+  year, no birth detail called saved unless it was), the schema, the normaliser (the yes chip, no
+  offer without an upay, no second hour ask, a reply giving a helpline made a care reply with no
+  astrology chip), accepting the upay in every language, the user prompt's blocks, the
+  birth-detail parsers and the one date read unasked, Guru/Shani ingress months, the v5 timing
+  topics, and the southern-script and Marathi language switches — v5's only, v4 switching as it
+  shipped. Then the chips: a menu per topic and chips on every example, `topicsOf` in every
+  script and its look-alikes (ghar wale, upay kaam karega, exam, Dhanu, ಹಣೆ, വരുമാനം, the remedy
+  working), English "work" and every language's word for pay, the production drift dropped, the partner's work kept under marriage, the allowed pairs, the top-up
+  in their language (Marathi too) and never on an ask or after a crisis, nothing already asked or
+  passed over offered again, the upay turn's guard, and every fallback chip on its own topic.
+  Then the kundali line: on the first reply with the whole chart (rashi and nakshatra, the rashi
+  said once), never without the hour, "sthan" only with a place on file, on the turn a captured
+  hour completes the chart, once a thread and never after a crisis, "the time ahead is good" only
+  with a window inside a year (the softer line otherwise), only the matter they asked about
+  named, never above a death, an illness or despair (owed to their next question instead), and
+  none of it in v4.
 - `chat_timing_test.ts` (17) — the windows v4 answers "when" with: karakas and house lords from
   Chandra, the soonest favoured period and never a past one, back-to-back periods merged, a
   closing period not offered as "now", a favoured Mahadasha bridging a long wait, no marriage
   timing under 18 or before 21, and the same answer every time.
+- `crisis_test.ts` (11) — the crisis check against real messages from the week before it existed
+  (all caught, each in its own language), and the everyday words that must not fire (ಸಾಯಂಕಾಲ,
+  "papa mar gaye", "live with me"); every reply carries all three helpline numbers; a safety block
+  is told apart from a failure.
 - `face_test.ts` (29) — `normaliseFaceReading`: display ordering, unknown and duplicate part
   keys, server focus winning over the model's echo. The reading keeps the no-remedies rule.
 - `jyotish_test.ts` (39) — the astronomy in `jyotish.ts` against **Meeus worked examples**:
@@ -44,6 +66,10 @@ signature check. No network, no database.
 - `trial_reading_limit_test.ts` (7) — the per-trial reading allowance: limit parsing and its
   fallback to one, that only a live trial is limited, and that only `ready` (and still-in-flight
   `pending`) readings count — never `rejected` or `failed`.
+- `db_test.ts` (6) — the load rules in `db.ts`: a session stamped only when never stamped,
+  unreadable or ten minutes stale (read with the lookup, never for an expired or unknown session),
+  and `withinCap`, which cuts `astro-chat`'s early history and memory reads to the configured size
+  and asks for a second read only when the cap may have cut rows off.
 - `review_account_test.ts` (6) — the store-review sign-in gate, focused on when it must stay
   **off**: half-filled config, placeholder values, malformed input.
 
@@ -75,7 +101,7 @@ signature check. No network, no database.
   ```
 
   The root README quotes `deno test functions/tests/payments_test.ts` for the payments file
-  alone. 368 tests in total.
+  alone. 512 tests in total.
 - Everything under test is deliberately pure, which is why the normalisers in `_shared/` take
   and return plain data rather than touching the DB themselves.
 - `mixpanel_test.ts` guards a specific past failure: the server `$insert_id` must key on the

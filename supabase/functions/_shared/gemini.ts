@@ -47,6 +47,18 @@ export class GeminiError extends Error {
   get isTransient(): boolean {
     return this.code !== null && [429, 500, 502, 503, 504].includes(this.code);
   }
+
+  /**
+   * The model's own safety filter refused — the prompt was blocked, or the answer was stopped.
+   *
+   * Separate from a failure because a chat turn has something better to say than "try again":
+   * asking the same thing again is blocked again, and some of what trips the filter is someone
+   * in distress. See `blockedReply` in `crisis.ts`.
+   */
+  get isSafetyBlock(): boolean {
+    return this.detail.startsWith("prompt blocked") ||
+      /finishReason (SAFETY|PROHIBITED_CONTENT|BLOCKLIST|SPII)/.test(this.detail);
+  }
 }
 
 export interface GeminiSettings {

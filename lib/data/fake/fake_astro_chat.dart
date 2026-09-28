@@ -40,8 +40,15 @@ class FakeChatRepository implements ChatRepository {
   /// checkout at the same point it would in production.
   static const _rateAfter = 5;
 
+  /// True while the newest scripted reply is waiting for its offered upay to be accepted.
+  bool _offered = false;
+
   @override
-  Future<ChatReply> send(String message, {String? threadId}) async {
+  Future<ChatReply> send(
+    String message, {
+    String? threadId,
+    String entry = 'composer',
+  }) async {
     await Future<void>.delayed(latency);
 
     // Unknown or absent means a new conversation, matching the server: a stale id must never
@@ -61,15 +68,19 @@ class FakeChatRepository implements ChatRepository {
       ),
     );
 
-    final reply = _scripted(_turn++);
+    final reply = _scripted(_turn++, message);
     transcript.add(reply);
 
     final existing = _summaries[id]!;
-    final title = existing.title.isNotEmpty ? existing.title : reply.title;
+    final title = existing.title.isNotEmpty
+        ? existing.title
+        : reply.title.isNotEmpty
+            ? reply.title
+            : 'Shaadi ka samay';
     _summaries[id] = ChatThreadSummary(
       id: id,
       title: title,
-      preview: reply.verdict.isNotEmpty ? reply.verdict : reply.text,
+      preview: reply.displayBubbles.first,
       lastMessageAt: DateTime.now(),
     );
 
@@ -242,74 +253,102 @@ class FakeChatRepository implements ChatRepository {
     _facts.add(const AstroFact(key: 'works_as', value: 'a schoolteacher in Pune'));
   }
 
-  AstroMessage _scripted(int turn) {
+  /// A v5 conversation, scripted: an answer that ends by offering the day's upay, the upay itself
+  /// when they say yes, an ask for the hour, and a thank-you that answers with the refined window.
+  ///
+  /// Written in the register the v5 prompt asks for — short Hinglish messages, a window in the
+  /// first one — because three real sentences wrap very differently from three short strings, and
+  /// the chat screen's timing (typing between bubbles) is what this exists to make visible.
+  AstroMessage _scripted(int turn, String said) {
     final id = 'fake-astro-${_nextId++}';
     final now = DateTime.now();
+    final lower = said.toLowerCase();
 
-    // The first turn asks for the hour, as the real prompt is instructed to — so the ask_for
-    // control and the time picker behind it are exercised without a model.
-    if (turn == 0) {
+    AstroMessage astro({
+      required List<String> bubbles,
+      ReplyKind kind = ReplyKind.answer,
+      String topic = 'marriage',
+      bool offer = false,
+      List<String> options = const [],
+      AskFor askFor = AskFor.none,
+    }) {
+      _offered = offer;
       return AstroMessage(
         id: id,
         role: ChatRole.astro,
         createdAt: now,
-        verdict: 'Patience is your inheritance — but tell me the hour, and I can say more.',
-        titleEmoji: '🪔',
-        title: 'Before We Begin',
-        text: 'Come, sit. Your Chandra rests in Vrishabha, which is a patient sign and slow to '
-            'give its trust — but the finer reading needs the hour you arrived. Tell me that, '
-            'and I can name the nakshatra you were born beneath.',
-        options: const ['Morning', 'Afternoon', 'Evening', 'I do not know'],
+        bubbles: bubbles,
+        // What an older build reads, as the server fills it.
+        verdict: bubbles.length > 1 ? bubbles.first : '',
+        text: bubbles.length > 1 ? bubbles.skip(1).join('\n\n') : bubbles.first,
+        kind: kind,
+        topic: topic,
+        offersRemedy: offer,
+        options: options,
+        askFor: askFor,
+      );
+    }
+
+    // They accepted the upay the last reply offered.
+    if (_offered && RegExp(r'haan|ha |yes|upay|हाँ').hasMatch('$lower ')) {
+      return astro(
+        kind: ReplyKind.remedy,
+        bubbles: const [
+          'Agle 4 hafte har Shukravar Maa Katyayani ka mantra 11 baar padhiye.',
+          'Kal wapas aaiye, upay ka asar dekhte hain.',
+          'Ek baat bataiye — rishta ghar wale dhoond rahe hain ya aap khud?',
+        ],
+        options: const ['Ghar wale dhoond rahe hain', 'Main khud dhoond raha hoon'],
+      );
+    }
+
+    // They answered the ask for the hour.
+    if (RegExp(r'\d|pata nahi|i do not know').hasMatch(lower) && turn > 1) {
+      _facts.add(const AstroFact(key: 'birth_time', value: 'the evening'));
+      return astro(
+        bubbles: const [
+          'Shukriya! 7:30 PM note kar liya — galat ho to bata dijiye.',
+          'Ab aur pakka: March se August 2027 ke beech naukri ke sabse acche chances hain.',
+          'Kya main aapko aaj ka upay bataun? 🙏',
+        ],
+        topic: 'career',
+        offer: true,
+        options: const ['Haan, upay batao 🙏', 'Kis field mein?'],
+      );
+    }
+
+    if (turn == 0) {
+      return astro(
+        bubbles: const [
+          'Aapki kundali ke hisaab se 2027 ke middle se 2028 ke end tak shaadi ka sabse accha '
+              'samay hai.',
+          'Is time Shukra ki dasha chalegi, jo rishton ke liye shubh hai.',
+          'Kya main aapko aaj ka upay bataun? 🙏',
+        ],
+        offer: true,
+        options: const ['Haan, upay batao 🙏', 'Jeevansathi kaisa hoga?', 'Love ya arrange?'],
+      );
+    }
+
+    if (turn == 2 || lower.contains('naukri') || lower.contains('career')) {
+      return astro(
+        kind: ReplyKind.ask,
+        topic: 'career',
+        bubbles: const [
+          'Aap kis samay paida hue the? Jaise subah 7:30 ya raat 10 baje — isse main aur pakka '
+              'bata sakta hoon.',
+        ],
         askFor: AskFor.birthTime,
       );
     }
 
-    if (turn == 1) {
-      _facts.add(const AstroFact(key: 'birth_time', value: 'the morning'));
-      return AstroMessage(
-        id: id,
-        role: ChatRole.astro,
-        createdAt: now,
-        verdict: 'You love slowly and then wholly. What is already near you matters most.',
-        titleEmoji: '✨',
-        title: 'Your Love Reading',
-        text: 'Then your Moon sits in Rohini, the nakshatra of steady attachment. Those born '
-            'beneath it tend to love slowly and then wholly, and to be more wounded by '
-            'carelessness than by argument.',
-        sections: const [
-          AstroSection(
-            emoji: '❤️',
-            heading: 'Relationship Energy',
-            body: 'A season for tending what already exists rather than seeking what does not.',
-          ),
-          AstroSection(
-            emoji: '💞',
-            heading: 'Love Opportunities',
-            body: 'What comes is likelier to come through people who already know you.',
-          ),
-        ],
-        options: const ['What of my career?', 'Tell me of Shani'],
-      );
-    }
-
-    return AstroMessage(
-      id: id,
-      role: ChatRole.astro,
-      createdAt: now,
-      verdict: 'The season ahead asks for patience rather than courage.',
-      titleEmoji: '💫',
-      title: 'The Season Ahead',
-      text: 'Rohini asks for patience, and the months after your next birthday will ask more of '
-          'it than of your courage. What you plant quietly now tends to be what you are glad '
-          'of later.',
-      sections: const [
-        AstroSection(
-          emoji: '🌱',
-          heading: 'What To Tend',
-          body: 'One thing, properly. Vrishabha does not reward a scattered hand.',
-        ),
+    return astro(
+      kind: ReplyKind.chat,
+      bubbles: const [
+        'Aapka jeevansathi samajhdar aur shaant swabhav ka hoga.',
+        'Rishta aapsi izzat aur dosti par tikega.',
       ],
-      options: const ['And my family?', 'What should I avoid?'],
+      options: const ['Love ya arrange?', 'Ghar wale maanenge?', 'Naukri kab lagegi?'],
     );
   }
 }

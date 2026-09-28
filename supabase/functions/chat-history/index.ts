@@ -1,4 +1,4 @@
-import { promptVersion } from "../_shared/astro_chat.ts";
+import { effectiveVersion, promptVersion } from "../_shared/astro_chat.ts";
 import { normaliseFeedbackComment } from "../_shared/chat_feedback.ts";
 import { resolveLanguage } from "../_shared/chat_language.ts";
 import { configSetting, loadConfig } from "../_shared/config.ts";
@@ -84,6 +84,9 @@ Deno.serve(async (req) => {
     const ownThread = thread ? (thread.id as string) : null;
     let turnCount: number | null = null;
     let model: string | null = null;
+    // Rows from before the version was stamped were all written for builds that got v4 at most, so
+    // an unstamped conversation is v4 whatever the dashboard now says.
+    let version = effectiveVersion(configSetting(config, "chat_prompt_version"), 1);
 
     if (ownThread) {
       const [{ count }, { data: latest }] = await Promise.all([
@@ -92,7 +95,7 @@ Deno.serve(async (req) => {
           .eq("thread_id", ownThread)
           .eq("role", "user"),
         db.from("chat_messages")
-          .select("model")
+          .select("model, body")
           .eq("thread_id", ownThread)
           .eq("role", "astro")
           .order("created_at", { ascending: false })
@@ -102,6 +105,10 @@ Deno.serve(async (req) => {
 
       turnCount = count ?? null;
       model = typeof latest?.model === "string" ? latest.model : null;
+      // The version that wrote this conversation, not whatever is live now: since v5 only some
+      // clients get it, the dashboard value no longer says which prompt a rating is about.
+      const written = (latest?.body as Record<string, unknown> | null)?.v;
+      if (typeof written === "string" && written) version = promptVersion(written);
     }
 
     const { error } = await db
@@ -116,7 +123,7 @@ Deno.serve(async (req) => {
             typeof user?.language === "string" ? user.language : null,
             config,
           ),
-          prompt_version: promptVersion(configSetting(config, "chat_prompt_version")),
+          prompt_version: version,
           model,
           // What they wrote beside the score, tidied and capped. A dismissal says nothing, whatever
           // arrives with it, and an unreadable comment costs the comment, never the rating.
@@ -208,11 +215,13 @@ Deno.serve(async (req) => {
       .select("key, value, updated_at")
       .eq("user_id", userId)
       .order("updated_at", { ascending: false }),
-    // Still per user, not per thread: the allowance belongs to the account.
+    // Still per user, not per thread: the allowance belongs to the account. Only metered turns,
+    // matching `astro-chat` — a crisis message and its fixed reply cost nobody a question.
     db.from("chat_messages")
       .select("id", { count: "exact", head: true })
       .eq("user_id", userId)
       .eq("role", "user")
+      .eq("metered", true)
       .gte("created_at", since),
   ]);
 
@@ -252,12 +261,14 @@ Deno.serve(async (req) => {
     }
 
     // Newest-first from the index, oldest-first for a transcript that reads top to bottom.
-    const messages = (rows ?? []).slice().reverse().map((row) => ({
-      id: row.id,
-      role: row.role,
-      created_at: row.created_at,
-      ...(row.body as Record<string, unknown>),
-    }));
+    // The upay behind an offer stays on the server until they say yes; `astro-chat` serves it.
+    const messages = (rows ?? []).slice().reverse().map((row) => {
+      const { remedy_bubbles: _upay, remedy_hook: _hook, ...body } = row.body as Record<
+        string,
+        unknown
+      >;
+      return { id: row.id, role: row.role, created_at: row.created_at, ...body };
+    });
 
     return json({ ...common, thread, messages });
   }

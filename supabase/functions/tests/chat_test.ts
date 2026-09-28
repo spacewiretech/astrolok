@@ -1,10 +1,12 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 
 import {
+  atLeastV4,
   birthHourAsks,
   buildUserPrompt,
   CHAT_SCHEMA,
   chatSystemPrompt,
+  effectiveVersion,
   normaliseChatReply,
   promptVersion,
 } from "../_shared/astro_chat.ts";
@@ -425,7 +427,7 @@ Deno.test("v1 is still reachable, and is the text that shipped", () => {
 Deno.test("an unset or misspelled version is treated as current", () => {
   // `configSetting` hands over "" for a blank cell, and a dashboard is a text box. Neither may
   // silently strand every user on the old prompt.
-  for (const version of ["", "  ", "V4", "v5", "latest"]) {
+  for (const version of ["", "  ", "V4", "v6", "latest"]) {
     assert(
       chatSystemPrompt({ version, language: "English" }).includes("THE TIMING block"),
       `version "${version}" did not fall through to v4`,
@@ -719,9 +721,10 @@ Deno.test("rolling back to v2 withdraws the remedies with it", () => {
 });
 
 Deno.test("the version cell is read forgivingly, and lands on v4", () => {
-  for (const raw of [undefined, null, "", "  ", "V4", "v5", "latest"]) {
+  for (const raw of [undefined, null, "", "  ", "V4", "v6", "latest"]) {
     assertEquals(promptVersion(raw), "v4", `"${raw}" did not land on v4`);
   }
+  assertEquals(promptVersion(" V5 "), "v5");
   assertEquals(promptVersion(" V3 "), "v3");
   assertEquals(promptVersion(" V2 "), "v2");
   assertEquals(promptVersion("v1"), "v1");
@@ -1086,4 +1089,23 @@ Deno.test("a reading keeps the language block it shipped with", () => {
 
   assert(!reading.includes("precedent"));
   assert(reading.includes("someone who types in English"));
+});
+
+// ---------------------------------------------------------------- v5 gating
+
+Deno.test("v5 reaches only the new chat screen; every older build stays on v4", () => {
+  assertEquals(effectiveVersion("v5", 2), "v5");
+  assertEquals(effectiveVersion("v5", 1), "v4");
+  assertEquals(effectiveVersion("v5", 0), "v4");
+
+  // A rollback applies to everyone, new screen included.
+  assertEquals(effectiveVersion("v3", 2), "v3");
+  assertEquals(effectiveVersion("v4", 2), "v4");
+  assertEquals(effectiveVersion("", 2), "v4");
+});
+
+Deno.test("v5 keeps everything v4 built — the timing block, the hour asked once", () => {
+  assert(atLeastV4("v4"));
+  assert(atLeastV4("v5"));
+  assert(!atLeastV4("v3"));
 });

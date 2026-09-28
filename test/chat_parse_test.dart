@@ -36,6 +36,85 @@ Map<String, dynamic> userTurn([Map<String, dynamic> over = const {}]) => {
     };
 
 void main() {
+  group('a v5 reply, as the WhatsApp-style chat reads it', () {
+    Map<String, dynamic> v5([Map<String, dynamic> over = const {}]) => {
+          'id': 'v5-1',
+          'role': 'astro',
+          'created_at': '2026-09-25T10:00:00Z',
+          'verdict': 'Shaadi ka sabse accha samay 2027 hai.',
+          'opening': 'Is time Shukra ki dasha chalegi.\n\nKya main aapko aaj ka upay bataun?',
+          'sections': [],
+          'bubbles': [
+            'Shaadi ka sabse accha samay 2027 hai.',
+            'Is time Shukra ki dasha chalegi.',
+            'Kya main aapko aaj ka upay bataun? 🙏',
+          ],
+          'kind': 'answer',
+          'offer': 'remedy',
+          'topic': 'marriage',
+          'options': ['Haan, upay batao 🙏', 'Jeevansathi kaisa hoga?'],
+          'ask_for': 'none',
+          ...over,
+        };
+
+    test('is its bubbles, with what kind of turn it was and whether it offers the upay', () {
+      final message = AstroMessage.fromServer(v5())!;
+      expect(message.displayBubbles, hasLength(3));
+      expect(message.displayBubbles.first, 'Shaadi ka sabse accha samay 2027 hai.');
+      expect(message.kind, ReplyKind.answer);
+      expect(message.offersRemedy, isTrue);
+      expect(message.topic, 'marriage');
+    });
+
+    test('a bubbles-only turn still parses — the opening is only there for older builds', () {
+      final message = AstroMessage.fromServer(v5({'opening': '', 'verdict': ''}))!;
+      expect(message.displayBubbles, hasLength(3));
+    });
+
+    test('an old card becomes bubbles: the answer, then its title and opening, then sections', () {
+      final message = AstroMessage.fromServer(astroTurn({'verdict': 'Love comes slowly.'}))!;
+      expect(message.displayBubbles, [
+        'Love comes slowly.',
+        '✨ Your Love Reading\nYour Chandra sits in Rohini.',
+        '❤️ Relationship Energy\nA steadier season.',
+        '💞 Love Opportunities\nThrough people you know.',
+      ]);
+      expect(message.kind, ReplyKind.reading);
+    });
+
+    test('a user turn is one bubble of its own words', () {
+      final message = AstroMessage.fromServer(userTurn())!;
+      expect(message.displayBubbles, ['I want to know about my love life.']);
+    });
+
+    test('round-trips through the cache with its bubbles, kind and offer intact', () {
+      final message = AstroMessage.fromServer(v5())!;
+      final back = AstroMessage.fromServer(message.toJson())!;
+      expect(back.bubbles, message.bubbles);
+      expect(back.kind, ReplyKind.answer);
+      expect(back.offersRemedy, isTrue);
+      expect(back.topic, 'marriage');
+    });
+
+    test('a care reply and an ask are told apart, and a date of birth can be asked for', () {
+      expect(AstroMessage.fromServer(v5({'kind': 'care'}))!.kind, ReplyKind.care);
+      final ask = AstroMessage.fromServer(v5({'kind': 'ask', 'ask_for': 'dob'}))!;
+      expect(ask.kind, ReplyKind.ask);
+      expect(ask.askFor, AskFor.dob);
+      expect(AskFor.dob.wire, 'dob');
+    });
+
+    test('an unknown kind is read as a reading rather than dropped', () {
+      expect(AstroMessage.fromServer(v5({'kind': 'haiku'}))!.kind, ReplyKind.reading);
+    });
+
+    test('read aloud from its bubbles, emoji left out', () {
+      final spoken = AstroMessage.fromServer(v5())!.spoken;
+      expect(spoken, contains('Shaadi ka sabse accha samay 2027 hai.'));
+      expect(spoken, isNot(contains('🙏')));
+    });
+  });
+
   group('AstroMessage.fromServer', () {
     test('parses an Astro turn', () {
       final message = AstroMessage.fromServer(astroTurn())!;

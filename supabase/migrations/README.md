@@ -124,6 +124,21 @@ and run in lexical order.
   Hindi, a shorter body) and rewrites the row's description. A project rolled back to v2 or v1
   stays put. **Safe in either order against the functions deploy** — code from before v4 reads
   `v4` as unrecognised, which there means v3.
+- `20260925000001_chat_safety.sql` — crisis handling. `chat_messages.metered` (boolean, default
+  true, no rewrite) so a crisis message never uses up the day's questions, and
+  `chat_safety_flags` (user/thread/message ids `on delete set null`, `rule`, `language`, review
+  columns; **no message text**), RLS on with zero policies, not purged. **Apply before deploying
+  `astro-chat` and `chat-history`** — both filter on `metered`. The review queue:
+  ```sql
+  select f.created_at at time zone 'Asia/Kolkata' as at, f.rule, f.language, m.body->>'text' as said
+    from chat_safety_flags f left join chat_messages m on m.id = f.message_id
+   where f.reviewed_at is null order by f.created_at desc;
+  -- then: update chat_safety_flags set reviewed_at = now(), reviewed_by = '<you>', note = '…' where id = '…';
+  ```
+- `20260925000002_chat_v5.sql` — data only: `chat_prompt_version` from `v4` to `v5` and
+  `chat_plan_3m_enabled` (**false**, private). v5 reaches only clients sending `chat_ui: 2` (the
+  WhatsApp-style screen); every older build keeps v4, so this changes nothing until that build
+  ships. Safe in either order against the functions deploy.
 
 ## Notes
 

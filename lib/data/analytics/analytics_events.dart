@@ -583,6 +583,13 @@ abstract final class P {
   static const askFor = 'ask_for';
   static const hasOpener = 'has_opener';
 
+  /// On `Chat Reply Received`, for the WhatsApp-style chat: how many messages the reply came as,
+  /// what sort of turn it was (`answer`, `remedy`, `ask`, `chat`, `care`, or `reading` for a v4
+  /// card), and whether it ended by offering today's upay.
+  static const bubbleCount = 'bubble_count';
+  static const replyKind = 'reply_kind';
+  static const offersRemedy = 'offers_remedy';
+
   /// On the birth time sheet: `early_morning` … `after_midnight`.
   static const partOfDay = 'part_of_day';
   static const adjusted = 'adjusted';

@@ -46,7 +46,8 @@ they are invoked with the anon key, before any session exists — so each valida
 ## Notes
 
 - **The user id never comes from the request body.** Every authed function resolves the caller
-  from the bearer token via `userIdForBearer`, so no request can name an account but its own.
+  from the bearer token via `userIdForBearer`, so no request can name an account but its own. It
+  stamps the session's `last_seen_at` at most once in ten minutes, not on every call.
 - `cashfree-webhook` and the cron-driven functions (`subscription-reconcile`, `kundali-worker`,
   `notification-dispatch`) cannot use a bearer token — Cashfree cannot send an `apikey` header, and
   pg_cron has no session. Hence HMAC and the shared `reconcile_secret` respectively.

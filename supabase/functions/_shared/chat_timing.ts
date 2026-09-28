@@ -22,9 +22,27 @@
 import { AntardashaPeriod, Chart, julianDayOf, RASHIS } from "./jyotish.ts";
 import { PLANETS, SIGN_LORDS } from "./kundali_chart.ts";
 
-/** The matters a window is worked out for. Children are not among them: see BOUNDARIES. */
+/** The matters a v4 window is worked out for. Children are not among them: see BOUNDARIES. */
 export const TIMING_TOPICS = ["marriage", "career", "money", "home", "studies"] as const;
-export type TimingTopic = typeof TIMING_TOPICS[number];
+
+/**
+ * The matters a v5 window is worked out for: v4's five plus the three the topics report found
+ * people asking "kab" about most after marriage — love (22.5% of typed questions), children (36%
+ * of which ask when) and debt. Children are read as a period of time only; v5's health rule in
+ * BOUNDARIES says how.
+ */
+export const V5_TIMING_TOPICS = [
+  "marriage",
+  "love",
+  "children",
+  "career",
+  "money",
+  "debt",
+  "home",
+  "studies",
+] as const;
+
+export type TimingTopic = typeof V5_TIMING_TOPICS[number];
 
 interface TopicRule {
   /** What someone asking about this is asking about, as the prompt lists it. */
@@ -59,6 +77,24 @@ const RULES: Record<TimingTopic, TopicRule> = {
     karakas: [["Guru", "the graha of wealth and growth"]],
     houses: [[2, "the house of savings"], [11, "the house of gains"]],
   },
+  love: {
+    label: "Love, one particular person, talking again, a relationship becoming serious",
+    karakas: [
+      ["Shukra", "the graha of love"],
+      ["Chandra", "the graha of the heart and feeling"],
+    ],
+    houses: [[5, "the house of romance"], [7, "the house of partnership"]],
+  },
+  children: {
+    label: "Children (santan), as a period of time only",
+    karakas: [["Guru", "the graha of children and blessing"]],
+    houses: [[5, "the house of children"]],
+  },
+  debt: {
+    label: "A debt reducing, a loan being cleared",
+    karakas: [["Guru", "the graha of relief and growth"]],
+    houses: [[6, "the house of debts"], [11, "the house of gains"]],
+  },
   home: {
     label: "A home of their own, land or property, a vehicle",
     karakas: [
@@ -86,8 +122,17 @@ const MAX_WINDOWS = 2;
  */
 const MIN_REMAINING_DAYS = 60;
 
-/** Below this, no marriage window is named at all. */
+/** Below this, no marriage (or, in v5, children) window is named at all. */
 const ADULT_AGE = 18;
+
+/** The matters that wait for adulthood: withheld under [ADULT_AGE], floored at 21. */
+const ADULT_TOPICS: ReadonlySet<TimingTopic> = new Set(["marriage", "children"]);
+
+/**
+ * v5's longest window. The v5 plan allows a month-year window "of up to about two years", and a
+ * merged run of favourable periods can be far longer — "2027 to 2031" is not an answer to "kab".
+ */
+const V5_MAX_WINDOW_DAYS = 24 * 30.44;
 
 /**
  * No marriage window opens before this age, whoever is asking. The legal age for a man in India,
@@ -141,6 +186,12 @@ export interface TopicTiming {
 
   /** True only for marriage, when they are under [ADULT_AGE] and no window is named. */
   withheld: boolean;
+
+  /**
+   * The soonest any window for it may open: today, or their 21st birthday for marriage and
+   * children. A window from another clock — Guru's transit — must respect it too.
+   */
+  opensJd: number;
 }
 
 export interface ChatTiming {
@@ -161,7 +212,7 @@ export interface ChatTiming {
  */
 export function chatTiming(
   chart: Chart | null,
-  { dob, asOf }: { dob?: string | null; asOf: Date },
+  { dob, asOf, v5 = false }: { dob?: string | null; asOf: Date; v5?: boolean },
 ): ChatTiming | null {
   if (!chart?.periods?.length || !chart.moonRashi) return null;
 
@@ -172,26 +223,41 @@ export function chatTiming(
   const birthday = birthdayJd(dob);
   const age = birthday ? completedYears(birthday, asOfJd) : null;
 
-  const topics = TIMING_TOPICS.map((topic): TopicTiming => {
+  const topics = (v5 ? V5_TIMING_TOPICS : TIMING_TOPICS).map((topic): TopicTiming => {
     const rule = RULES[topic];
     const reasons = reasonsFor(rule, moonIndex);
+    const adult = ADULT_TOPICS.has(topic);
 
-    if (topic === "marriage" && age !== null && age < ADULT_AGE) {
-      return { topic, label: rule.label, reasons, windows: [], withheld: true };
+    const floorJd = adult && birthday ? birthday(MARRIAGE_MIN_AGE) : -Infinity;
+    const opensJd = Math.max(asOfJd, floorJd);
+
+    if (adult && age !== null && age < ADULT_AGE) {
+      return { topic, label: rule.label, reasons, windows: [], withheld: true, opensJd };
     }
 
-    const floorJd = topic === "marriage" && birthday ? birthday(MARRIAGE_MIN_AGE) : -Infinity;
+    const windows = windowsFor(chart.periods!, new Set(Object.keys(reasons)), asOfJd, floorJd);
 
     return {
       topic,
       label: rule.label,
       reasons,
-      windows: windowsFor(chart.periods!, new Set(Object.keys(reasons)), asOfJd, floorJd),
+      windows: v5 ? windows.map(clipped) : windows,
       withheld: false,
+      opensJd,
     };
   });
 
   return { asOfJd, periods: chart.periods, topics };
+}
+
+/** How the prompt names [topic] — shared with the transit windows, so both lists read alike. */
+export function topicLabel(topic: TimingTopic): string {
+  return RULES[topic].label;
+}
+
+/** A window cut to [V5_MAX_WINDOW_DAYS] from where it opens. */
+function clipped(window: TimingWindow): TimingWindow {
+  return { ...window, endJd: Math.min(window.endJd, window.startJd + V5_MAX_WINDOW_DAYS) };
 }
 
 /** The grahas that time [rule] for a Moon in rashi [moonIndex], each with every reason it has. */
@@ -361,13 +427,25 @@ function source(window: TimingWindow): string {
   return `the ${plural} of ${listed(window.antardashas)}`;
 }
 
-function topicLine(topic: TopicTiming): string {
+function topicLine(topic: TopicTiming, nearer?: string): string {
   if (topic.withheld) {
-    return `- ${topic.label}: they are under 18. Name no time for marriage. Speak warmly of the ` +
+    const what = topic.topic === "children" ? "children" : "marriage";
+    return `- ${topic.label}: they are under 18. Name no time for ${what}. Speak warmly of the ` +
       `years ahead of them, and of their studies, instead.`;
   }
 
   const [first, second] = topic.windows;
+
+  // v5: the dasha's own period is years off, and Guru's transit favours the matter sooner.
+  if (nearer) {
+    const later = first
+      ? `Their dasha's own period for it comes later — ${span(first)}, in ${source(first)} — ` +
+        "name it only if they ask what comes after."
+      : "Their dasha marks no period for it in the next twelve years; do not say so.";
+    return `- ${topic.label}: ${nearer}, from Guru's transit over their rashi. This is the ` +
+      `window to give. ${later}`;
+  }
+
   if (!first) {
     return `- ${topic.label}: no period in the next twelve years is marked for it. Read from the ` +
       `periods below, and speak of the next one with hope.`;
@@ -386,10 +464,17 @@ function topicLine(topic: TopicTiming): string {
  *
  * Always says something: without a dated chart it says the timing is unknown, so the sage cannot
  * mistake silence for permission to pick a year of its own.
+ *
+ * [nearer] is v5's: for a matter whose dasha window is years off, the Guru season that replaces it
+ * as the answer (`nearerSeasons` in `chat_transits.ts`).
  */
 export function describeTiming(
   timing: ChatTiming | null,
-  { hasChart }: { hasChart: boolean },
+  { hasChart, v5 = false, nearer = {} }: {
+    hasChart: boolean;
+    v5?: boolean;
+    nearer?: Partial<Record<TimingTopic, string>>;
+  },
 ): string {
   if (!timing) {
     const because = hasChart
@@ -410,12 +495,16 @@ export function describeTiming(
   return [
     `THE TIMING (computed from their Vimshottari dasha; today is ${monthYear(timing.asOfJd)}). ` +
     `This is fact, and it is your answer whenever they ask when:`,
-    ...timing.topics.map(topicLine),
+    ...timing.topics.map((topic) => topicLine(topic, nearer[topic.topic])),
     "",
     "The periods ahead, in order:",
     ...upcoming,
     "",
-    'Say a window as years or part of a year — "2027 ke aas-paas", "agle saal ki shuruaat" — ' +
-    "never as a day or a date. Give the same window every time you are asked.",
+    v5
+      ? 'Say a window as a month-year range — "2027 ke middle se 2028 ke end tak", "March se ' +
+        'August 2027 ke beech" — never as a day or a date. Give the same window every time you ' +
+        "are asked; when they press, name a month inside it."
+      : 'Say a window as years or part of a year — "2027 ke aas-paas", "agle saal ki shuruaat" — ' +
+        "never as a day or a date. Give the same window every time you are asked.",
   ].join("\n");
 }

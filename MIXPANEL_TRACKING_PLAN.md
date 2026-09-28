@@ -290,9 +290,9 @@ The single most instrumented flow in the app. **Every event in one checkout atte
 | Event | Fires when | Where | Key properties |
 |-------|-----------|-------|----------------|
 | `Chat Opened` | The chat screen opens | `chat_view.dart` | `has_opener`, `source` (`reading` / `direct`), `thread_count` |
-| `Chat Topic Tapped` | An opening topic pill is picked | `chat_view.dart` | `topic` |
+| `Chat Topic Tapped` | A topic button under Astro's greeting is picked | `chat_view.dart` | `topic` (`marriage` / `love` / `children` / `home` / `career` / `money`, the same six in every language) |
 | `Chat Message Sent` | A message is sent — **counted before the send, so a turn that fails still has its question counted** | `chat_viewmodel.dart` | `thread_id`, `entry_method` (`typed` / `topic` / `quick_reply` / `opener` — three different levels of intent), `chars`, `turn_index` |
-| `Chat Reply Received` | The sage answers | `chat_viewmodel.dart` | `thread_id`, `turn_index`, `ms`, `section_count`, `has_verdict`, `option_count`, `ask_for`, `count` (**daily allowance remaining — the turn where this hits zero is the turn a conversation ends against its will**) |
+| `Chat Reply Received` | The sage answers — once per turn, when the reply lands, before its bubbles are staged | `chat_viewmodel.dart` | `thread_id`, `turn_index`, `ms` (network time, not the typing animation), `section_count`, `has_verdict`, `option_count`, `ask_for`, `count` (**daily allowance remaining — the turn where this hits zero is the turn a conversation ends against its will**), `bubble_count`, `reply_kind` (`answer` / `remedy` / `ask` / `chat` / `care`, or `reading` for a v4 card), `offers_remedy`, `topic` (v5 only) |
 | `Chat Reply Failed` | The reply failed or the daily limit was hit | `chat_viewmodel.dart` | `reason` (`limit_reached` / `failed` / …), `message`, `chars` |
 | `Chat Quick Reply Tapped` | A suggested reply chip is tapped | `chat_composer.dart` | `option_index`, `label`, `option_count` |
 | `Chat Drawer Opened` | The conversation history drawer opens | `chat_view.dart` | — |

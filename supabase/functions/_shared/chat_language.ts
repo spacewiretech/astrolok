@@ -162,6 +162,28 @@ const PLAIN_WORDS =
   "sentences. Never a literary, bookish or formal word where a common one exists. If a word " +
   "would sound odd in a message to a cousin, use a simpler one.";
 
+/**
+ * Chat v5's section A, beyond the plain-words list: the phrases the one-star review kept finding,
+ * and the two readings of a word that sent answers the wrong way.
+ */
+const SPOKEN_V5 = `
+Write the way a friendly pandit ji talks on the phone, not the way a book is written. Short
+sentences, one idea in each. Reuse the words they used — if they said "shaadi", you say "shaadi".
+
+Never these, in any script — use the everyday word instead: vivah → shaadi; aajeevika → naukri,
+kaam; peshevar sthirta → naukri pakki hona; paarivarik sahmati → ghar walon ki haan; apeksha →
+umeed; virajman → baitha hai; pratishthit → izzatdaar, accha; sahbhagita → saath; baudhik aur
+vaicharik mel → soch milna. Never the phrase "dwar khulega" / "द्वार खुलेगा" at all.
+
+"Ghar", "ghar wale" and ಮನೆಯವರು very often mean the family, not a house. Read which one they mean
+before you answer it as a question about property.
+
+Marathi is written in Devanagari too — "कधी होईल", "आहे", "लग्न" (marriage). If they write
+Marathi, answer in simple Marathi, never Hindi.
+
+If you are about to write a word a 10th-pass person in a small town would not say out loud,
+replace it.`.trim();
+
 /** The line describing how to write [name]. Unknown names get a template, so config can lead. */
 export function languageInstruction(name: string, { plain = false } = {}): string {
   const key = name.trim().toLowerCase();
@@ -190,9 +212,21 @@ export function languageInstruction(name: string, { plain = false } = {}): strin
  */
 export function languageBlock(
   name: string,
-  { conversation = false, plain = false } = {},
+  { conversation = false, plain = false, v5 = false } = {},
 ): string {
-  const head = `
+  const head = v5
+    ? `
+THE LANGUAGE YOU WRITE IN.
+
+Write every field of your reply in ${name} — every message bubble, the hidden remedy messages, and
+every option. Not a mixture of two languages, and never a translation appended after. The person
+reads one language; give them that one.
+
+${languageInstruction(name, { plain: true })}
+
+${SPOKEN_V5}
+`.trim()
+    : `
 THE LANGUAGE YOU WRITE IN.
 
 Write every field of your reply in ${name} — the verdict, the title, the opening, every section
@@ -263,6 +297,43 @@ const LANGUAGE_NAMES: Record<string, readonly string[]> = {
   hinglish: ["hinglish", "हिंग्लिश"],
 };
 
+/**
+ * v5's: "kannada mein bolo", "in Tamil please" — the v5 plan's "switch immediately and stay in
+ * it". Not v4's, which still switches exactly as it shipped.
+ */
+const LANGUAGE_NAMES_V5: Record<string, readonly string[]> = {
+  ...LANGUAGE_NAMES,
+  kannada: ["kannada", "ಕನ್ನಡ"],
+  tamil: ["tamil", "தமிழ்"],
+  telugu: ["telugu", "తెలుగు"],
+  malayalam: ["malayalam", "മലയാളം"],
+  marathi: ["marathi", "मराठी"],
+};
+
+/**
+ * The scripts that name their language outright, for v5. A message written mostly in one of them
+ * is in that language, the way a Devanagari message is Hindi — except that Devanagari is shared
+ * with Marathi, which [isMarathi] tells apart.
+ */
+const SCRIPTS: ReadonlyArray<readonly [string, RegExp]> = [
+  ["kannada", /[\u0C80-\u0CFF]/g],
+  ["tamil", /[\u0B80-\u0BFF]/g],
+  ["telugu", /[\u0C00-\u0C7F]/g],
+  ["malayalam", /[\u0D00-\u0D7F]/g],
+];
+
+/**
+ * Words Marathi uses and Hindi does not, as they appear in chat: "लग्न कधी होईल", "माझं", "आहे".
+ * Two of them in one message is Marathi; one could be a Hindi speaker's stray word.
+ */
+const MARATHI_WORDS =
+  /(?<![\p{L}\p{M}])(?:आहे|आहेत|कधी|होईल|लग्न|माझं|माझा|माझी|माझे|माझ्या|नाही|काय|मला|तुम्ही|आणि|सांगा|मिळेल|होणार|करू)(?![\p{L}\p{M}])/gu;
+
+/** True when a Devanagari message is Marathi rather than Hindi. */
+export function isMarathi(message: string): boolean {
+  return (message.match(MARATHI_WORDS)?.length ?? 0) >= 2;
+}
+
 /** "In", as it follows a language's name: "Hindi me", "हिंदी में". */
 const POSTPOSITION = "me|mein|mai|mei|main|men|में|मे|मैं";
 
@@ -317,23 +388,48 @@ export interface LanguageSwitch {
  * - **The script.** A message mostly in Devanagari is Hindi. Roman letters decide nothing, because
  *   English and Hinglish share them — that case stays with the prompt.
  *
+ * [v5] adds the southern languages — asked for by name, or written in their own script — and
+ * tells Marathi from Hindi. Only v5's prompt can answer in Marathi, and a v4 turn switching
+ * someone's saved language to Kannada would be a change to the build on the Play Store, so v4
+ * switches exactly as it shipped.
+ *
  * A language the dashboard does not offer is never returned, so a switch cannot name something
  * `resolveLanguage` would refuse.
  */
-export function detectLanguageSwitch(message: string, config: AppConfig): LanguageSwitch | null {
+export function detectLanguageSwitch(
+  message: string,
+  config: AppConfig,
+  { v5 = false } = {},
+): LanguageSwitch | null {
   const text = message.trim().toLowerCase();
   if (!text) return null;
 
   const languages = supportedLanguages(config);
   const spelled = (key: string) => languages.find((entry) => entry.toLowerCase() === key);
 
-  const asked = requestedLanguage(text);
+  const asked = requestedLanguage(text, v5 ? LANGUAGE_NAMES_V5 : LANGUAGE_NAMES);
   const named = asked ? spelled(asked) : undefined;
   if (named) return { language: named, explicit: true };
 
-  const devanagari = text.match(DEVANAGARI)?.length ?? 0;
   const latin = text.match(LATIN)?.length ?? 0;
+
+  for (const [key, script] of v5 ? SCRIPTS : []) {
+    const letters = text.match(script)?.length ?? 0;
+    if (letters >= MIN_SCRIPT_CHARS && letters >= latin) {
+      const offered = spelled(key);
+      if (offered) return { language: offered, explicit: false };
+    }
+  }
+
+  const devanagari = text.match(DEVANAGARI)?.length ?? 0;
   if (devanagari >= MIN_SCRIPT_CHARS && devanagari >= latin) {
+    // Marathi is written in Devanagari too, and switching a Marathi speaker to Hindi is the
+    // wrong answer in a way nobody would forgive. Marathi if the dashboard offers it; otherwise
+    // no switch at all, and the prompt is told to answer in Marathi (see [isMarathi]).
+    if (v5 && isMarathi(message)) {
+      const marathi = spelled("marathi");
+      return marathi ? { language: marathi, explicit: false } : null;
+    }
     const hindi = spelled("hindi");
     if (hindi) return { language: hindi, explicit: false };
   }
@@ -341,8 +437,14 @@ export function detectLanguageSwitch(message: string, config: AppConfig): Langua
   return null;
 }
 
-/** The key of the language [text] asks for, or null. When it names two, the later one wins. */
-function requestedLanguage(text: string): string | null {
+/**
+ * The key of the language [text] asks for, out of [languages], or null. When it names two, the
+ * later one wins.
+ */
+function requestedLanguage(
+  text: string,
+  languages: Record<string, readonly string[]>,
+): string | null {
   if (NEGATION.test(text)) return null;
 
   const short = text.split(/\s+/).filter((word) => word).length <= SHORT_WORDS;
@@ -350,7 +452,7 @@ function requestedLanguage(text: string): string | null {
 
   let found: { key: string; at: number } | null = null;
 
-  for (const [key, names] of Object.entries(LANGUAGE_NAMES)) {
+  for (const [key, names] of Object.entries(languages)) {
     const name = whole(names.join("|"));
 
     // Nothing but the name, give or take "please" and "sirf": "हिन्दी", "English please".

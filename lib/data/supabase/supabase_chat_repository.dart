@@ -1,3 +1,4 @@
+import '../models/app_user.dart';
 import '../models/astro_message.dart';
 import '../repositories/chat_repository.dart';
 import 'edge_functions.dart';
@@ -22,13 +23,24 @@ class SupabaseChatRepository implements ChatRepository {
   /// as a generic timeout.
   static const _sendTimeout = Duration(seconds: 35);
 
+  /// Which chat screen this build is. 2 is the WhatsApp-style one, and only a client that says so
+  /// is answered with the v5 prompt: short messages, the upay offered then served, birth details
+  /// asked in the chat. Older builds send nothing and keep v4.
+  static const _chatUi = 2;
+
   @override
-  Future<ChatReply> send(String message, {String? threadId}) async {
+  Future<ChatReply> send(
+    String message, {
+    String? threadId,
+    String entry = 'composer',
+  }) async {
     final data = await _call('astro-chat', {
       'message': message,
       // Omitted rather than sent as null on the first turn of a new conversation: the server
       // reads its absence as "open one for me".
       if (threadId != null && threadId.isNotEmpty) 'thread_id': threadId,
+      'entry': entry,
+      'chat_ui': _chatUi,
     }, _sendTimeout);
 
     final reply = AstroMessage.fromServer(data['message']);
@@ -57,6 +69,7 @@ class SupabaseChatRepository implements ChatRepository {
       remaining: data['remaining'] is int ? data['remaining'] as int : null,
       savedLanguage: _text(data['saved_language']).isEmpty ? null : _text(data['saved_language']),
       askRating: data['ask_rating'] == true,
+      user: AppUser.fromServer(data['user']),
     );
   }
 
