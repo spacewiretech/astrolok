@@ -2,8 +2,8 @@ import { parseCancellationFeedback } from "../_shared/cancellation_feedback.ts";
 import { resolveLanguage } from "../_shared/chat_language.ts";
 import { loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
-import { serviceClient, userIdForBearer } from "../_shared/db.ts";
-import { asUserRow, USER_COLUMNS } from "../_shared/entitlement.ts";
+import { callerForBearer, serviceClient } from "../_shared/db.ts";
+import { callerUserRow } from "../_shared/entitlement.ts";
 import { configureMixpanel, setProfile } from "../_shared/mixpanel.ts";
 
 /**
@@ -23,8 +23,9 @@ Deno.serve(async (req) => {
   if (cors) return cors;
 
   const db = serviceClient();
-  const userId = await userIdForBearer(db, req.headers.get("Authorization"));
-  if (!userId) return fail("unauthorized", "Please sign in again.", 401);
+  const caller = await callerForBearer(db, req.headers.get("Authorization"));
+  if (!caller) return fail("unauthorized", "Please sign in again.", 401);
+  const { userId } = caller;
 
   let body: unknown = null;
   try {
@@ -39,7 +40,7 @@ Deno.serve(async (req) => {
   const config = await loadConfig(db);
   configureMixpanel(config, "cancellation-feedback");
 
-  const [{ data: subscription, error: subError }, { data: userRow, error: userError }] = await Promise.all([
+  const [{ data: subscription, error: subError }, user] = await Promise.all([
     db.from("subscriptions")
       .select("subscription_id, cancelled_at")
       .eq("user_id", userId)
@@ -47,16 +48,14 @@ Deno.serve(async (req) => {
       .order("cancelled_at", { ascending: false, nullsFirst: false })
       .limit(1)
       .maybeSingle(),
-    db.from("users").select(USER_COLUMNS).eq("user_id", userId).single(),
+    callerUserRow(db, caller, "cancellation-feedback"),
   ]);
 
-  if (subError || userError || !userRow) {
-    console.error("cancellation-feedback: lookup failed", subError ?? userError);
+  if (subError || !user) {
+    console.error("cancellation-feedback: lookup failed", subError ?? "no user row");
     return fail("server_error", "Something went wrong. Please try again.", 500);
   }
   if (!subscription) return fail("not_found", "There is no cancelled plan to tell us about.", 404);
-
-  const user = asUserRow(userRow);
 
   // Only an id that is really this account's push; anything else is stored as unattributed.
   let notificationId = feedback.notificationId;

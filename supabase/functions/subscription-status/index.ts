@@ -4,13 +4,13 @@ import { configureFacebookCapi } from "../_shared/facebook_capi.ts";
 import { configureMixpanel } from "../_shared/mixpanel.ts";
 import { configureNotifications } from "../_shared/notify.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
-import { serviceClient, userIdForBearer } from "../_shared/db.ts";
+import { callerForBearer, serviceClient } from "../_shared/db.ts";
 import {
-  asUserRow,
+  callerUserRow,
   entitlementPayload,
   graceHoursFrom,
   isEntitled,
-  USER_COLUMNS,
+  readUserRow,
 } from "../_shared/entitlement.ts";
 import { planFor } from "../_shared/pricing.ts";
 import { latestSubscription, syncSubscription } from "../_shared/subscription_sync.ts";
@@ -33,8 +33,9 @@ Deno.serve(async (req) => {
   if (cors) return cors;
 
   const db = serviceClient();
-  const userId = await userIdForBearer(db, req.headers.get("Authorization"));
-  if (!userId) return fail("unauthorized", "Please sign in again.", 401);
+  const caller = await callerForBearer(db, req.headers.get("Authorization"));
+  if (!caller) return fail("unauthorized", "Please sign in again.", 401);
+  const { userId } = caller;
 
   const config = await loadConfig(db);
   configureMixpanel(config, "subscription-status");
@@ -43,6 +44,9 @@ Deno.serve(async (req) => {
   const graceHours = graceHoursFrom(config);
 
   const subscription = await latestSubscription(db, userId);
+  // Whether anything in this request may have written `users` or `subscriptions`. Until a sync
+  // runs, the rows read at the top are still the answer and are not read a second time.
+  let synced = false;
 
   if (subscription && !TERMINAL.includes(subscription.status)) {
     // Pull the payments list only when a debit could be unaccounted for, so the extra Cashfree
@@ -52,16 +56,13 @@ Deno.serve(async (req) => {
     // webhook produces. `chargeDue` catches it earlier: Cashfree's schedule has passed, so a
     // debit has probably happened, and waiting for the user to be locked out first would mean
     // recovering their access only after they had already been shown the paywall.
-    const { data: stored } = await db
-      .from("users")
-      .select(USER_COLUMNS)
-      .eq("user_id", userId)
-      .maybeSingle();
+    const stored = await callerUserRow(db, caller, "subscription-status");
 
-    const blocked = !stored || !isEntitled(asUserRow(stored), graceHours);
+    const blocked = !stored || !isEntitled(stored, graceHours);
     const chargeDue = subscription.next_schedule_date !== null &&
       new Date(subscription.next_schedule_date).getTime() <= Date.now();
 
+    synced = true;
     try {
       const settings = cashfreeSettings(config);
       await syncSubscription(
@@ -78,19 +79,12 @@ Deno.serve(async (req) => {
     }
   }
 
-  const { data: userRow, error } = await db
-    .from("users")
-    .select(USER_COLUMNS)
-    .eq("user_id", userId)
-    .single();
+  const row = synced
+    ? await readUserRow(db, userId, "subscription-status")
+    : await callerUserRow(db, caller, "subscription-status");
+  if (!row) return fail("server_error", "Something went wrong. Please try again.", 500);
 
-  if (error || !userRow) {
-    console.error("subscription-status user lookup failed", error);
-    return fail("server_error", "Something went wrong. Please try again.", 500);
-  }
-
-  const fresh = subscription ? await latestSubscription(db, userId) : null;
-  const row = asUserRow(userRow);
+  const fresh = synced ? await latestSubscription(db, userId) : subscription;
 
   return json({
     user: entitlementPayload(row, graceHours, planFor(config, row.plan_variant)),

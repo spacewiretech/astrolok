@@ -28,9 +28,10 @@ they are invoked with the anon key, before any session exists — so each valida
 | `subscription-start` | POST | bearer | creates the Cashfree mandate, returns the session payload |
 | `subscription-status` | POST/GET | bearer | reads the latest subscription, optionally re-syncs, returns entitlement. No method check |
 | `subscription-cancel` | POST | bearer | cancels the mandate, returns refreshed entitlement |
-| `cashfree-webhook` | POST from Cashfree | **HMAC signature** | verifies `x-webhook-signature` over the raw body, dedupes, drives `syncSubscription` |
+| `cashfree-webhook` | POST from Cashfree | **HMAC signature** | verifies `x-webhook-signature` over the raw body, dedupes, drives `syncSubscription`. With `cashfree_webhook_batch` on it only records the delivery and `payment-sync` processes it; another product's unverifiable delivery (`c360_…`, `ca_…`) is answered 200 so Cashfree stops retrying it |
+| `payment-sync` | POST from `pg_cron` (every minute) | **shared secret** (`x-cron-secret`) | answers 202, then claims queued webhook deliveries and syncs each subscription once, recording only charges the ledger lacks at that status. Failures stay queued, up to 12 attempts |
 | `subscription-reconcile` | POST from `pg_cron` | **shared secret** | `app_config.reconcile_secret`, compared with `constantTimeEquals`; sweeps abandoned/drifted/stale subscriptions |
-| `payment-retry` | POST from `pg_cron` (hourly, :37) | **shared secret** | same `reconcile_secret`. Retries debits that failed for insufficient funds via Cashfree's manage-payment RETRY (`payment_retries` table, schedule in `_shared/payment_retry.ts`). Off unless `cashfree_retry_enabled`. Body `{probe}` is read-only; `{only: [...]}` acts on named mandates even while switched off |
+| `payment-retry` | POST from `pg_cron` (hourly, `37 * * * *` UTC = :07 IST) | **shared secret** | same `reconcile_secret`. Retries debits that failed for insufficient funds via Cashfree's manage-payment RETRY (`payment_retries` table, schedule in `_shared/payment_retry.ts`). Off unless `cashfree_retry_enabled`. Body `{probe}` is read-only; `{only: [...]}` acts on named mandates even while switched off |
 | `place-search` | POST `{action: autocomplete \| details, …, session_token}` | bearer + entitled | Google Places (New) + Time Zone API with the key server-side; metered per user per hour (`place_search_per_hour`) |
 | `kundali` | POST `{action: status \| report \| request, …}` | bearer + entitled (trial OK) | casts the chart at request time; `report` answers **409 `not_ready` until `unlock_at`** — the lock lives in `kundaliPayload`, the only serializer. A trial's `unlock_at` is 24 h out; a paying account's is now, and its reading is written straight after the response (`_shared/kundali_generate.ts`) |
 | `kundali-worker` | POST from `pg_cron` (every 5 min) | **shared secret** (`x-cron-secret`) | answers 202, then writes due readings with Gemini after the response; retries with backoff, including a paying account's instant attempt that failed |
@@ -50,11 +51,12 @@ they are invoked with the anon key, before any session exists — so each valida
   from the bearer token via `userIdForBearer`, so no request can name an account but its own. It
   stamps the session's `last_seen_at` at most once in ten minutes, not on every call.
 - `cashfree-webhook` and the cron-driven functions (`subscription-reconcile`, `kundali-worker`,
-  `notification-dispatch`) cannot use a bearer token — Cashfree cannot send an `apikey` header, and
+  `notification-dispatch`, `payment-sync`) cannot use a bearer token — Cashfree cannot send an `apikey` header, and
   pg_cron has no session. Hence HMAC and the shared `reconcile_secret` respectively.
 - Adding a function means adding it to `config.toml` too, or it deploys with JWT verification on
   and rejects the anon key the app calls with.
-- Gemini, Fast2SMS and Cashfree are reached **only** from here. The client sends no amount and
+- Gemini (direct, or through OpenRouter while `openrouter_use` is true), Fast2SMS and Cashfree
+  are reached **only** from here. The client sends no amount and
   no plan id — everything billable is resolved server-side from `app_config`.
 - Pushes are sent by `_shared/notify.ts` with the service-account JSON in the private
   `fcm_service_account_key` row. The two billing campaigns (`mid_cancel`, `billing_issue`) are

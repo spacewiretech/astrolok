@@ -1,5 +1,7 @@
 import { createClient, SupabaseClient } from "jsr:@supabase/supabase-js@2";
 
+import { configCached, primeConfig } from "./config.ts";
+
 /**
  * Service-role client. Bypasses RLS, so it is the only thing that can read or write
  * `users`, `user_sessions` and `otp_throttle` — those tables have RLS on with no policies.
@@ -76,15 +78,78 @@ export function lastSeenDue(lastSeenAt: string | null | undefined, now: Date = n
   return !Number.isFinite(at) || now.getTime() - at >= LAST_SEEN_EVERY_MS;
 }
 
+/**
+ * Who is calling, and their `users` row when the session lookup brought it — every column but
+ * `chart`. Read it through `callerUserRow` in `entitlement.ts`, which cuts it to `USER_COLUMNS`.
+ */
+export interface Caller {
+  userId: string;
+  user: Record<string, unknown> | null;
+}
+
 /** Resolves a `Authorization: Bearer <token>` header to a user id, or null. */
 export async function userIdForBearer(
   db: SupabaseClient,
   authorization: string | null,
 ): Promise<string | null> {
+  return (await resolveCaller(db, authorization, false))?.userId ?? null;
+}
+
+/** Like [userIdForBearer], but brings the caller's `users` row along in the same round trip. */
+export function callerForBearer(
+  db: SupabaseClient,
+  authorization: string | null,
+): Promise<Caller | null> {
+  return resolveCaller(db, authorization, true);
+}
+
+/**
+ * One `edge_caller` round trip for the session, its stamp, the `users` row and — on an instance
+ * with none cached — `app_config`, which it hands to `loadConfig`. Those were up to four requests
+ * in a row at the head of every signed-in call, and on 2026-09-28 they were about 20 of the 44 a
+ * second behind the project's high-CPU warning.
+ *
+ * Falls back to the separate reads if the call fails, so a deploy that lands before its migration
+ * (or a broken migration) costs requests rather than signing everyone out.
+ */
+async function resolveCaller(
+  db: SupabaseClient,
+  authorization: string | null,
+  withUser: boolean,
+): Promise<Caller | null> {
   const token = authorization?.replace(/^Bearer\s+/i, "").trim();
   if (!token) return null;
 
   const tokenHash = await hashToken(token);
+  const withConfig = !configCached();
+  let answer: Record<string, unknown>;
+  try {
+    const { data, error } = await db.rpc("edge_caller", {
+      p_token_hash: tokenHash,
+      p_with_config: withConfig,
+      p_with_user: withUser,
+      p_stamp_every_seconds: LAST_SEEN_EVERY_MS / 1000,
+    });
+    if (error) throw error;
+    if (!isRecord(data)) throw new Error("edge_caller returned no object");
+    answer = data;
+  } catch (error) {
+    console.error("edge_caller failed; resolving the session with separate reads", error);
+    const userId = await sessionUserId(db, tokenHash);
+    return userId ? { userId, user: null } : null;
+  }
+
+  if (withConfig && Array.isArray(answer.config)) primeConfig(answer.config);
+  if (typeof answer.user_id !== "string" || !answer.user_id) return null;
+  return { userId: answer.user_id, user: isRecord(answer.user) ? answer.user : null };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** The session lookup as it was before `edge_caller`: a read, then a stamp when one is due. */
+async function sessionUserId(db: SupabaseClient, tokenHash: string): Promise<string | null> {
   const { data, error } = await db
     .from("user_sessions")
     .select("user_id, expires_at, last_seen_at")

@@ -1,8 +1,8 @@
 import { localToUtc, offsetSecondsAt } from "../_shared/birth_timezone.ts";
 import { configFlag, configSetting, loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
-import { serviceClient, userIdForBearer } from "../_shared/db.ts";
-import { asUserRow, graceHoursFrom, isEntitled, USER_COLUMNS } from "../_shared/entitlement.ts";
+import { callerForBearer, serviceClient } from "../_shared/db.ts";
+import { callerUserRow, graceHoursFrom, isEntitled } from "../_shared/entitlement.ts";
 import {
   autocomplete,
   isSessionToken,
@@ -34,8 +34,9 @@ Deno.serve(async (req) => {
   if (cors) return cors;
 
   const db = serviceClient();
-  const userId = await userIdForBearer(db, req.headers.get("Authorization"));
-  if (!userId) return fail("unauthorized", "Please sign in again.", 401);
+  const caller = await callerForBearer(db, req.headers.get("Authorization"));
+  if (!caller) return fail("unauthorized", "Please sign in again.", 401);
+  const { userId } = caller;
 
   let body: Record<string, unknown>;
   try {
@@ -52,16 +53,9 @@ Deno.serve(async (req) => {
     return unavailable();
   }
 
-  const { data: userRow, error: userError } = await db
-    .from("users")
-    .select(USER_COLUMNS)
-    .eq("user_id", userId)
-    .single();
-  if (userError || !userRow) {
-    console.error("place-search: user lookup failed", userError);
-    return fail("server_error", "Something went wrong. Please try again.", 500);
-  }
-  if (!isEntitled(asUserRow(userRow), graceHoursFrom(config))) {
+  const user = await callerUserRow(db, caller, "place-search");
+  if (!user) return fail("server_error", "Something went wrong. Please try again.", 500);
+  if (!isEntitled(user, graceHoursFrom(config))) {
     return fail("not_entitled", "Your subscription has ended. Renew to continue.", 402);
   }
 

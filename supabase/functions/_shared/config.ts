@@ -31,8 +31,22 @@ export async function loadConfig(
     throw new Error(`app_config unavailable: ${error.message}`);
   }
 
+  return primeConfig(data ?? []);
+}
+
+/** Whether [loadConfig] would answer from memory right now, without a read. */
+export function configCached(): boolean {
+  return cache !== null && Date.now() - cache.at < ttlMs;
+}
+
+/**
+ * Caches `app_config` rows that arrived some other way, so the [loadConfig] after them is answered
+ * from memory. The session lookup in `db.ts` brings them along on an instance with nothing cached,
+ * which saves the read that would otherwise open almost every signed-in call.
+ */
+export function primeConfig(rows: ReadonlyArray<{ key: unknown; value: unknown }>): AppConfig {
   const config: AppConfig = new Map(
-    (data ?? []).map((row) => [
+    rows.map((row) => [
       String(row.key).trim(),
       String(row.value ?? "").trim(),
     ]),

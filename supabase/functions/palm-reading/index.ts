@@ -1,13 +1,12 @@
 import { resolveLanguage } from "../_shared/chat_language.ts";
 import { loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
-import { serviceClient, userIdForBearer } from "../_shared/db.ts";
+import { callerForBearer, serviceClient } from "../_shared/db.ts";
 import {
-  asUserRow,
+  callerUserRow,
   graceHoursFrom,
   isEntitled,
   isInTrial,
-  USER_COLUMNS,
 } from "../_shared/entitlement.ts";
 import { GeminiError, geminiSettings, readImage } from "../_shared/gemini.ts";
 import { ageFrom, firstName } from "../_shared/person.ts";
@@ -66,10 +65,11 @@ Deno.serve(async (req) => {
   const startedAt = Date.now();
   const db = serviceClient();
 
-  const userId = await userIdForBearer(db, req.headers.get("Authorization"));
-  if (!userId) {
+  const caller = await callerForBearer(db, req.headers.get("Authorization"));
+  if (!caller) {
     return fail("unauthorized", "Please sign in again.", 401);
   }
+  const { userId } = caller;
 
   let body: Record<string, unknown>;
   try {
@@ -94,18 +94,10 @@ Deno.serve(async (req) => {
 
   const config = await loadConfig(db);
 
-  const { data: userRow, error: userError } = await db
-    .from("users")
-    .select(USER_COLUMNS)
-    .eq("user_id", userId)
-    .single();
-
-  if (userError || !userRow) {
-    console.error("palm-reading: user lookup failed", userError);
+  const user = await callerUserRow(db, caller, "palm-reading");
+  if (!user) {
     return fail("server_error", "Something went wrong. Please try again.", 500);
   }
-
-  const user = asUserRow(userRow);
   if (!isEntitled(user, graceHoursFrom(config))) {
     return fail("not_entitled", "Your subscription has ended. Renew to keep reading.", 402);
   }

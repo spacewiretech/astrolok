@@ -9,9 +9,10 @@ import { configureFacebookCapi } from "../_shared/facebook_capi.ts";
 import { configureMixpanel } from "../_shared/mixpanel.ts";
 import { configureNotifications } from "../_shared/notify.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
-import { serviceClient, userIdForBearer } from "../_shared/db.ts";
+import { callerForBearer, serviceClient } from "../_shared/db.ts";
 import {
   asUserRow,
+  callerUserRow,
   entitlementPayload,
   graceHoursFrom,
   USER_COLUMNS,
@@ -39,8 +40,9 @@ Deno.serve(async (req) => {
   if (cors) return cors;
 
   const db = serviceClient();
-  const userId = await userIdForBearer(db, req.headers.get("Authorization"));
-  if (!userId) return fail("unauthorized", "Please sign in again.", 401);
+  const caller = await callerForBearer(db, req.headers.get("Authorization"));
+  if (!caller) return fail("unauthorized", "Please sign in again.", 401);
+  const { userId } = caller;
 
   const config = await loadConfig(db);
   configureMixpanel(config, "subscription-cancel");
@@ -87,12 +89,7 @@ Deno.serve(async (req) => {
   // The `cancel:<subscription id>` insert id is what makes the double-report safe: the sync below
   // will raise the same event a second later, and Mixpanel collapses the two onto this one.
   {
-    const { data: priorUser } = await db
-      .from("users")
-      .select(USER_COLUMNS)
-      .eq("user_id", userId)
-      .maybeSingle();
-    const prior = priorUser ? asUserRow(priorUser) : null;
+    const prior = await callerUserRow(db, caller, "subscription-cancel");
 
     await trackCancellation({
       userId,

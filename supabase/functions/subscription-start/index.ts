@@ -12,14 +12,13 @@ import { configureFacebookCapi } from "../_shared/facebook_capi.ts";
 import { configureMixpanel } from "../_shared/mixpanel.ts";
 import { configureNotifications } from "../_shared/notify.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
-import { serviceClient, userIdForBearer } from "../_shared/db.ts";
+import { callerForBearer, serviceClient } from "../_shared/db.ts";
 import {
-  asUserRow,
+  callerUserRow,
   entitlementPayload,
   graceHoursFrom,
   isEntitled,
   trialAvailable,
-  USER_COLUMNS,
 } from "../_shared/entitlement.ts";
 import { planFor } from "../_shared/pricing.ts";
 import {
@@ -40,8 +39,9 @@ import {
  *    schedule a first debit less than 24 hours ahead — charging it up front is the only way to
  *    take money at mandate time at all.
  *
- * The plan price is the account's own side of the ₹499 / ₹299 split: `planFor` in
- * `_shared/pricing.ts`, the same answer the paywall was priced from.
+ * The plan price is the account's own side of the ₹499 / ₹699 split — or ₹299, for an account from
+ * before ₹699 replaced it: `planFor` in `_shared/pricing.ts`, the same answer the paywall was
+ * priced from.
  *
  * Which of the two applies is decided here from the user's own row, never from the request. This
  * used to be a display-only distinction the paywall made on its own, which meant a returning
@@ -73,8 +73,9 @@ Deno.serve(async (req) => {
   if (cors) return cors;
 
   const db = serviceClient();
-  const userId = await userIdForBearer(db, req.headers.get("Authorization"));
-  if (!userId) return fail("unauthorized", "Please sign in again.", 401);
+  const caller = await callerForBearer(db, req.headers.get("Authorization"));
+  if (!caller) return fail("unauthorized", "Please sign in again.", 401);
+  const { userId } = caller;
 
   const config = await loadConfig(db);
   configureMixpanel(config, "subscription-start");
@@ -91,19 +92,11 @@ Deno.serve(async (req) => {
     return fail("payment_failed", "Payments are temporarily unavailable.", 503);
   }
 
-  const { data: userRow, error: userError } = await db
-    .from("users")
-    .select(USER_COLUMNS)
-    .eq("user_id", userId)
-    .single();
-
-  if (userError || !userRow) {
-    console.error("subscription-start user lookup failed", userError);
-    return fail("server_error", "Something went wrong. Please try again.", 500);
-  }
+  const userRow = await callerUserRow(db, caller, "subscription-start");
+  if (!userRow) return fail("server_error", "Something went wrong. Please try again.", 500);
 
   // Reassigned by the reconcile below, which can credit a payment we were never told about.
-  let user = asUserRow(userRow);
+  let user = userRow;
 
   // Charging someone who is already inside their trial or their paid month is the one mistake
   // that is genuinely hard to undo, so it is checked before anything else touches Cashfree.

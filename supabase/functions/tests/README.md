@@ -9,9 +9,14 @@ signature check. No network, no database.
 
 - `payments_test.ts` (64 tests) — entitlement boundaries (trial / grace / active / none) and
   webhook signature verification. **The silent-and-expensive logic**, and the largest file here.
-- `pricing_test.ts` (6) — the ₹499 / ₹299 price split: which plan an account resolves to, the
-  fallback to ₹499 while the ₹299 plan has no Cashfree id, and that the split needs both its switch
-  and a plan. The other half, a ₹299 authorisation buying a month, is in `payments_test.ts`.
+- `payment_sync_test.ts` (7) — the every-minute webhook worker: only a named non-`alk_` subscription
+  is foreign; deliveries collapse onto their subscription oldest first, joining by Cashfree's id when
+  that is all they carry; a charge already in the ledger at that status is not recorded again, while
+  a change of status always is, in arrival order.
+- `pricing_test.ts` (9) — the ₹499 / ₹699 price split, with ₹299 kept for the accounts already on
+  it: which plan an account resolves to, the fallback to ₹499 while its plan has no Cashfree id,
+  that the split needs both its switch and a ₹699 plan, and how `pricing_split_699_percent` reads.
+  The other half, a ₹299 authorisation buying a month, is in `payments_test.ts`.
 - `chat_feedback_test.ts` (5) — the written answer beside the chat rating: non-text and blank
   input store nothing, whitespace is tidied, and the 500-character cap matches the column without
   splitting an emoji.
@@ -115,6 +120,14 @@ signature check. No network, no database.
   Vimshottari dasha — its dated sub-periods back to back and agreeing with the running one.
 - `palm_test.ts` (21) — `normalisePalmReading`: ordering, `is_palm` rejection paths, unknown and
   duplicate lines, incompleteness.
+- `openrouter_test.ts` (19) — Gemini through OpenRouter: the flag picks the route and keeps the
+  configured model under OpenRouter's name; every real schema (palm, face, chat v4 and v5,
+  kundali) crossing with its types, rules and property order intact; the same system prompt,
+  turns, photo-first order, temperature, top_p and token cap as the direct request; truncation,
+  a filtered answer (a safety block, so chat's crisis line still fires), a 403 content-policy
+  block, 402, overloads and failures inside a 200 each raising the error Gemini would; and the
+  retry policy — fallback model on overload, bigger cap on truncation, no retry without credit;
+  a key over its spending limit told as an outage, never as a bad photo.
 - `birth_time_test.ts` (6) — `readClock`: AM/PM, raat/shaam/subah in both scripts, night past
   midnight, and a bare "11:55" left unguessed.
 - `mixpanel_test.ts` (11) — server-side Mixpanel: token gating, `$ip` suppression, insert-id
@@ -127,8 +140,11 @@ signature check. No network, no database.
 - `trial_reading_limit_test.ts` (7) — the per-trial reading allowance: limit parsing and its
   fallback to one, that only a live trial is limited, and that only `ready` (and still-in-flight
   `pending`) readings count — never `rejected` or `failed`.
-- `db_test.ts` (6) — the load rules in `db.ts`: a session stamped only when never stamped,
-  unreadable or ten minutes stale (read with the lookup, never for an expired or unknown session),
+- `db_test.ts` (13) — the load rules in `db.ts`: a session stamped only when never stamped,
+  unreadable or ten minutes stale (read with the lookup, never for an expired or unknown session);
+  `edge_caller` as one round trip that asks for config only when none is cached and for the user
+  row only when wanted, primes `loadConfig`, and falls back to the separate reads when it fails;
+  `userColumnsOf` cutting a row to exactly `USER_COLUMNS` (none at all when a column is missing);
   and `withinCap`, which cuts `astro-chat`'s early history and memory reads to the configured size
   and asks for a second read only when the cap may have cut rows off.
 - `review_account_test.ts` (6) — the store-review sign-in gate, focused on when it must stay

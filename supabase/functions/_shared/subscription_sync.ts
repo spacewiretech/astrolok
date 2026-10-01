@@ -348,7 +348,7 @@ export function buysAMonth(
 ): boolean {
   if (kind === "UNKNOWN") return false;
   if (kind === "RECURRING") return true;
-  // Measured against the cheapest plan, not the ₹499 one: new signups are split between ₹499 and
+  // Measured against the cheapest plan, not the ₹499 one: accounts from the ₹499 / ₹299 split keep
   // ₹299, and a returning ₹299 subscriber's ₹299 authorisation is their month. The trial-fee check
   // stands on its own, so a blank plan amount reading as 0 can never turn the ₹3 into a month.
   return amount !== null &&

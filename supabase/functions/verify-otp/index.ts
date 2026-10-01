@@ -12,7 +12,7 @@ import {
   graceHoursFrom,
   USER_COLUMNS,
 } from "../_shared/entitlement.ts";
-import { assignPlanVariant, planFor, splitEnabled } from "../_shared/pricing.ts";
+import { alternatePercent, assignPlanVariant, planFor, splitEnabled } from "../_shared/pricing.ts";
 import { DEV_OTP, devOtpEnabled, warnDevOtp } from "../_shared/dev_otp.ts";
 import {
   consumeReviewVerifyQuota,
@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
   let mobile: unknown;
   let otp: unknown;
   // Sent by builds whose paywall prices itself from the user payload — the only builds whose new
-  // accounts can be put on the ₹299 side of the price split. See the assignment below.
+  // accounts can be put on the ₹699 side of the price split. See the assignment below.
   let planVariants: unknown;
   try {
     ({ mobile, otp, plan_variants: planVariants } = await req.json());
@@ -127,12 +127,13 @@ Deno.serve(async (req) => {
   //
   // The split only applies to a build that says it prices the paywall from this payload. An older
   // build reads the ₹499 label from config, so splitting its signups would promise ₹499 on the
-  // consent line and open a ₹299 mandate.
+  // consent line and open a ₹699 mandate.
   if (!row.plan_variant) {
     row.plan_variant = await assignPlanVariant(
       db,
       row.user_id,
       splitEnabled(config) && planVariants === true,
+      alternatePercent(config),
     );
   }
 

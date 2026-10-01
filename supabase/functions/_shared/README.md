@@ -9,18 +9,25 @@ from here. This is where the credentials, the billing state machine and the mode
 
 **Request plumbing**
 - `cors.ts` — Exports: `corsHeaders`, `json`, `fail`, `preflight`.
-- `db.ts` — the service-role client and the session-token machinery. `userIdForBearer` stamps a
-  session's `last_seen_at` only when it is ten minutes stale (`lastSeenDue`), and `withinCap` cuts a
-  read made before `app_config` said how many rows it wants. Exports: `serviceClient`,
-  `isValidMobile`, `consumeOtpQuota`, `hashToken`, `newSessionToken`, `lastSeenDue`,
-  `userIdForBearer`, `withinCap`.
-- `config.ts` — loads the `app_config` table (private rows included). Exports: `AppConfig`,
-  `loadConfig`, `configValue`, `isUnset`, `configSetting`, `configFlag`.
+- `db.ts` — the service-role client and the session-token machinery. `userIdForBearer` and
+  `callerForBearer` resolve a session in **one `edge_caller` round trip**: the lookup, the
+  `last_seen_at` stamp (only when ten minutes stale, `lastSeenDue`), `app_config` on an instance with
+  none cached (handed to `loadConfig`), and for `callerForBearer` the `users` row. If `edge_caller`
+  fails they fall back to the separate reads. `withinCap` cuts a read made before `app_config` said
+  how many rows it wants. Exports: `serviceClient`, `isValidMobile`, `consumeOtpQuota`, `hashToken`,
+  `newSessionToken`, `lastSeenDue`, `Caller`, `userIdForBearer`, `callerForBearer`, `withinCap`.
+- `config.ts` — loads the `app_config` table (private rows included). `primeConfig` caches rows that
+  arrived another way (the session lookup), so the `loadConfig` after them costs nothing. Exports:
+  `AppConfig`, `loadConfig`, `configCached`, `primeConfig`, `configValue`, `isUnset`,
+  `configSetting`, `configFlag`.
 
 **Access and identity**
 - `entitlement.ts` — **the single source of truth for "is this account allowed in".** Exports:
-  `PaymentType`, `graceHoursFrom`, `UserRow`, `USER_COLUMNS`, `asUserRow`, `isEntitled`,
-  `trialAvailable`, `isInTrial`, `entitlementPayload`.
+  `PaymentType`, `graceHoursFrom`, `UserRow`, `USER_COLUMNS`, `asUserRow`, `userColumnsOf`,
+  `callerUserRow`, `readUserRow`, `isEntitled`, `trialAvailable`, `isInTrial`, `entitlementPayload`.
+  `callerUserRow` is the request-opening read: the row `callerForBearer` brought, cut to exactly
+  `USER_COLUMNS`, or a read when it brought none. After anything that may write `users`, use
+  `readUserRow`.
 - `fast2sms.ts` — OTP send/resend/verify with the key held server-side. Exports: `OTP_LENGTH`,
   `OTP_EXPIRY_MINUTES`, `Fast2SmsError`, `credentialsFrom`, `sendOtp`, `resendOtp`,
   `VerifyResult`, `verifyOtp`.
@@ -41,20 +48,30 @@ from here. This is where the credentials, the billing state machine and the mode
   `syncSubscription`, `userUpdatesFor`, `recordPayment`, `reconcilePayments`,
   `refreshPaymentTotals`, `recordRefund`, `recordDispute`, `trackCancellation`,
   `latestSubscription`, `staleSweepCutoff`, `isResumable`, `paymentKind`, `buysAMonth`, `planProps`.
+- `payment_sync.ts` — the pure decisions behind `payment-sync`: `isForeignSubscription` (not
+  `alk_…`), `groupPendingEvents` (one group per subscription, oldest first), `chargesToRecord` (drops a
+  charge the ledger already holds at that status), `paymentIdsOf`, `chunked`. Exports those and
+  `PendingEvent`.
 - `payment_retry.ts` — when to retry a debit that failed for insufficient funds: failure day + 2,
   + 4, then the next 5th, skipped when it would not come before the regular monthly charge. Pure;
   `payment-retry` does the I/O. Exports: `planRetry`, `retryPolicy`, `DEFAULT_POLICY`,
   `MAX_ATTEMPTS`, `istDate`, `addDaysToDate`, `onOrAfterDayOfMonth`, `isInsufficientFunds`.
-- `pricing.ts` — the ₹499 / ₹299 price split. Which plan an account pays (`planFor`, the one answer
-  both the paywall payload and `subscription-start` read), whether new signups alternate
-  (`splitEnabled`), and the once-per-account assignment at signup (`assignPlanVariant`). Exports:
-  `PlanVariant`, `DEFAULT_VARIANT`, `PricingPlan`, `PricingPlans`, `pricingPlans`, `planFor`,
-  `splitEnabled`, `planPayload`, `assignPlanVariant`.
+- `pricing.ts` — the ₹499 / ₹699 price split, and ₹299 for the accounts from before ₹699 replaced
+  it. Which plan an account pays (`planFor`, the one answer both the paywall payload and
+  `subscription-start` read), whether new signups are split (`splitEnabled`) and what share gets
+  ₹699 (`alternatePercent`), and the once-per-account assignment at signup (`assignPlanVariant`).
+  Exports: `PlanVariant`, `DEFAULT_VARIANT`, `ALTERNATE_VARIANT`, `PricingPlan`, `PricingPlans`,
+  `pricingPlans`, `configuredPlans`, `planFor`, `splitEnabled`, `alternatePercent`, `planPayload`,
+  `assignPlanVariant`.
 
 **The readings**
 - `gemini.ts` — the model transport (image reads + multi-turn chat) and the shared status/focus
   vocabulary. Exports: `GeminiError`, `geminiSettings`, `readImage`, `converse`, `text`,
-  `STATUSES`, `FOCUS_KEYS`, `FOCUS_LABELS`, `parseFocus`, `focusMismatch`, `ceremony`.
+  `STATUSES`, `FOCUS_KEYS`, `FOCUS_LABELS`, `parseFocus`, `focusMismatch`, `ceremony`. Two routes
+  to the same Gemini: straight to Google, or through OpenRouter while `openrouter_use` is true
+  (`jsonSchema`, `openRouterText` and `openRouterError` translate the request and map its
+  failures back onto `GeminiError`). The prompt, schema order, sampling, token caps and retry
+  policy are shared, so the flag changes the bill and nothing a user reads.
 - `pandit.ts` — the shared persona, grounding rules, safety boundaries and style. Exports:
   `PANDIT_VOICE`, `GROUNDING`, `BOUNDARIES`, `STYLE`, `TIPS_RULE`, `TIMING_RULE`,
   `panditSystemPrompt`, `SHARED_LENGTHS`. `panditSystemPrompt` takes optional `grounding` and

@@ -190,3 +190,39 @@ and run in lexical order.
   `renewals` stays as the total; the halves need not sum to it, since a payment with no
   `subscription_pk` counts in the total and neither half. **Drops and recreates** the function
   rather than `create or replace`, which cannot change a return type.
+- `20260928000009_edge_caller.sql` — function `edge_caller(token_hash, with_config, with_user,
+  stamp_every_seconds)`: the session lookup, its `last_seen_at` stamp, the `users` row (less `chart`)
+  and `app_config` in **one round trip**, replacing up to four PostgREST requests at the head of
+  every signed-in call (about 20 of 44 req/s behind the 2026-09-28 high-CPU warning). **Returns
+  every config secret, so it is service_role only.** Safe in either order against the functions
+  deploy: until it exists they fall back to the separate reads. Applied by hand on 2026-09-28
+  without a history row, because the main checkout lacked the file, and a history row would have
+  made its `db push` refuse. It is re-runnable, so the next `db push` applies it again harmlessly
+  and records it.
+- `20260929000001_payment_sync.sql` — Cashfree webhooks processed every minute instead of on
+  arrival:
+  - `payment_events.attempts` and `locked_at`, and a `payment_events_pending_idx` over verified,
+    unprocessed deliveries only;
+  - `claim_payment_events` (`for update skip locked`, a stale claim retaken after 10 minutes);
+  - config `cashfree_webhook_batch` (**false**, private);
+  - pg_cron job `payment-sync-1min`, every minute. Five-minute batches collapsed barely more
+    (2,828 syncs for 5,590 deliveries in two hours, against 3,001), because the duplicates arrive
+    seconds apart, and they made a slow bank confirmation wait up to five minutes.
+
+  With the switch off nothing changes except that `payment-sync` rescues a verified delivery left
+  unprocessed for five minutes. Deploy `payment-sync` before this (the job calls it), then
+  `cashfree-webhook`, then flip the switch. Flipping it back off is the rollback.
+- `20260929000002_openrouter.sql` — config only: `openrouter_use` (**false**), `openrouter_api_key`
+  (empty), `openrouter_model` (`google/gemini-3.8-flash`) and `openrouter_model_fallback`
+  (`google/gemini-3.5-flash`), all private. Emptying a model row makes it mirror the Gemini row. With the switch on, every model call goes through
+  OpenRouter instead of straight to Google; switching it off is the rollback. Safe in either
+  order against the functions deploy.
+- `20260929000003_plan_699.sql` — ₹699 replaces ₹299 in the split. `plan_699` joins the
+  `plan_variant` checks on `users` and `subscriptions`; `assign_plan_variant` gains `p_alternate`
+  and `p_alternate_percent` (defaulting to `plan_299` at 50, so the deployed `verify-otp` assigns
+  exactly as before) and puts a payer count `n` on the alternate when `(n * P) % 100 < P`. Config
+  `cashfree_plan_id_699` (**empty**), `cashfree_plan_name_699`, `cashfree_recurring_amount_699`
+  (699), `plan_price_label_699` (₹699) and `pricing_split_699_percent` (25), all private. **The ₹299
+  rows keep their values**: 2,150 live mandates debit ₹299 and their accounts are still priced from
+  them. Safe before the functions deploy; the split onto ₹699 starts once the functions are out
+  and `cashfree_plan_id_699` is filled in, and until then every new signup gets ₹499.

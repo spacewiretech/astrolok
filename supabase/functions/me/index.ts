@@ -1,12 +1,7 @@
 import { loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
-import { hashToken, serviceClient, userIdForBearer } from "../_shared/db.ts";
-import {
-  asUserRow,
-  entitlementPayload,
-  graceHoursFrom,
-  USER_COLUMNS,
-} from "../_shared/entitlement.ts";
+import { callerForBearer, hashToken, serviceClient } from "../_shared/db.ts";
+import { callerUserRow, entitlementPayload, graceHoursFrom } from "../_shared/entitlement.ts";
 import { planFor } from "../_shared/pricing.ts";
 
 /**
@@ -22,9 +17,9 @@ Deno.serve(async (req) => {
 
   const db = serviceClient();
   const authorization = req.headers.get("Authorization");
-  const userId = await userIdForBearer(db, authorization);
+  const caller = await callerForBearer(db, authorization);
 
-  if (!userId) return fail("unauthorized", "Please sign in again.", 401);
+  if (!caller) return fail("unauthorized", "Please sign in again.", 401);
 
   if (req.method === "DELETE") {
     const token = authorization!.replace(/^Bearer\s+/i, "").trim();
@@ -32,19 +27,10 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
 
-  const { data: user, error } = await db
-    .from("users")
-    .select(USER_COLUMNS)
-    .eq("user_id", userId)
-    .single();
-
-  if (error || !user) {
-    console.error("me lookup failed", error);
-    return fail("server_error", "Something went wrong. Please try again.", 500);
-  }
+  const row = await callerUserRow(db, caller, "me");
+  if (!row) return fail("server_error", "Something went wrong. Please try again.", 500);
 
   const config = await loadConfig(db);
-  const row = asUserRow(user);
   return json({
     user: entitlementPayload(row, graceHoursFrom(config), planFor(config, row.plan_variant)),
   });

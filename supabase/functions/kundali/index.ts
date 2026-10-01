@@ -1,8 +1,8 @@
 import { inBackground } from "../_shared/background.ts";
 import { loadConfig } from "../_shared/config.ts";
 import { fail, json, preflight } from "../_shared/cors.ts";
-import { serviceClient, userIdForBearer } from "../_shared/db.ts";
-import { asUserRow, graceHoursFrom, isEntitled, USER_COLUMNS } from "../_shared/entitlement.ts";
+import { callerForBearer, serviceClient } from "../_shared/db.ts";
+import { callerUserRow, graceHoursFrom, isEntitled } from "../_shared/entitlement.ts";
 import {
   asKundaliRow,
   KUNDALI_COLUMNS,
@@ -53,8 +53,9 @@ Deno.serve(async (req) => {
   if (cors) return cors;
 
   const db = serviceClient();
-  const userId = await userIdForBearer(db, req.headers.get("Authorization"));
-  if (!userId) return fail("unauthorized", "Please sign in again.", 401);
+  const caller = await callerForBearer(db, req.headers.get("Authorization"));
+  if (!caller) return fail("unauthorized", "Please sign in again.", 401);
+  const { userId } = caller;
 
   let body: Record<string, unknown> = {};
   try {
@@ -68,16 +69,8 @@ Deno.serve(async (req) => {
   const settings = kundaliSettings(config);
   const now = new Date();
 
-  const { data: userRow, error: userError } = await db
-    .from("users")
-    .select(USER_COLUMNS)
-    .eq("user_id", userId)
-    .single();
-  if (userError || !userRow) {
-    console.error("kundali: user lookup failed", userError);
-    return fail("server_error", "Something went wrong. Please try again.", 500);
-  }
-  const user = asUserRow(userRow);
+  const user = await callerUserRow(db, caller, "kundali");
+  if (!user) return fail("server_error", "Something went wrong. Please try again.", 500);
   const entitled = isEntitled(user, graceHoursFrom(config), now);
   if (!entitled) {
     return fail("not_entitled", "Your subscription has ended. Renew to see your Kundali.", 402);

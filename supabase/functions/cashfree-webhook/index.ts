@@ -10,12 +10,13 @@ import {
   verifyWebhook,
   webhookSecrets,
 } from "../_shared/cashfree.ts";
-import { loadConfig } from "../_shared/config.ts";
+import { configFlag, loadConfig } from "../_shared/config.ts";
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { serviceClient } from "../_shared/db.ts";
 import { configureFacebookCapi } from "../_shared/facebook_capi.ts";
 import { configureMixpanel, trackServer } from "../_shared/mixpanel.ts";
 import { configureNotifications } from "../_shared/notify.ts";
+import { isForeignSubscription } from "../_shared/payment_sync.ts";
 import {
   asSubscriptionRow,
   recordDispute,
@@ -99,6 +100,10 @@ Deno.serve(async (req) => {
   configureMixpanel(config, "cashfree-webhook");
   configureNotifications(config, "cashfree-webhook");
   configureFacebookCapi(config, "cashfree-webhook");
+
+  // On: verified deliveries are recorded here and processed by `payment-sync` every minute,
+  // one sync per subscription. Off: processed inline, as below. See `20260929000001_payment_sync.sql`.
+  const batching = configFlag(config, "cashfree_webhook_batch");
 
   // Parsed before the secret is looked up, so that a delivery arriving at a misconfigured
   // deployment can still be identified and counted. This reads the body without having verified
@@ -334,9 +339,30 @@ Deno.serve(async (req) => {
     eventId = prior.id as number;
   }
 
-  await reportRetryStorm();
+  const finish = async (error?: string) => {
+    if (eventId === undefined) return;
+    await db
+      .from("payment_events")
+      .update({ processed_at: new Date().toISOString(), process_error: error ?? null })
+      .eq("id", eventId);
+  };
+
+  // Another product's mandate on the shared merchant account (`c360_…`, `ca_…`, `mt_…`), signed with
+  // its secret rather than ours. Answered 401 until 2026-09-29, which Cashfree retried several times
+  // each, about 6,600 a day and none of them ever ours. See `isForeignSubscription`.
+  const foreign = !verified && isForeignSubscription(ids.subscriptionId);
+
+  // Only a delivery that can still be answered with a non-2xx can storm. Queued, a verified one
+  // never is, so the count is not spent on it.
+  if (!foreign && (!verified || !batching)) await reportRetryStorm();
 
   if (!verified) {
+    if (foreign) {
+      // Acknowledged so Cashfree stops redelivering, and marked processed so it leaves the queue.
+      // Nothing in it is read: it could not be verified, and it names nothing we own.
+      await finish("foreign subscription: not signed with our secret");
+      return ok({ ignored: true, reason: "not our subscription" });
+    }
     console.error(
       `cashfree webhook signature mismatch: type=${eventType} ` +
         `sub=${ids.subscriptionId ?? "?"} skew=${skew ?? "?"}s`,
@@ -348,13 +374,17 @@ Deno.serve(async (req) => {
     return new Response("invalid signature", { status: 401, headers: corsHeaders });
   }
 
-  const finish = async (error?: string) => {
-    if (eventId === undefined) return;
-    await db
-      .from("payment_events")
-      .update({ processed_at: new Date().toISOString(), process_error: error ?? null })
-      .eq("id", eventId);
-  };
+  // Payment-scoped events — refunds and disputes — name no subscription, only a payment, and are
+  // rare. They stay inline, like a payload too large to have been recorded whole, which the queue
+  // could not replay.
+  const refund = refundFrom(payload);
+  const dispute = refund ? null : disputeFrom(payload);
+
+  if (batching && !refund && !dispute && raw.length <= MAX_RECORDED_BODY) {
+    // Recorded above and left unprocessed: `payment-sync` takes it from here. The 200 is what stops
+    // Cashfree redelivering, and the queue retries a failure itself.
+    return ok({ queued: true, event: eventType });
+  }
 
   try {
     // Cashfree's own id is the fallback: a few event shapes carry it without ours.
@@ -386,10 +416,8 @@ Deno.serve(async (req) => {
       deliveryUserId = asSubscriptionRow(subscriptionRow).user_id;
     }
 
-    // Payment-scoped events — refunds and disputes — name no subscription, only a payment. The
-    // ledger ties every charge to its mandate, so they resolve through that instead. Handled
-    // before the subscription branch because they will never satisfy it.
-    const refund = refundFrom(payload);
+    // The ledger ties every charge to its mandate, so refunds and disputes resolve through that.
+    // Handled before the subscription branch because they will never satisfy it.
     if (refund) {
       await recordRefund(db, settings, refund);
       deliveryUserId ??= await userForPayment(db, refund.cfPaymentId);
@@ -406,7 +434,6 @@ Deno.serve(async (req) => {
       return ok({ handled: true, event: eventType, kind: "refund" });
     }
 
-    const dispute = disputeFrom(payload);
     if (dispute) {
       await recordDispute(db, settings, dispute);
       deliveryUserId ??= await userForPayment(db, dispute.cfPaymentId);

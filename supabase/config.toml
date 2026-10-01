@@ -103,6 +103,11 @@ verify_jwt = false
 [functions.notification-dispatch]
 verify_jwt = false
 
+# The queued Cashfree webhooks, processed every minute by pg_cron, authenticated with
+# x-cron-secret.
+[functions.payment-sync]
+verify_jwt = false
+
 # The why-are-you-leaving answer. Bearer session token only, no entitlement check: a trial user who
 # cancels loses access the same minute.
 [functions.cancellation-feedback]

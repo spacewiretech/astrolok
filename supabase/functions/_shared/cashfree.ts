@@ -10,7 +10,7 @@
  */
 
 import { AppConfig, configSetting } from "./config.ts";
-import { PricingPlan, pricingPlans } from "./pricing.ts";
+import { configuredPlans, PricingPlan, pricingPlans } from "./pricing.ts";
 
 const TIMEOUT_MS = 15_000;
 
@@ -66,8 +66,8 @@ export interface CashfreeSettings {
   /** The ₹499 plan's monthly amount: every account not on the other side of the price split. */
   recurringAmount: number;
   /**
-   * Every plan a mandate can be opened on — ₹499, and ₹299 once its Cashfree plan id is filled in.
-   * Which one a given account pays is `planFor` in `pricing.ts`, never a choice made here.
+   * Every plan a mandate can be on — ₹499, plus ₹699 and ₹299 whenever their Cashfree plan ids are
+   * filled in. Which one a given account pays is `planFor` in `pricing.ts`, never a choice made here.
    */
   plans: PricingPlan[];
   trialDays: number;
@@ -101,7 +101,7 @@ export function cashfreeSettings(config: AppConfig): CashfreeSettings {
   }
 
   const env = (configSetting(config, "cashfree_env") || "production").toLowerCase();
-  const { standard, alternate } = pricingPlans(config);
+  const { standard } = pricingPlans(config);
 
   return {
     appId,
@@ -114,7 +114,7 @@ export function cashfreeSettings(config: AppConfig): CashfreeSettings {
     apiVersion: configSetting(config, "cashfree_api_version") || "2025-01-01",
     trialAmount: numberFrom(config, "cashfree_trial_amount", 3),
     recurringAmount: standard.recurringAmount,
-    plans: alternate ? [standard, alternate] : [standard],
+    plans: configuredPlans(config),
     // Astrolok sells a one-day trial, so the default matches. Cashfree requires
     // subscription_first_charge_time to sit at least 24 hours out for a UPI Autopay mandate,
     // which is exactly where trialDays = 1 lands it — verify a real mandate in sandbox before

@@ -10,7 +10,10 @@
  * than a date moving forward.
  */
 
+import { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+
 import { AppConfig, configSetting } from "./config.ts";
+import type { Caller } from "./db.ts";
 import { chartToJson, computeChart } from "./jyotish.ts";
 import { PricingPlan, planPayload } from "./pricing.ts";
 
@@ -74,7 +77,7 @@ export interface UserRow {
   cancelled_at?: string | null;
   billing_state?: string | null;
 
-  /// `plan_499` or `plan_299`, set once at signup. Not an entitlement input either: it decides the
+  /// `plan_499`, `plan_699` or `plan_299`, set once at signup. Not an entitlement input either: it decides the
   /// price the paywall shows and `subscription-start` charges, through `planFor`. Null reads as ₹499.
   plan_variant?: string | null;
 }
@@ -99,6 +102,44 @@ export const USER_COLUMNS =
  */
 export function asUserRow(row: unknown): UserRow {
   return row as UserRow;
+}
+
+const USER_COLUMN_NAMES = USER_COLUMNS.split(",").map((column) => column.trim());
+
+/**
+ * [row] cut down to exactly [USER_COLUMNS], as `.select(USER_COLUMNS)` would have returned it, or
+ * null when it lacks one of them. The null makes a column added to the constant but missing from
+ * `edge_caller`'s row a read made the long way, rather than a column read as null, which here
+ * can mean "trial never started".
+ */
+export function userColumnsOf(row: Record<string, unknown> | null | undefined): UserRow | null {
+  if (!row) return null;
+  const picked: Record<string, unknown> = {};
+  for (const column of USER_COLUMN_NAMES) {
+    if (!(column in row)) return null;
+    picked[column] = row[column];
+  }
+  return asUserRow(picked);
+}
+
+/**
+ * The caller's row in [USER_COLUMNS]: the one the session lookup brought, else read now. Only for
+ * the read at the head of a request. Once the request has written to `users`, or run a sync that
+ * might have, read it again with [readUserRow]. Null, logged under [label], when there is none.
+ */
+export function callerUserRow(db: SupabaseClient, caller: Caller, label: string): Promise<UserRow | null> {
+  const prefetched = userColumnsOf(caller.user);
+  return prefetched ? Promise.resolve(prefetched) : readUserRow(db, caller.userId, label);
+}
+
+/** [userId]'s row in [USER_COLUMNS], read now. Null, logged under [label], when there is none. */
+export async function readUserRow(db: SupabaseClient, userId: string, label: string): Promise<UserRow | null> {
+  const { data, error } = await db.from("users").select(USER_COLUMNS).eq("user_id", userId).maybeSingle();
+  if (error || !data) {
+    console.error(`${label}: user lookup failed`, error ?? "no row");
+    return null;
+  }
+  return asUserRow(data);
 }
 
 function isFuture(value: string | null, graceMs: number, now: number): boolean {
@@ -180,7 +221,7 @@ export function entitlementPayload(
   graceHours: number,
   /**
    * `planFor(config, user.plan_variant)`. Required rather than defaulted, so a function that forgets
-   * it fails `deno check` instead of quietly sending a ₹299 account the ₹499 price.
+   * it fails `deno check` instead of quietly sending a ₹699 account the ₹499 price.
    */
   plan: PricingPlan,
   now: Date = new Date(),
